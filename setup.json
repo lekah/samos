@@ -23,7 +23,9 @@
     }, 
     "install_requires": [
         "numpy", 
-        "ase"
+        "ase",
+        "scipy",
+        "matplotlib"
     ], 
     "license": "MIT License", 
     "name": "samos", 
