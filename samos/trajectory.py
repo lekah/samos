@@ -14,6 +14,8 @@ class Trajectory(object):
     _POSITIONS_KEY = 'positions'
     _VELOCITIES_KEY = 'velocities'
     _FORCES_KEY = 'forces'
+    _METADATA_FILENAME = 'metadata.json'
+    _ATOMS_FILENAME = 'atoms.traj'
     def __init__(self, **kwargs):
         """
         Instantiating a trajectory class.
@@ -21,7 +23,6 @@ class Trajectory(object):
         """
         self._atoms = None
         self._arrays = {}
-        self._nstep = None
         self._timestep_fs = None
         for key, val in kwargs.items():
             getattr(self, 'set_{}'.format(key))(val)
@@ -30,7 +31,10 @@ class Trajectory(object):
         """
         :param timestep: expects value of the timestep in femtoseconds
         """
-        self._timestep_fs = float(timestep_fs)
+        if timestep_fs is None:
+            self._timestep_fs = None
+        else:
+            self._timestep_fs = float(timestep_fs)
 
 
     def get_timestep(self):
@@ -188,4 +192,43 @@ class Trajectory(object):
         Saves the trajectory instance to tarfile.
         :param str filename: The filename. Won't be checked or modified with extension!
         """
-        
+        import tarfile, tempfile, json
+        from os.path import join
+        temp_folder = tempfile.mkdtemp()
+        for  arrayname, array in self._arrays.items():
+            np.save(join(temp_folder, '{}.npy'.format(arrayname)), array)
+        # The metadata of my trajectory:
+        d = {'timestep':self._timestep_fs}
+        with open(join(temp_folder, self._METADATA_FILENAME), 'w') as f:
+            json.dump(d, f)
+        if self._atoms:
+            from ase.io import write
+            write(join(temp_folder, self._ATOMS_FILENAME), self._atoms)
+
+        with tarfile.open(filename, "w:gz", format=tarfile.PAX_FORMAT) as tar:
+                tar.add(temp_folder, arcname="")
+    @classmethod
+    def load_file(cls, filename):
+        import tarfile, tempfile, json, os
+        from os.path import join
+        temp_folder = tempfile.mkdtemp()
+        with tarfile.open(filename, "r:gz", format=tarfile.PAX_FORMAT) as tar:
+            tar.extractall(temp_folder)
+
+        files_in_tar = set(os.listdir(temp_folder))
+
+        with open(join(temp_folder, cls._METADATA_FILENAME)) as f:
+            metadata = json.load(f)
+        files_in_tar.remove(cls._METADATA_FILENAME)
+        new = cls(**metadata)
+
+        if cls._ATOMS_FILENAME in files_in_tar:
+            from ase.io import read
+            new.set_atoms(read(join(temp_folder, cls._ATOMS_FILENAME)))
+            files_in_tar.remove(cls._ATOMS_FILENAME)
+
+        for array_file in files_in_tar:
+            if not array_file.endswith('.npy'):
+                raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
+            new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
+        return new

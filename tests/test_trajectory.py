@@ -7,8 +7,9 @@ class TestTrajectory(unittest.TestCase):
         from ase import Atoms
         from samos.trajectory import Trajectory
         pos = np.random.random((10,10,3))
-        vel = np.random.random((10,10,3))
         frc = np.random.random((10,10,3))
+        vel = np.random.random((10,10,3))
+
         t = Trajectory()
         t.set_atoms(Atoms('H'*10))
         t.set_positions(pos)
@@ -34,15 +35,21 @@ class TestTrajectory(unittest.TestCase):
         pos = np.random.random((10,10,3))
         vel = np.random.random((10,10,3))
         frc = np.random.random((10,10,3))
+        xtr = np.random.random(10)
         t = Trajectory()
         t.set_atoms(Atoms('H'*10))
         t.set_positions(pos)
         t.set_velocities(vel)
         t.set_forces(frc)
+        t.set_array('extra', xtr)
         with tempfile.NamedTemporaryFile() as f:
-            print t.save(f.name)
-        #~ t.save(
-
+            t.save(f.name)
+            tnew =  Trajectory.load_file(f.name)
+        
+        self.assertTrue(np.array_equal(pos, tnew.get_positions()))
+        self.assertTrue(np.array_equal(vel, tnew.get_velocities()))
+        self.assertTrue(np.array_equal(frc, tnew.get_forces()))
+        self.assertTrue(np.array_equal(xtr, tnew.get_array('extra')))
 
 if __name__ == '__main__':
     unittest.main()
