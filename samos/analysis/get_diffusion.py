@@ -14,6 +14,9 @@ class TimeSeries(AttributedArray):
 
 
 class DiffusionAnalyzer(object):
+    """
+    This class blabla
+    """
     def __init__(self, **kwargs):
         self._species_of_interest = None
         self._verbosity = 1
