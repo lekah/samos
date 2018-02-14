@@ -29,7 +29,9 @@ def check_trajectory_compatibility(trajectories):
     if len(array_names_set) > 1:
         raise IncompatibleTrajectoriesException("Different arrays are set")
     if len(chemical_symbols_set) > 1:
-        raise IncompatibleTrajectoriesException("Different chemical symbols in trajectory")
+        raise IncompatibleTrajectoriesException("Different chemical symbols in trajectories")
+    if len(timestep_set) > 1:
+        raise IncompatibleTrajectoriesException("Different timesteps in trajectories")
     return atoms, timestep
 
 
@@ -57,7 +59,7 @@ class Trajectory(AttributedArray):
         super(Trajectory, self).__init__(**kwargs)
 
     def _save_atoms(self, folder_name):
-        from io.path import join
+        from os.path import join
         if self._atoms:
             from ase.io import write
             write(join(folder_name, self._ATOMS_FILENAME), self._atoms)
@@ -182,5 +184,9 @@ class Trajectory(AttributedArray):
         Recenter positions and velocities in-place
         """
         from samos.lib.mdutils import recenter_positions, recenter_velocities
+        masses = self.atoms.get_masses()
+        factors = [1]*len(masses)
+        self.set_positions(recenter_positions(self.get_positions(), masses, factors))
+        self.set_velocities(recenter_velocities(self.get_velocities(), masses, factors))
         
         

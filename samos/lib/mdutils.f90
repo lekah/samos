@@ -56,8 +56,6 @@ SUBROUTINE recenter_velocities(velocities, masses, factors, velocities_, nstep, 
     REAL*8, dimension(3)                            :: com
     REAL*8                                          :: M
 
-    print*,"THIS is recenter_velocities, I am recentering velocities of shape", nstep, nat
-
     DO iat=1, nat
         rel_masses(iat) = DBLE(factors(iat)) * masses(iat)
     END DO

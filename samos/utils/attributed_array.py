@@ -72,12 +72,13 @@ class AttributedArray(object):
         :param str filename: The filename. Won't be checked or modified with extension!
         """
         import tarfile, tempfile
-        from inspect import getmembers
+        from inspect import getmembers, ismethod
         
         temp_folder = tempfile.mkdtemp()
+        for funcname, func in getmembers(self, predicate=ismethod):
+            if funcname.startswith('_save_'):
+                func(temp_folder)
 
-
-        print dir(self)
         with tarfile.open(filename, "w:gz", format=tarfile.PAX_FORMAT) as tar:
             tar.add(temp_folder, arcname="")
 
