@@ -38,7 +38,7 @@ class AttributedArray(object):
         if check_nstep:
             for other_name, other_array in self._arrays.items():
                 assert array.shape[0] == other_array.shape[0], (
-                    'Number of steps in this array is not compliant with array {}'.format(other_name))
+                    'Number of steps in array {} is not compliant with array {}'.format(name, other_name))
         if check_nat and len(array.shape) > 2:
             if array.shape[1] != len(self.atoms):
                 raise ValueError("Second dimension of array does not match the number of atoms")
@@ -52,7 +52,7 @@ class AttributedArray(object):
             raise KeyError("An array with that name ( {} ) has not been set.".format(name))
 
     def get_arraynames(self):
-        return self._arrays.keys()
+        return sorted(self._arrays.keys())
 
 
     def get_attrs(self):
@@ -128,3 +128,4 @@ class AttributedArray(object):
                 raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
             new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
         return new
+

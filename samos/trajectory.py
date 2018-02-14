@@ -6,27 +6,31 @@ class IncompatibleTrajectoriesException(Exception):
     pass
 
 
-def check_trajectory_compatibility(*trajectories):
+def check_trajectory_compatibility(trajectories):
     """
     Check whether the trajectories passed are compatible.
     They are compatible if they have the same order of atoms, and the same cell, and store the same arrays
     """
 
-    assert len(trajectories) > 1, 'No trajectories passed'
+    assert len(trajectories) >= 1, 'No trajectories passed'
     for t in trajectories:
         if not isinstance(t, Trajectory):
             raise TypeError("{} is not an instance of Trajectory".format(t))
     array_names_set = set()
     chemical_symbols_set = set()
+    timestep_set = set()
     for t in trajectories:
         array_names_set.add(frozenset(t.get_arraynames()))
-        chemical_symbols_set.add(tuple(t.atoms.get_chemical_symbols()))
+        atoms = t.atoms
+        chemical_symbols_set.add(tuple(atoms.get_chemical_symbols()))
+        timestep = t.get_timestep()
+        timestep_set.add(timestep)
 
     if len(array_names_set) > 1:
         raise IncompatibleTrajectoriesException("Different arrays are set")
     if len(chemical_symbols_set) > 1:
         raise IncompatibleTrajectoriesException("Different chemical symbols in trajectory")
-    return True
+    return atoms, timestep
 
 
 class Trajectory(AttributedArray):
@@ -107,7 +111,7 @@ class Trajectory(AttributedArray):
         else:
             raise TypeError("species  has  to be an integer or a string, I got {}".format(type(species)))
 
-        return np.array([i for i, s in enumerate(array_to_search, start=start) if s==species])
+        return np.array([i for i, s in enumerate(array_to_index, start=start) if s==species])
 
 
     @property
@@ -172,3 +176,11 @@ class Trajectory(AttributedArray):
                 pass
         return atoms
 
+
+    def recenter(self):
+        """
+        Recenter positions and velocities in-place
+        """
+        from samos.lib.mdutils import recenter_positions, recenter_velocities
+        
+        
