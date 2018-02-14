@@ -51,5 +51,27 @@ class TestTrajectory(unittest.TestCase):
         self.assertTrue(np.array_equal(frc, tnew.get_forces()))
         self.assertTrue(np.array_equal(xtr, tnew.get_array('extra')))
 
+    def test_compatibility(self):
+        from samos.trajectory import Trajectory, check_trajectory_compatibility, IncompatibleTrajectoriesException
+        from ase import Atoms
+        atoms1 = Atoms('H'*10+'O')
+        atoms2 = Atoms('H'*11+'O')
+        atoms3 = Atoms('O'+'H'*10)
+        t1 = Trajectory(atoms=atoms1)
+        t2 = Trajectory(atoms=atoms2)
+        t3 = Trajectory(atoms=atoms3)
+        t4 = Trajectory(atoms=atoms3.copy())
+
+
+        with self.assertRaises(IncompatibleTrajectoriesException):
+            check_trajectory_compatibility(t1, t2)
+        with self.assertRaises(IncompatibleTrajectoriesException):
+            check_trajectory_compatibility(t2, t3)
+        with self.assertRaises(IncompatibleTrajectoriesException):
+            check_trajectory_compatibility(t1, t3)
+        with self.assertRaises(TypeError):
+            check_trajectory_compatibility(t1, t3, 3)
+        self.assertTrue(check_trajectory_compatibility(t3,t4))
+
 if __name__ == '__main__':
     unittest.main()

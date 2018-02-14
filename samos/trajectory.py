@@ -1,7 +1,35 @@
 import numpy as np
+from samos.utils.attributed_array import AttributedArray
 
 
-class Trajectory(object):
+class IncompatibleTrajectoriesException(Exception):
+    pass
+
+
+def check_trajectory_compatibility(*trajectories):
+    """
+    Check whether the trajectories passed are compatible.
+    They are compatible if they have the same order of atoms, and the same cell, and store the same arrays
+    """
+
+    assert len(trajectories) > 1, 'No trajectories passed'
+    for t in trajectories:
+        if not isinstance(t, Trajectory):
+            raise TypeError("{} is not an instance of Trajectory".format(t))
+    array_names_set = set()
+    chemical_symbols_set = set()
+    for t in trajectories:
+        array_names_set.add(frozenset(t.get_arraynames()))
+        chemical_symbols_set.add(tuple(t.atoms.get_chemical_symbols()))
+
+    if len(array_names_set) > 1:
+        raise IncompatibleTrajectoriesException("Different arrays are set")
+    if len(chemical_symbols_set) > 1:
+        raise IncompatibleTrajectoriesException("Different chemical symbols in trajectory")
+    return True
+
+
+class Trajectory(AttributedArray):
     """
     Class defining our trajectories.
     A trajectory is a sequence of time-ordered points in phase space.
@@ -11,10 +39,10 @@ class Trajectory(object):
     *   eV for energies
     *   Masses and cells are set via the _atoms member, an ase.Atoms instance and units as in ase are used. 
     """
+    _TIMESTEP_KEY = 'timestep_fs'
     _POSITIONS_KEY = 'positions'
     _VELOCITIES_KEY = 'velocities'
     _FORCES_KEY = 'forces'
-    _METADATA_FILENAME = 'metadata.json'
     _ATOMS_FILENAME = 'atoms.traj'
     def __init__(self, **kwargs):
         """
@@ -22,35 +50,23 @@ class Trajectory(object):
         Optional keyword-arguments are everything with a set-method.
         """
         self._atoms = None
-        self._arrays = {}
-        self._timestep_fs = None
-        for key, val in kwargs.items():
-            getattr(self, 'set_{}'.format(key))(val)
+        super(Trajectory, self).__init__(**kwargs)
+
+    def _save_atoms(self, folder_name):
+        from io.path import join
+        if self._atoms:
+            from ase.io import write
+            write(join(folder_name, self._ATOMS_FILENAME), self._atoms)
+
+    def get_timestep(self):
+        return self.get_attr(self._TIMESTEP_KEY)
 
     def set_timestep(self, timestep_fs):
         """
         :param timestep: expects value of the timestep in femtoseconds
         """
-        if timestep_fs is None:
-            self._timestep_fs = None
-        else:
-            self._timestep_fs = float(timestep_fs)
+        self.set_attr(self._TIMESTEP_KEY, float(timestep_fs))
 
-
-    def get_timestep(self):
-        """
-        raises: ValueError if timestep has not been set
-        """
-        if isinstance(self._timestep_fs, float):
-            return self._timestep_fs
-        else:
-            raise ValueError("Timestep has not been set")
-
-    def set_atoms(self, atoms):
-        from ase import Atoms
-        if not isinstance(atoms, Atoms):
-            raise ValueError("You have to pass an instance of ase.Atoms")
-        self._atoms = atoms
 
     def get_atoms(self):
         if self._atoms:
@@ -60,48 +76,17 @@ class Trajectory(object):
     @property
     def atoms(self):
         return self.get_atoms()
+
+    def set_atoms(self, atoms):
+        from ase import Atoms
+        if not isinstance(atoms, Atoms):
+            raise ValueError("You have to pass an instance of ase.Atoms")
+        self._atoms = atoms
+
     @property
     def cell(self):
         return self.atoms.cell
 
-    def set_array(self, name, array, check_existing=False, check_nstep=True, check_nat=True):
-        """
-        Method to set an array with a name to reference it.
-        :param str name: A name to reference that array
-        :param array: A valid numpy array or an object that can be converted with a call to numpy.array
-        :param bool check_existing:
-            Check for an array of that name existing, and raise if it exists.
-            Defaults to False.
-        :param book check_nstep:
-            Check if the number of steps, which is the first dimension of the array, is commensurate
-            with other arrays stored. Defaults to True
-        :param bool check_nat:
-            If the array is of rank 3 or higher, the second dimension is interpreted as the number of atoms.
-            If this flag is True, I will check for arrays with rank 3 or higher. Defaults  to True.
-            Requires that the atoms have been set
-        """
-        # First, I call np.array to ensure it's a valid array
-        array = np.array(array)
-        if not isinstance(name, basestring):
-            raise TypeError("Name has to be a string")
-        if check_existing:
-            if name in self._arrays.keys():
-                raise ValueError("Name {} already exists".formamt(name))
-        if check_nstep:
-            for other_name, other_array in self._arrays.items():
-                assert array.shape[0] == other_array.shape[0], (
-                    'Number of steps in this array is not compliant with array {}'.format(other_name))
-        if check_nat and len(array.shape) > 2:
-            if array.shape[1] != len(self.atoms):
-                raise ValueError("Second dimension of array does not match the number of atoms")
-        self._arrays[name] = array
-
-
-    def get_array(self, name):
-        try:
-            return self._arrays[name]
-        except KeyError:
-            raise KeyError("An array with that name ( {} ) has not been set.".format(name))
 
     def get_incides_of_species(self, species, start=0):
         """
@@ -187,48 +172,3 @@ class Trajectory(object):
                 pass
         return atoms
 
-    def save(self, filename):
-        """
-        Saves the trajectory instance to tarfile.
-        :param str filename: The filename. Won't be checked or modified with extension!
-        """
-        import tarfile, tempfile, json
-        from os.path import join
-        temp_folder = tempfile.mkdtemp()
-        for  arrayname, array in self._arrays.items():
-            np.save(join(temp_folder, '{}.npy'.format(arrayname)), array)
-        # The metadata of my trajectory:
-        d = {'timestep':self._timestep_fs}
-        with open(join(temp_folder, self._METADATA_FILENAME), 'w') as f:
-            json.dump(d, f)
-        if self._atoms:
-            from ase.io import write
-            write(join(temp_folder, self._ATOMS_FILENAME), self._atoms)
-
-        with tarfile.open(filename, "w:gz", format=tarfile.PAX_FORMAT) as tar:
-                tar.add(temp_folder, arcname="")
-    @classmethod
-    def load_file(cls, filename):
-        import tarfile, tempfile, json, os
-        from os.path import join
-        temp_folder = tempfile.mkdtemp()
-        with tarfile.open(filename, "r:gz", format=tarfile.PAX_FORMAT) as tar:
-            tar.extractall(temp_folder)
-
-        files_in_tar = set(os.listdir(temp_folder))
-
-        with open(join(temp_folder, cls._METADATA_FILENAME)) as f:
-            metadata = json.load(f)
-        files_in_tar.remove(cls._METADATA_FILENAME)
-        new = cls(**metadata)
-
-        if cls._ATOMS_FILENAME in files_in_tar:
-            from ase.io import read
-            new.set_atoms(read(join(temp_folder, cls._ATOMS_FILENAME)))
-            files_in_tar.remove(cls._ATOMS_FILENAME)
-
-        for array_file in files_in_tar:
-            if not array_file.endswith('.npy'):
-                raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
-            new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
-        return new
