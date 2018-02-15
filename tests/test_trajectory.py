@@ -57,21 +57,24 @@ class TestTrajectory(unittest.TestCase):
         atoms1 = Atoms('H'*10+'O')
         atoms2 = Atoms('H'*11+'O')
         atoms3 = Atoms('O'+'H'*10)
-        t1 = Trajectory(atoms=atoms1)
-        t2 = Trajectory(atoms=atoms2)
-        t3 = Trajectory(atoms=atoms3)
-        t4 = Trajectory(atoms=atoms3.copy())
+        t1 = Trajectory(atoms=atoms1, timestep=1.)
+        t2 = Trajectory(atoms=atoms2, timestep=1.)
+        t3 = Trajectory(atoms=atoms3, timestep=1.)
+        t4 = Trajectory(atoms=atoms3.copy(), timestep=1.)
 
 
         with self.assertRaises(IncompatibleTrajectoriesException):
-            check_trajectory_compatibility(t1, t2)
+            check_trajectory_compatibility([t1, t2])
         with self.assertRaises(IncompatibleTrajectoriesException):
-            check_trajectory_compatibility(t2, t3)
+            check_trajectory_compatibility([t2, t3])
         with self.assertRaises(IncompatibleTrajectoriesException):
-            check_trajectory_compatibility(t1, t3)
+            check_trajectory_compatibility([t1, t3])
         with self.assertRaises(TypeError):
-            check_trajectory_compatibility(t1, t3, 3)
-        self.assertTrue(check_trajectory_compatibility(t3,t4))
+            check_trajectory_compatibility([t1, t3, 3])
+        self.assertTrue(check_trajectory_compatibility([t3,t4]))
+        t4.set_timestep(3)
+        with self.assertRaises(IncompatibleTrajectoriesException):
+            self.assertTrue(check_trajectory_compatibility([t3,t4]))
 
 if __name__ == '__main__':
     unittest.main()
