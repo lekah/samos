@@ -12,6 +12,8 @@ def plot_msd_isotropic(msd,
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(1,1,1)
     attrs = msd.get_attrs()
+    if attrs['decomposed']:
+        raise NotImplementedError("Plotting decomposed trajectories is not implemented")
     nr_of_blocks = attrs['nr_of_blocks']
     nr_of_trajectories = attrs['nr_of_trajectories']
     block_length_dt = attrs['block_length_dt']
@@ -23,8 +25,8 @@ def plot_msd_isotropic(msd,
     ax.set_xlabel('Time $t$ [fs]')
 
     times_msd = timestep_fs*stepsize*np.arange(
-                attrs.get('t_start_msd_dt')/stepsize,
-                attrs.get('t_end_msd_dt')/stepsize
+                attrs.get('t_start_dt')/stepsize,
+                attrs.get('t_end_dt')/stepsize
             )
 
     times_fit =  timestep_fs*stepsize*np.arange(

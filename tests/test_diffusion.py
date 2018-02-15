@@ -12,24 +12,25 @@ class TestDiffusion(unittest.TestCase):
         d = DiffusionAnalyzer(verbosity=0)
         
         d.set_trajectories(t)
-        msd_iso = d.get_msd_isotropic(
+
+        #~ vaf = d.get_vaf(t_start_fit_fs=2000.,  t_end_fit_fs=4000., nr_of_blocks=12)
+
+
+        msd_iso = d.get_msd(
                 t_start_fit_fs=2000., 
                 t_end_fit_fs=4000., 
                 nr_of_blocks=12,)
-        msd_iso_com = d.get_msd_isotropic(
-                t_start_fit_fs=2000., 
-                t_end_fit_fs=4000., 
-                nr_of_blocks=12, species_of_interest='O', do_com=True)
-        #~ vaf_iso = d.get_vaf_isotropic(t_start_fit_fs=2000., 
-                #~ t_end_fit_fs=4000., 
-                #~ nr_of_blocks=12,)
-            
+        if 1:
+            msd_iso_dec = d.get_msd(
+                    t_start_fit_fs=2000., 
+                    t_end_fit_fs=4000., 
+                    nr_of_blocks=12, decomposed=True)
+        
         attrs = msd_iso.get_attrs()
         with open('ref/msd_iso_H2O-64-300K.json', 'r') as f:
-            #~ json.dump(attrs, f)
             ref_attrs = json.load(f)
-        self.assertEqual(ref_attrs, attrs)
-
+        for k in ('H', 'O'):
+            self.assertEqual(ref_attrs[k], attrs[k])
 
         plot_msd_isotropic(msd_iso, show=True)
 if __name__ == '__main__':

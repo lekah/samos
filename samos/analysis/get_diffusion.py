@@ -92,19 +92,19 @@ class DiffusionAnalyzer(object):
             )
     
     
-        t_start_msd_fs = kwargs.pop('t_start_msd_fs', None)
-        t_start_msd_dt = kwargs.pop('t_start_msd_dt', 0)
+        t_start_fs = kwargs.pop('t_start_fs', None)
+        t_start_dt = kwargs.pop('t_start_dt', 0)
     
-        if isinstance(t_start_msd_fs, float):
-            t_start_msd_dt = int(t_start_msd_fs / timestep_fs)
-        elif isinstance(t_start_msd_dt, int):
-            t_start_msd_fs = t_start_msd_dt*timestep_fs
+        if isinstance(t_start_fs, float):
+            t_start_dt = int(t_start_fs / timestep_fs)
+        elif isinstance(t_start_dt, int):
+            t_start_fs = t_start_dt*timestep_fs
         else:
             raise Exception(
                 "\n\n\n"
                 "Set the time that you consider the\n"
                 "VAF to have converged as a float with\n"
-                "keyword t_start_msd_fs or t_start_msd_dt"
+                "keyword t_start_fs or t_start_dt"
                 "\n\n\n"
             )
     
@@ -125,21 +125,21 @@ class DiffusionAnalyzer(object):
             )
     
     
-        t_end_msd_fs = kwargs.pop('t_end_msd_fs', None)
-        t_end_msd_dt = kwargs.pop('t_end_msd_dt', None)
+        t_end_fs = kwargs.pop('t_end_fs', None)
+        t_end_dt = kwargs.pop('t_end_dt', None)
     
-        if t_end_msd_fs and t_end_msd_dt:
-            raise Exception("You cannot set both 't_end_msd_fs' and 't_end_msd_dt'")
-        if isinstance(t_end_msd_fs, float):
-            t_end_msd_dt = int(t_end_msd_fs / timestep_fs)
-        elif isinstance(t_end_msd_dt, int):
-            t_end_msd_fs = timestep_fs * t_end_msd_dt
+        if t_end_fs and t_end_dt:
+            raise Exception("You cannot set both 't_end_fs' and 't_end_dt'")
+        if isinstance(t_end_fs, float):
+            t_end_dt = int(t_end_fs / timestep_fs)
+        elif isinstance(t_end_dt, int):
+            t_end_fs = timestep_fs * t_end_dt
         else:
-            t_end_msd_dt = t_end_fit_dt
-            #~ t_end_msd_fs = t_end_fit_dt
+            t_end_dt = t_end_fit_dt
+            #~ t_end_fs = t_end_fit_dt
     
         # The number of timesteps I will calculate:
-        nr_of_t = (t_end_msd_dt - t_start_msd_dt) / stepsize_t # In principle I could start at t_start_msd_dt, but for the
+        nr_of_t = (t_end_dt - t_start_dt) / stepsize_t # In principle I could start at t_start_dt, but for the
         # the plotting I will calculate also the part between 0 adn t_start.
     
         # Checking if I have to partition the trajectory into blocks (By default just 1 block)
@@ -168,10 +168,10 @@ class DiffusionAnalyzer(object):
             nr_of_blocks = nr_of_blocks
         else:
             nr_of_blocks=1
-        return (species_of_interest, nr_of_blocks, t_start_msd_dt, t_end_msd_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
+        return (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
             stepsize_t, stepsize_tau, block_length_dt, do_com)
 
-    def get_msd_isotropic(self, **kwargs):
+    def get_msd(self, decomposed=False, **kwargs):
         """
         Calculates the mean square discplacement (MSD),
     
@@ -185,7 +185,7 @@ class DiffusionAnalyzer(object):
             This tells me whether I will have a stepsize larger than 1 (the default)
             when looping over the trajectory.
         """
-        from samos.lib.mdutils import calculate_msd_specific_atoms, get_com_positions
+        from samos.lib.mdutils import calculate_msd_specific_atoms, calculate_msd_specific_atoms_decompose_d, get_com_positions
         try:
             timestep_fs = self._timestep_fs
             atoms = self._atoms
@@ -198,50 +198,50 @@ class DiffusionAnalyzer(object):
             )
 
 
-        (species_of_interest, nr_of_blocks, t_start_msd_dt, t_end_msd_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
+        (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
             stepsize_t, stepsize_tau, block_length_dt, do_com) = self._get_running_params(timestep_fs, **kwargs)
 
         msd = TimeSeries()
 
-        msd_results_dict = {atomic_species: {}
+        results_dict = {atomic_species: {}
                 for atomic_species
                 in species_of_interest
             }
-        msd_isotrop_all_species = []
+        msd_all_species = []
         #self.msd_averaged = []
         # Setting params for calculation of MSD and conductivity
         # Future: Maybe allow for element specific parameter settings?
     
         for atomic_species in species_of_interest:
-            msd_isotrop_this_species = []
-            slopes_intercepts = np.empty((len(trajectories), nr_of_blocks, 2))
-            slopes = []
+            msd_this_species = []
+
+            if decomposed:
+                slopes_intercepts = np.empty((len(trajectories), nr_of_blocks, 3,3, 2))
+            else:
+                slopes_intercepts = np.empty((len(trajectories), nr_of_blocks, 2))
     
             for itraj, trajectory in enumerate(trajectories):
+
+                positions = trajectory.get_positions()
+
                 if do_com:
+                    # I replace the array positions with the COM!
+                    masses = self._atoms.get_masses() # Getting the masses for recentering
+                    factors = [1]*len(masses)
+                    #~ nstep, nat, _ = positions.shape
+                    positions = get_com_positions(positions, masses, factors)
                     indices_of_interest = [1]
                     prefactor = len(trajectory.get_incides_of_species(atomic_species, start=0))
                 else:
                     indices_of_interest = trajectory.get_incides_of_species(atomic_species, start=1)
                     prefactor = 1
-                positions = trajectory.get_positions()
-        
-                nat_of_interest = len(indices_of_interest)
+
                 nstep, nat, _= positions.shape
-                total_time = nstep*timestep_fs
-    
-                if nr_of_blocks:
-                    block_length_dt = (nstep - t_end_msd_dt)  / nr_of_blocks
-                    block_length_fs = block_length_dt*timestep_fs
-                else:
-                    nr_of_blocks   = (nstep - t_end_msd_dt) / block_length_dt
-    
-                if do_com:
-                    masses = self._atoms.get_masses()
-                    factors = [1]*len(masses)
-                    positions = get_com_positions(positions, masses, factors, nstep, nat)
-                    nstep, nat, _= positions.shape
-    
+                block_length_dt = (nstep - t_end_dt)  / nr_of_blocks
+
+
+                nat_of_interest = len(indices_of_interest)
+
                 if self._verbosity > 0:
                     print(
                             '\n    ! Calculating MSD for atomic species {} in trajectory {}\n'
@@ -249,17 +249,12 @@ class DiffusionAnalyzer(object):
                             '      I will calculate {} block(s)'
                             ''.format(atomic_species, itraj, nat_of_interest, atomic_species, nr_of_blocks)
                         )
-                    print (            indices_of_interest,
-                                stepsize_t,
-                                stepsize_tau,
-                                block_length_dt, t_end_msd_dt, 11111111,
-                                nr_of_blocks,
-                                nr_of_t,
-                                nstep,
-                                nat,
-                                nat_of_interest
-                    )
-                msd_isotrop_this_species_this_traj = prefactor*calculate_msd_specific_atoms(
+                if decomposed:
+                    msd_this_species_this_traj = prefactor*calculate_msd_specific_atoms_decompose_d(
+                            positions, indices_of_interest, stepsize_t, stepsize_tau, block_length_dt,
+                            nr_of_blocks, nr_of_t, nstep, nat, nat_of_interest)
+                else:
+                    msd_this_species_this_traj = prefactor*calculate_msd_specific_atoms(
                             positions, indices_of_interest, stepsize_t, stepsize_tau, block_length_dt,
                             nr_of_blocks, nr_of_t, nstep, nat, nat_of_interest)
 
@@ -268,53 +263,74 @@ class DiffusionAnalyzer(object):
 
                 range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt/stepsize_t, t_end_fit_dt/stepsize_t)
     
-                for iblock, block in enumerate(msd_isotrop_this_species_this_traj):
-                    slope, intercept, _, _, _ = linregress(range_for_t, block[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t])
-                    slopes_intercepts[itraj, iblock, 0] = slope
-                    slopes.append(slope)
-                    slopes_intercepts[itraj, iblock, 1] = intercept
-                    msd.set_array('msd_isotropic_{}_{}_{}'.format(atomic_species, itraj, iblock), block)
-                    msd_isotrop_this_species.append(block)
+                for iblock, block in enumerate(msd_this_species_this_traj):
+                    if decomposed:
+                        for ipol in range(3):
+                            for jpol in range(3):
+                                slope, intercept, _, _, _ = linregress(range_for_t, block[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t,ipol, jpol])
+                                slopes_intercepts[itraj, iblock, ipol, jpol, 0] = slope
+                                slopes_intercepts[itraj, iblock, ipol, jpol, 1] = intercept
+                        msd.set_array('msd_decompsed_{}_{}_{}'.format(atomic_species, itraj, iblock), block)
+                    else:
+                        slope, intercept, _, _, _ = linregress(range_for_t, block[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t])
+                        slopes_intercepts[itraj, iblock, 0] = slope
+                        slopes_intercepts[itraj, iblock, 1] = intercept
+                        msd.set_array('msd_isotropic_{}_{}_{}'.format(atomic_species, itraj, iblock), block)
+                    msd_this_species.append(block)
 
             # Calculating the average sem/std for each point in time:
-            msd_mean = np.mean(msd_isotrop_this_species, axis=0)
-            msd_std = np.std(msd_isotrop_this_species, axis=0)
-            msd_sem = msd_std / np.sqrt(len(msd_isotrop_this_species) - 1)
-            msd.set_array('msd_isotropic_{}_mean'.format(atomic_species), msd_mean)
-            msd.set_array('msd_isotropic_{}_std'.format(atomic_species), msd_std)
-            msd.set_array('msd_isotropic_{}_sem'.format(atomic_species), msd_sem)
+            msd_mean = np.mean(msd_this_species, axis=0)
+            msd_std = np.std(msd_this_species, axis=0)
+            msd_sem = msd_std / np.sqrt(len(msd_this_species) - 1)
 
-            msd_results_dict[atomic_species].update({
-                'slope_msd_mean':np.mean(slopes), 'slope_msd_std':np.std(slopes),
-                'slope_msd_sem':standard_error_of_mean(slopes), 'slopes_intercepts':slopes_intercepts.tolist()})
+            msd.set_array('msd_{}_{}_mean'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_mean)
+            msd.set_array('msd_{}_{}_std'.format('decomposed' if decomposed else 'isotropic',atomic_species), msd_std)
+            msd.set_array('msd_{}_{}_sem'.format('decomposed' if decomposed else 'isotropic',atomic_species), msd_sem)
 
-            msd_results_dict[atomic_species]['diffusion_mean_cm2_s'] =  1e-1 / 6.* msd_results_dict[atomic_species]['slope_msd_mean']
-            msd_results_dict[atomic_species]['diffusion_std_cm2_s']  =  1e-1 / 6.* msd_results_dict[atomic_species]['slope_msd_std']
-            msd_results_dict[atomic_species]['diffusion_sem_cm2_s']  =  1e-1 / 6.* msd_results_dict[atomic_species]['slope_msd_sem']
-    
-    
+            if decomposed:
+                results_dict[atomic_species].update({
+                    'slope_msd_mean':np.mean(slopes_intercepts[:,:,:,:,0], axis=(0,1)),
+                    'slope_msd_std':np.std(slopes_intercepts[:,:,:,:,0], axis=(0,1)),
+                    'slopes_intercepts':slopes_intercepts.tolist()})
+                results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(trajectories)*nr_of_blocks-1)
+            else:
+                results_dict[atomic_species].update({
+                    'slope_msd_mean':np.mean(slopes_intercepts[:,:,0]),
+                    'slope_msd_std':np.std(slopes_intercepts[:,:,0]),
+                    'slopes_intercepts':slopes_intercepts.tolist()})
+                results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(trajectories)*nr_of_blocks-1)
+
+            results_dict[atomic_species]['diffusion_mean_cm2_s'] =  1e-1 / 6.* results_dict[atomic_species]['slope_msd_mean']
+            results_dict[atomic_species]['diffusion_std_cm2_s']  =  1e-1 / 6.* results_dict[atomic_species]['slope_msd_std']
+            results_dict[atomic_species]['diffusion_sem_cm2_s']  =  1e-1 / 6.* results_dict[atomic_species]['slope_msd_sem']
+
+
+            if decomposed:
+                # I need to transform to lists, numpy are not json serializable:
+                for k in ('slope_msd_mean', 'slope_msd_std', 'slope_msd_sem',
+                    'diffusion_mean_cm2_s', 'diffusion_std_cm2_s','diffusion_sem_cm2_s'):
+                    results_dict[atomic_species][k] = results_dict[atomic_species][k].tolist()
             if self._verbosity > 1:
                 print('      Done, these are the results for {}:'.format(atomic_species))
-                for key, val in msd_results_dict[atomic_species].items():
+                for key, val in results_dict[atomic_species].items():
                     if not isinstance(val, (tuple, list, dict)):
                         print(  '          {:<20} {}'.format(key,  val))
 
-            #~ self.msd_isotrop_all_species.append(msd_isotrop_this_species)
-    
-        msd_results_dict.update({
+        results_dict.update({
             't_start_fit_dt'        :   t_start_fit_dt,
             't_end_fit_dt'          :   t_end_fit_dt,
-            't_start_msd_dt'        :   t_start_msd_dt,
-            't_end_msd_dt'          :   t_end_msd_dt,
+            't_start_dt'            :   t_start_dt,
+            't_end_dt'              :   t_end_dt,
             'nr_of_blocks'          :   nr_of_blocks,
             'nr_of_trajectories'    :   len(trajectories),
             'block_length_dt'       :   block_length_dt,
             'stepsize_t'            :   stepsize_t,
             'species_of_interest'   :   species_of_interest,
-            'timestep_fs'        :   timestep_fs,
+            'timestep_fs'           :   timestep_fs,
             'nr_of_t'               :   nr_of_t,
+            'decomposed'            :   decomposed,
         })
-        for k,v in msd_results_dict.items():
+        for k,v in results_dict.items():
             msd.set_attr(k,v)
         
         return msd
@@ -322,149 +338,47 @@ class DiffusionAnalyzer(object):
 
     def get_vaf(self, integration='trapezoid', **kwargs):
 
-        from difflib import calculate_vaf_specific_atoms, get_com_velocities
-
+        from samos.lib.mdutils import calculate_vaf_specific_atoms, get_com_velocities
         try:
-            structure = self.structure
-            self._chemical_symbols
-        except AttributeError:
+            timestep_fs = self._timestep_fs
+            atoms = self._atoms
+            trajectories = self._trajectories
+        except AttributeError as e:
             raise Exception(
                 "\n\n\n"
-                "Please use the set_structure method to set structure"
-                "\n\n\n"
-            )
-        try:
-            velocities = self._velocities
-            timestep_in_fs = self.timestep_in_fs
-            nstep_set, nat_set = set(), set()
-            if not self._has_velocities:
-                raise AttributeError
-            for v in self._velocities:
-                nstep_, nat_, _ = v.shape
-                nstep_set.add(nstep_)
-                nat_set.add(nat_)
-
-            nstep = nstep_set.pop()
-            nat = nat_set.pop()
-
-            if nstep_set or nat_set:
-                raise Exception("incommensurate arrays")
-
-        except AttributeError:
-            raise Exception(
-                "\n\n\n"
-                "Please use the set_trajectory method to give me velocities"
-                "\n\n\n"
-            )
-        log = self.log # set in __init__
-        species_of_interest = kwargs.pop("species_of_interest", self.species_of_interest)
-
-        stepsize_t = kwargs.pop('stepsize_t', 1)
-        #~ if stepsize_t > 1:
-            #~ raise DeprecationWarning("Don't pyt the stepsize > 1 when computing the VAF!")
-
-        stepsize_tau = kwargs.pop('stepsize_tau', 1)
-        t_start_fit_fs = kwargs.pop('t_start_fit_fs', None)
-        t_start_fit_dt = kwargs.pop('t_start_fit_dt', None)
-
-        if t_start_fit_fs and t_start_fit_dt:
-            raise Exception("You cannot set both 't_start_fit_fs' and 't_start_fit_dt'")
-        elif isinstance(t_start_fit_fs, float):
-            t_start_fit_dt  = int(t_start_fit_fs / timestep_in_fs)
-        elif isinstance(t_start_fit_dt, int):
-            block_length_fs  = t_start_fit_dt * timestep_in_fs
-        else:
-            raise Exception(
-                "Please set the time to start the fit with keyword t_start_fit_fs or t_start_fit_dt"
+                "Please use the set_trajectories method to set trajectories"
+                "\n{}\n".format(e)
             )
 
-        t_end_fit_fs = kwargs.pop('t_end_fit_fs', None)
-        t_end_fit_dt = kwargs.pop('t_end_fit_dt', None)
 
-        if t_end_fit_fs and t_end_fit_dt:
-            raise Exception("You cannot set both 't_end_fit_fs' and 't_end_fit_dt'")
-        elif isinstance(t_end_fit_fs, float):
-            t_end_fit_dt  = int(t_end_fit_fs / timestep_in_fs)
-        elif isinstance(t_end_fit_dt, int):
-            block_length_fs  = t_end_fit_dt * timestep_in_fs
-        else:
-            raise Exception(
-                "Please set the time to end the fit with keyword t_end_fit_fs or t_end_fit_dt"
-            )
+        (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
+            stepsize_t, stepsize_tau, block_length_dt, do_com) = self._get_running_params(timestep_fs, **kwargs)
 
-        t_end_vaf_fs = kwargs.pop('t_end_vaf_fs', None)
-        t_end_vaf_dt = kwargs.pop('t_end_vaf_dt', None)
+        vaf = TimeSeries()
 
-        if t_end_vaf_dt and t_end_vaf_fs:
-            raise Exception("You specified both 't_end_vaf_fs' and 't_end_vaf_dt'")
-        elif isinstance(t_end_vaf_fs, float):
-            t_end_vaf_dt  = int(t_end_vaf_fs / timestep_in_fs)
-        elif isinstance(t_end_vaf_dt, int):
-            t_end_vaf_fs  = t_end_vaf_dt * timestep_in_fs
-        else:
-            t_end_vaf_fs = t_end_fit_fs
-            t_end_vaf_dt = t_end_fit_dt
 
-        nr_of_t = t_end_vaf_dt / stepsize_t
+        results_dict = dict()
+        vaf_all_species = []
 
-        # Checking if I have to partition the trajectory into blocks (By default just 1 block)
-        block_length_fs = kwargs.pop('block_length_fs', None)
-        block_length_dt = kwargs.pop('block_length_dt', None)
-
-        nr_of_blocks = kwargs.pop('nr_of_blocks', None)
-
-        do_com =  kwargs.pop('do_com', False)
-        if kwargs:
-            raise Exception("Uncrecognized keywords: {}".format(kwargs.keys()))
-
-        if block_length_fs and block_length_dt :
-           raise Exception("You cannot set both 'block_length_fs' and 'block_length_dt'")
-        elif ( block_length_dt or block_length_fs ) and nr_of_blocks:
-            raise Exception("You cannot set both 'a block length' and 'nr_of_blocks'") #
-            # Maybe allow this in the future, at the cost of not the whole trajectory being used:
-        elif isinstance(block_length_fs, float):
-            block_length_dt  = int(block_length_fs / timestep_in_fs)
-        elif isinstance(block_length_dt, int):
-            block_length_fs  = block_length_dt * timestep_in_fs
-        elif isinstance(nr_of_blocks, int):
-            nr_of_blocks = nr_of_blocks
-        else:
-            nr_of_blocks=1
-            #~ raise Exception(
-                #~ "Please set the block length in femtoseconds (kw block_length_fs or block_length_dt) or define the\n"
-                #~ "number of blocks (kw nr_of_blocks)"
-            #~ )
-        self.vaf_all_species =  []
-        self.vaf_results_dict = dict(
-            t_end_vaf_fs    =   t_end_vaf_fs,
-            t_end_vaf_dt    =   t_end_vaf_dt,
-            stepsize_t      =   stepsize_t,
-            stepsize_tau    =   stepsize_tau,
-            timestep_in_fs  =   timestep_in_fs,
-            nr_of_t         =   nr_of_t,
-            t_start_fit_dt  =   t_start_fit_dt,
-            t_start_fit_fs  =   t_start_fit_fs,
-            t_end_fit_dt    =   t_end_fit_dt,
-            t_end_fit_fs    =   t_end_fit_fs,
-            species_of_interest=species_of_interest,
-        )
-
-        self.D_from_vaf_averaged = []
+        #~ self.D_from_vaf_averaged = []
         for atomic_species in species_of_interest:
-            indices_of_interest = self._get_indices_of_interest(atomic_species, start=1)
-            if do_com:
-                indices_of_interest = [1]
-                prefactor = len(self._get_indices_of_interest(atomic_species, start=0))
-            else:
-                indices_of_interest = self._get_indices_of_interest(atomic_species, start=1)
-                prefactor = 1
 
 
-            nat_of_interest     = len(indices_of_interest)
+
+            #~ nat_of_interest = len(indices_of_interest)
             vaf_this_species = []
-            slopes_n_intercepts = []
-            means_of_integral = []
-            for vel_array in velocities:
+            slopes_n_intercepts = np.empty((len(trajectories), nr_of_blocks, 2))
+            #~ means_of_integral = []
+            for itraj, trajectory in enumerate(trajectories):
+                if do_com:
+                    indices_of_interest = [1]
+                    prefactor = len(trajectory.get_incides_of_species(atomic_species))
+                else:
+                    indices_of_interest = trajectory.get_incides_of_species(atomic_species, start=1)
+                    prefactor = 1
+
+                velocities = trajectory.get_velocities()
+
                 total_steps = len(vel_array)
                 total_time = total_steps*self.timestep_in_fs
                 if nr_of_blocks:
@@ -515,7 +429,7 @@ class DiffusionAnalyzer(object):
 
                 range_for_t = timestep_in_fs*stepsize_t*np.arange(t_start_fit_dt/stepsize_t, t_end_fit_dt/stepsize_t)
 
-                #~ for iblock, block in enumerate(msd_isotrop_this_species_this_traj, start=1):
+                #~ for iblock, block in enumerate(msd_this_species_this_traj, start=1):
 
 
                 for block_vaf, integrated_vaf in zip(*res):
@@ -558,6 +472,18 @@ class DiffusionAnalyzer(object):
                 )
             self.vaf_all_species.append(vaf_this_species)
 
+        results_dict.update({
+            't_start_fit_dt'        :   t_start_fit_dt,
+            't_end_fit_dt'          :   t_end_fit_dt,
+            't_start_dt'            :   t_start_dt,
+            't_end_dt'              :   t_end_dt,
+            'nr_of_blocks'          :   nr_of_blocks,
+            'nr_of_trajectories'    :   len(trajectories),
+            'block_length_dt'       :   block_length_dt,
+            'stepsize_t'            :   stepsize_t,
+            'species_of_interest'   :   species_of_interest,
+            'timestep_fs'           :   timestep_fs,
+            'nr_of_t'               :   nr_of_t,})
 
         return self.vaf_results_dict, np.array(self.vaf_all_species)
 

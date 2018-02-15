@@ -12,7 +12,7 @@ class AttributedArray(object):
         for key, val in kwargs.items():
             getattr(self, 'set_{}'.format(key))(val)
 
-    def set_array(self, name, array, check_existing=False, check_nstep=True, check_nat=True):
+    def set_array(self, name, array, check_existing=False, check_nstep=True, check_nat=False):
         """
         Method to set an array with a name to reference it.
         :param str name: A name to reference that array
@@ -38,7 +38,8 @@ class AttributedArray(object):
         if check_nstep:
             for other_name, other_array in self._arrays.items():
                 assert array.shape[0] == other_array.shape[0], (
-                    'Number of steps in array {} is not compliant with array {}'.format(name, other_name))
+                    'Number of steps in array {} ({}) is not compliant with array {} ({})'.format(
+                            name, array.shape[0],other_name,  other_array.shape[0]))
         if check_nat and len(array.shape) > 2:
             if array.shape[1] != len(self.atoms):
                 raise ValueError("Second dimension of array does not match the number of atoms")
