@@ -1,19 +1,19 @@
 import unittest
 
-class TestDiffusion(unittest.TestCase):
+class TestDynamics(unittest.TestCase):
 
     def test_1(self):
         from samos.trajectory import Trajectory
-        from samos.analysis.get_diffusion import DiffusionAnalyzer
-        from samos.plotting.plot_diffusion import plot_msd_isotropic
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        from samos.plotting.plot_dynamics import plot_msd_isotropic
         import json
         t = Trajectory.load_file('data/H2O-64-300K.tar.gz')
         t.recenter()
-        d = DiffusionAnalyzer(verbosity=0)
+        d = DynamicsAnalyzer(verbosity=0)
         
         d.set_trajectories(t)
 
-        #~ vaf = d.get_vaf(t_start_fit_fs=2000.,  t_end_fit_fs=4000., nr_of_blocks=12)
+        vaf = d.get_vaf(t_start_fit_fs=2000.,  t_end_fit_fs=4000., nr_of_blocks=12)
 
 
         msd_iso = d.get_msd(

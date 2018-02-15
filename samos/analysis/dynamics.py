@@ -13,9 +13,9 @@ class TimeSeries(AttributedArray):
 
 
 
-class DiffusionAnalyzer(object):
+class DynamicsAnalyzer(object):
     """
-    This class blabla
+    This class
     """
     def __init__(self, **kwargs):
         self._species_of_interest = None
@@ -28,8 +28,9 @@ class DiffusionAnalyzer(object):
         """
         if isinstance(trajectories, Trajectory):
             trajectories = [trajectories]
-
+        # I check the compatibility. Implicitly, also checks if trajectories are valid instances.
         self._atoms, self._timestep_fs = check_trajectory_compatibility(trajectories)
+        # Setting as attribute of self for analysis
         self._trajectories = trajectories
 
     def set_species_of_interest(self, species_of_interest):
@@ -53,6 +54,7 @@ class DiffusionAnalyzer(object):
                 "Please use the set_trajectories method to set trajectories, and I will get the atoms from there."
                 "\n{}\n".format(e)
             )
+
     def set_verbosity(self, verbosity):
         if not isinstance(verbosity, int):
             raise TypeError("Verbosity is an integer")
