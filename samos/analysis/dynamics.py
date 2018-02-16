@@ -406,7 +406,6 @@ class DynamicsAnalyzer(object):
 
             for itraj, trajectory in enumerate(trajectories):
                 velocities = trajectory.get_velocities()
-
                 if do_com:
                     # I replace the array positions with the COM!
                     masses = self._atoms.get_masses() # Getting the masses for recentering
@@ -445,34 +444,41 @@ class DynamicsAnalyzer(object):
                 vaf, vaf_integral = calculate_vaf_specific_atoms(velocities, indices_of_interest, stepsize_t, stepsize_tau,
                     nr_of_t, nr_of_blocks_this_traj, block_length_dt_this_traj, timestep_fs*stepsize_t,
                     integration, nstep, nat, nat_of_interest)
+                # transforming A^2/fs -> cm^2 /s, dividing by three to get D
+                vaf_integral *= 0.1/3. * prefactor
 
 
 
                 for iblock in range(nr_of_blocks):
                     
-                    D =  0.1 / 3. * prefactor * vaf_integral[iblock]  # transforming A^2/fs -> cm^2 /s, dividing by three to get D
+                    #~ D =  0.1 / 3. * prefactor * vaf_integral[iblock]  
                     vaf_this_species.append(vaf[iblock])
                     #~ print vaf[iblock,0]
-                    vaf_integral_this_species.append(D[iblock])
+                    vaf_integral_this_species.append(vaf_integral[iblock])
                     #~ slope, intercept, _, _, _ = linregress(range_for_t, D[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t])
                     #~ slopes_intercepts[iblock, :] = slope, intercept
-
-                    fitted_means_of_integral.append(D[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t].mean())
+                    fitted_means_of_integral.append(vaf_integral[iblock, t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t].mean())
 
                 vaf_time_series.set_array('vaf_isotropic_{}_{}'.format(atomic_species, itraj), vaf)
-                vaf_time_series.set_array('vaf_integral_isotropic_{}_{}'.format(atomic_species, itraj), D)
+                vaf_time_series.set_array('vaf_integral_isotropic_{}_{}'.format(atomic_species, itraj), vaf_integral)
                 #~ vaf_time_series.set_array('slopes_intercepts_isotropic_{}_{}'.format(atomic_species, itraj), slopes_intercepts)
 
-            vaf_integral_this_species = np.array(vaf_integral_this_species)
+
+            for arr, name in ((vaf_this_species, 'vaf_isotropic'), (vaf_integral_this_species, 'vaf_integral_isotropic')):
+                arr = np.array(arr)
+
+                arr_mean = np.mean(arr, axis=0)
+                arr_std  = np.std(arr, axis=0)
+                arr_sem  = arr_std / np.sqrt(arr.shape[0] - 1)
+                #~ print name, arr_mean.shape
+                vaf_time_series.set_array('{}_{}_mean'.format(name, atomic_species), arr_mean)
+                vaf_time_series.set_array('{}_{}_std'.format(name, atomic_species), arr_std)
+                vaf_time_series.set_array('{}_{}_sem'.format(name, atomic_species), arr_sem)
+
             fitted_means_of_integral = np.array(fitted_means_of_integral)
-
-            vaf_integral_this_species_mean = np.mean(vaf_integral_this_species, axis=0)
-            vaf_integral_this_species_std  = np.std(vaf_integral_this_species, axis=0)
-            vaf_integral_this_species_sem  = vaf_integral_this_species_std / np.sqrt(len(vaf_integral_this_species) - 1)
-
             results_dict[atomic_species] = dict(
-                    diffusion_mean_cm2_s = fitted_means_of_integral.mean(),
-                    diffusion_std_cm2_s = fitted_means_of_integral.std())
+                    diffusion_mean_cm2_s=fitted_means_of_integral.mean(),
+                    diffusion_std_cm2_s=fitted_means_of_integral.std())
 
             results_dict[atomic_species]['diffusion_sem_cm2_s'] = results_dict[atomic_species]['diffusion_std_cm2_s'] / np.sqrt(len(fitted_means_of_integral) -1)
 
@@ -488,9 +494,9 @@ class DynamicsAnalyzer(object):
             't_end_fit_dt'          :   t_end_fit_dt,
             't_start_dt'            :   t_start_dt,
             't_end_dt'              :   t_end_dt,
-            'nr_of_blocks'          :   nr_of_blocks,
+
             'nr_of_trajectories'    :   len(trajectories),
-            'block_length_dt'       :   block_length_dt,
+
             'stepsize_t'            :   stepsize_t,
             'species_of_interest'   :   species_of_interest,
             'timestep_fs'           :   timestep_fs,
@@ -498,7 +504,7 @@ class DynamicsAnalyzer(object):
 
         for k,v in results_dict.items():
             vaf_time_series.set_attr(k,v)
-        return vaf
+        return vaf_time_series
 
 
     def get_kinetic_energies(self, stepsize=1, decompose_system=True, decompose_atoms=False, decompose_species=False):
@@ -572,3 +578,4 @@ class DynamicsAnalyzer(object):
                 kinetic_energies_series.set_attr('mean_atoms_kinetic_energy_{}'.format(itraj), kinE.mean(axis=0).tolist())
 
         return kinetic_energies_series
+
