@@ -94,7 +94,7 @@ class Trajectory(AttributedArray):
         return self.atoms.cell
 
 
-    def get_incides_of_species(self, species, start=0):
+    def get_indices_of_species(self, species, start=0):
         """
         Convenience function to get all indices of a species.
         :param species:

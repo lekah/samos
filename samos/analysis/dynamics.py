@@ -167,7 +167,6 @@ class DynamicsAnalyzer(object):
 
 
         # Checking if I have to partition the trajectory into blocks (By default just 1 block)
-        
         if 'block_length_fs' in keywords_provided:
             block_length_dt = int(float(kwargs.pop('block_length_fs')) / timestep_fs)
             nr_of_blocks = None
@@ -186,10 +185,9 @@ class DynamicsAnalyzer(object):
 
         # Asking whether to calculate COM diffusion
         do_com = kwargs.pop('do_com', False)
-    
-    
+
         if kwargs:
-            raise Exception("Uncrecognized keywords: {}".format(kwargs.keys()))
+            raise InputError("Uncrecognized keywords: {}".format(kwargs.keys()))
 
         return (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
             stepsize_t, stepsize_tau, block_length_dt, do_com)
@@ -251,9 +249,9 @@ class DynamicsAnalyzer(object):
                     #~ nstep, nat, _ = positions.shape
                     positions = get_com_positions(positions, masses, factors)
                     indices_of_interest = [1]
-                    prefactor = len(trajectory.get_incides_of_species(atomic_species, start=0))
+                    prefactor = len(trajectory.get_indices_of_species(atomic_species, start=0))
                 else:
-                    indices_of_interest = trajectory.get_incides_of_species(atomic_species, start=1)
+                    indices_of_interest = trajectory.get_indices_of_species(atomic_species, start=1)
                     prefactor = 1
 
                 nstep, nat, _= positions.shape
@@ -413,9 +411,9 @@ class DynamicsAnalyzer(object):
                     #~ nstep, nat, _ = positions.shape
                     velocities = get_com_velocities(velocities, masses, factors)
                     indices_of_interest = [1]
-                    prefactor = len(trajectory.get_incides_of_species(atomic_species, start=0))
+                    prefactor = len(trajectory.get_indices_of_species(atomic_species, start=0))
                 else:
-                    indices_of_interest = trajectory.get_incides_of_species(atomic_species, start=1)
+                    indices_of_interest = trajectory.get_indices_of_species(atomic_species, start=1)
                     prefactor = 1
 
                 nstep, nat, _= velocities.shape
@@ -554,7 +552,7 @@ class DynamicsAnalyzer(object):
                 steps = list(range(0, nstep, stepsize))
                 kinE_species = np.zeros((len(steps), ntyp))
                 for ityp, atomic_species in enumerate(species_of_interest):
-                    indices_of_interest = t.get_incides_of_species(atomic_species, start=0)
+                    indices_of_interest = t.get_indices_of_species(atomic_species, start=0)
                     for istep0, istep in enumerate(steps):
                         for idx, iat in enumerate(indices_of_interest):
                             for ipol in range(3):
@@ -578,4 +576,122 @@ class DynamicsAnalyzer(object):
                 kinetic_energies_series.set_attr('mean_atoms_kinetic_energy_{}'.format(itraj), kinE.mean(axis=0).tolist())
 
         return kinetic_energies_series
+
+    def get_power_spectrum(self, smoothing_factor_fs=1., **kwargs):
+        """
+        
+        Power spectrum
+        """
+        def myfilter(arr, window, freq):
+            # I do two things:
+            # First I average the function to remove the crazy wiggles
+            newarr = np.empty(arr.shape)
+            for istep in range(arr.size):
+                newarr[istep] = arr[istep-window:istep+window].mean()
+            #Now I remove frequencies and signal from the point on where signal is 0
+            for idx in range(0, len(freq), int(float(len(freq))/100)):
+                if np.all(newarr[idx:]<1e-4):
+                    return newarr[:idx], freq[:idx]
+
+            return newarr, freq
+        
+
+        from scipy import signal
+        from scipy.stats import sem
+        try:
+            trajectories = self._trajectories
+            timestep_fs = self._timestep_fs
+        except AttributeError as e:
+            raise Exception(
+                "\n\n\n"
+                "Please use the set_trajectories method to set trajectories"
+                "\n{}\n".format(e)
+            )
+
+        keywords_provided = kwargs.keys()
+        for mutually_exclusive_keys in (
+                ('block_length_fs','block_length_ps','block_length_dt', 'nr_of_blocks'),):
+            keys_provided_this_group = [k for k in mutually_exclusive_keys if k in keywords_provided]
+            if len(keys_provided_this_group)>1:
+                raise InputError("This keywords are mutually exclusive: {}".format(', '.join(keys_provided_this_group)))
+        if 'block_length_fs' in keywords_provided:
+            block_length_dt = int(float(kwargs.pop('block_length_fs')) / timestep_fs)
+            nr_of_blocks = None
+        elif 'block_length_ps' in keywords_provided:
+            block_length_dt = int(1000*float(kwargs.pop('block_length_ps')) / timestep_fs)
+            nr_of_blocks = None
+        elif 'block_length_dt' in keywords_provided:
+            block_length_dt = int(kwargs.pop('block_length_dt'))
+            nr_of_blocks = None
+        elif 'nr_of_blocks' in keywords_provided:
+            nr_of_blocks = kwargs.pop('nr_of_blocks')
+            block_length_dt = None
+        else:
+            nr_of_blocks = 1
+            block_length_dt = None
+        if kwargs:
+            raise InputError("Uncrecognized keywords: {}".format(kwargs.keys()))
+
+
+        # The time I consider the VAF to drop to 0 (diffusive regime) in fs:
+        # n terms of a frequency, I need the inverse:
+        freq_decorrelated = 0.05 * smoothing_factor_fs**(-1)
+        # I now need to determine the filter window
+
+        fourier_velocities = []
+        fourier_results = dict(smoothing_factor_fs=smoothing_factor_fs)
+        for index_of_species, atomic_species in enumerate(self.get_species_of_interest()):
+            periodogram_this_species = []
+
+            for itraj, trajectory in enumerate(trajectories):
+                vel_array = trajectory.get_velocities()
+                nstep, _, _ = vel_array.shape
+
+                if nr_of_blocks > 0:
+                    nr_of_blocks_this_traj = nr_of_blocks
+                elif block_length_dt > 0:
+                    nr_of_blocks_this_traj   = nstep / block_length_dt
+                else:
+                    raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
+
+                # I need to have blocks of equal length, and use the split method
+                # I need the length of the array to be a multiple of nr_of_blocks_this_traj
+                split_number = vel_array.shape[0] / nr_of_blocks_this_traj
+                print vel_array.shape, split_number*nr_of_blocks_this_traj
+                blocks = np.array_split(vel_array, nr_of_blocks_this_traj, axis=0)
+                
+                print vel_array.shape
+                print len(blocks), [b.shape for b in blocks]
+                return 
+                zero_freq_components = []
+                
+                pd_here = []
+
+                freq, pd = signal.periodogram(vel_array[:, trajectory.get_indices_of_species(atomic_species, start=0), :], 
+                        fs=1./timestep_fs, axis=0, return_onesided=True) # Show result in THz
+
+
+                continue
+                for idx in trajectory.get_indices_of_species(atomic_species, start=0):
+                    for ipol in range(3):
+                        # Using signal periodogram to get the vib  signal:
+                        freq, pd = signal.periodogram(vel_array[:, :, :], fs=1./timestep_fs, axis=0, return_onesided=True) # Show result in THz
+                        print vel_array.shape, freq.shape, pd.shape
+                        pd *= 0.5
+                        pd_here.append(pd)
+                counter = 0
+                for frequency in freq:
+                    if -freq_decorrelated < frequency < freq_decorrelated:
+                        counter += 1
+                filter_window = counter
+                # I average over all my directions and trajectories:
+                pd_mean = np.mean(np.array(pd_here), axis=0)
+                #~ pd_filtered = signal.lfilter(1./float(filter_window)*np.ones(filter_window),1., pd_mean)
+                # I filter to remove the big wiggles.
+                pd_filtered, freq_filtered = myfilter(pd_mean, filter_window, freq)
+                #~ pos_0 = pd_filtered.size/2
+                #~ zero_freq_components.append(pd_filtered[pos_0])
+                periodogram_this_species.append((freq_filtered, pd_filtered))
+            fourier_velocities.append(periodogram_this_species)
+
 

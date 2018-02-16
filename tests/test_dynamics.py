@@ -15,11 +15,10 @@ class TestDynamics(unittest.TestCase):
         d = DynamicsAnalyzer(verbosity=2)
         
         d.set_trajectories(t)
-        #~ kine = d.get_kinetic_energies(decompose_species=True)
-        #~ print kine.get_attrs()
-        #~ return
-        vaf = d.get_vaf(t_start_fit_fs=2000.,  stepsize_tau=20, t_end_fit_fs=4000., nr_of_blocks=12, species_of_interest=['O'])
 
+        pws = d.get_power_spectrum(2000., nr_of_blocks=4)
+        return
+        vaf = d.get_vaf(t_start_fit_fs=2000.,  stepsize_tau=20, t_end_fit_fs=4000., nr_of_blocks=12, species_of_interest=['O'])
 
         msd_iso = d.get_msd(
                 t_start_fit_fs=2000., 
