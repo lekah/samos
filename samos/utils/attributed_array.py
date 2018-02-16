@@ -12,7 +12,7 @@ class AttributedArray(object):
         for key, val in kwargs.items():
             getattr(self, 'set_{}'.format(key))(val)
 
-    def set_array(self, name, array, check_existing=False, check_nstep=True, check_nat=False):
+    def set_array(self, name, array, check_existing=False, check_nstep=False, check_nat=False):
         """
         Method to set an array with a name to reference it.
         :param str name: A name to reference that array
@@ -22,7 +22,7 @@ class AttributedArray(object):
             Defaults to False.
         :param book check_nstep:
             Check if the number of steps, which is the first dimension of the array, is commensurate
-            with other arrays stored. Defaults to True
+            with other arrays stored. Defaults to False
         :param bool check_nat:
             If the array is of rank 3 or higher, the second dimension is interpreted as the number of atoms.
             If this flag is True, I will check for arrays with rank 3 or higher. Defaults  to True.
@@ -66,6 +66,12 @@ class AttributedArray(object):
         #Testing whether this is valid:
         dumps(value)
         self._attrs[key] = value
+
+    def rescale_array(self, arrayname, value):
+        """
+        Rescale the array by a certain value
+        """
+        self._arrays[arrayname] *= float(value)
 
     def save(self, filename):
         """

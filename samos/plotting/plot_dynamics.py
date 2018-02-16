@@ -14,9 +14,8 @@ def plot_msd_isotropic(msd,
     attrs = msd.get_attrs()
     if attrs['decomposed']:
         raise NotImplementedError("Plotting decomposed trajectories is not implemented")
-    nr_of_blocks = attrs['nr_of_blocks']
+
     nr_of_trajectories = attrs['nr_of_trajectories']
-    block_length_dt = attrs['block_length_dt']
     t_start_fit_dt = attrs['t_start_fit_dt']
     stepsize = attrs.get('stepsize_t', 1)
     timestep_fs = attrs['timestep_fs']
@@ -50,11 +49,11 @@ def plot_msd_isotropic(msd,
             label=r'MSD ({})$\rightarrow D=( {:.2e} \pm {:.2e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem))
 
         for itraj in range(nr_of_trajectories):
-            for iblock in range(nr_of_blocks):
-
-                slope_this_block, intercept_this_block = attrs[atomic_species]['slopes_intercepts'][itraj][iblock]
-                block =  msd.get_array('msd_isotropic_{}_{}_{}'.format(atomic_species, itraj, iblock))
-                ax.plot(times_msd, block, color=color, alpha=0.1,)
+            msd_this_traj =  msd.get_array('msd_isotropic_{}_{}'.format(atomic_species, itraj))
+            slopes_intercepts_this_traj =  msd.get_array('slopes_intercepts_isotropic_{}_{}'.format(atomic_species, itraj))
+            for iblock in range(len(msd_this_traj)):
+                slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
+                ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=0.1,)
                 ax.plot(times_fit, [slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=0.2)
     if not(no_legend):
         leg = ax.legend(loc=4)
