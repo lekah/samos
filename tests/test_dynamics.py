@@ -12,12 +12,12 @@ class TestDynamics(unittest.TestCase):
         t.recenter()
         t.rescale_array(t._VELOCITIES_KEY, bohr_to_ang)
         t.rescale_array(t._POSITIONS_KEY, bohr_to_ang)
-        d = DynamicsAnalyzer(verbosity=2)
+        d = DynamicsAnalyzer(verbosity=0)
 
         d.set_trajectories(t)
 
-        pws = d.get_power_spectrum(2000., nr_of_blocks=2, species_of_interest='O')
-        #~ return
+        pws = d.get_power_spectrum(smothening=1, nr_of_blocks=6)
+
         vaf = d.get_vaf(t_start_fit_fs=2000.,
             stepsize_tau=20, t_end_fit_fs=4000.,
             nr_of_blocks=12, species_of_interest=['O', 'H'])
@@ -26,27 +26,31 @@ class TestDynamics(unittest.TestCase):
                 t_start_fit_fs=2000.,
                 t_end_fit_fs=4000.,
                 #~ nr_of_blocks=12,)
-                block_length_dt=640,species_of_interest=['O']
+                block_length_dt=640,species_of_interest=['O', 'H']
             )
-        if 0:
-            msd_iso_dec = d.get_msd(
+        msd_iso_dec = d.get_msd(
                     t_start_fit_fs=2000.,
                     t_end_fit_fs=4000., stepsize_tau=20,
                     nr_of_blocks=12, decomposed=True)
-        from matplotlib import pyplot as plt
-        fig = plt.figure(figsize=(12,7))
-        plt.suptitle(r'Diffusion TIP4P-$H_2O$ at 300K', fontsize=18)
-        plot_msd_isotropic(msd_iso, fig.add_subplot(3,1,1))
-        plot_vaf_isotropic(vaf, fig.add_subplot(3,1,2))
-        plot_power_spectrum(pws, fig.add_subplot(3,1,3), )
 
-        plt.show()
+        for attributed_array, name in ((msd_iso, 'msd_iso'), (msd_iso_dec, 'msd_iso_dec'),
+                (vaf,'vaf'), (pws, 'pws')):
+            attrs = attributed_array.get_attrs()
+            #~ with open('ref/{}_H2O-64-300K.json'.format(name), 'w') as f:
+                #~ json.dump(attrs , f)
+            with open('ref/{}_H2O-64-300K.json'.format(name), 'r') as f:
+                ref_attrs = json.load(f)
+            self.assertEqual(ref_attrs, attrs)
 
-        attrs = msd_iso.get_attrs()
-        with open('ref/msd_iso_H2O-64-300K.json', 'r') as f:
-            ref_attrs = json.load(f)
-        for k in ('H', 'O'):
-            self.assertEqual(ref_attrs[k], attrs[k])
+
+        # Uncomment to test plot:
+        #~ from matplotlib import pyplot as plt
+        #~ fig = plt.figure(figsize=(12,7))
+        #~ plt.suptitle(r'Diffusion TIP4P-$H_2O$ at 300K', fontsize=18)
+        #~ plot_msd_isotropic(msd_iso, fig.add_subplot(3,1,1))
+        #~ plot_vaf_isotropic(vaf, fig.add_subplot(3,1,2))
+        #~ plot_power_spectrum(pws, fig.add_subplot(3,1,3), )
+        #~ plt.show()
 
 if __name__ == '__main__':
     unittest.main()

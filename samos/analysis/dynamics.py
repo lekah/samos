@@ -577,27 +577,14 @@ class DynamicsAnalyzer(object):
 
         return kinetic_energies_series
 
-    def get_power_spectrum(self, smoothing_factor_fs=1., **kwargs):
+    def get_power_spectrum(self, **kwargs):
         """
-
-        Power spectrum
+        Calculate the power spectrum.
+        :param int smothening: Smothen the power spectrum by taking a mean every N steps.
         """
-        def myfilter(arr, window, freq):
-            # I do two things:
-            # First I average the function to remove the crazy wiggles
-            newarr = np.empty(arr.shape)
-            for istep in range(arr.size):
-                newarr[istep] = arr[istep-window:istep+window].mean()
-            #Now I remove frequencies and signal from the point on where signal is 0
-            for idx in range(0, len(freq), int(float(len(freq))/100)):
-                if np.all(newarr[idx:]<1e-4):
-                    return newarr[:idx], freq[:idx]
-
-            return newarr, freq
-
 
         from scipy import signal
-        from scipy.stats import sem
+
         try:
             trajectories = self._trajectories
             timestep_fs = self._timestep_fs
@@ -630,17 +617,13 @@ class DynamicsAnalyzer(object):
             nr_of_blocks = 1
             block_length_dt = None
         species_of_interest = kwargs.pop('species_of_interest', None) or self.get_species_of_interest()
+        smothening = int(kwargs.pop('smothening', 1))
         if kwargs:
             raise InputError("Uncrecognized keywords: {}".format(kwargs.keys()))
 
 
-        # The time I consider the VAF to drop to 0 (diffusive regime) in fs:
-        # n terms of a frequency, I need the inverse:
-        freq_decorrelated = 0.05 * smoothing_factor_fs**(-1)
-        # I now need to determine the filter window
 
-        fourier_velocities = []
-        fourier_results = dict(smoothing_factor_fs=smoothing_factor_fs)
+        fourier_results = dict(smothening=smothening)
         power_spectrum = TimeSeries()
         frequencies = []
 
@@ -661,25 +644,46 @@ class DynamicsAnalyzer(object):
                 # I need to have blocks of equal length, and use the split method
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
                 split_number = vel_array.shape[0] / nr_of_blocks_this_traj
-                #~ print vel_array.shape, split_number*nr_of_blocks_this_traj
-                #~ print vel_array.shape
+
                 blocks = np.array(np.split(vel_array[:nr_of_blocks_this_traj*split_number], nr_of_blocks_this_traj, axis=0))
-                #~ print blocks.shape
-                #~ print type(blocks)
-                #~ print vel_array.shape
-                #~ print len(blocks), [b.shape for b in blocks]
-                #~ return
-                #~ for iblock, block in enumerate(blocks):
-                #~ for block in blocks:
+                nblocks = len(blocks)
+
                 freq, pd = signal.periodogram(blocks,
-                    fs=1000./timestep_fs, axis=1, return_onesided=True) # Show result in THz
+                    fs=timestep_fs, axis=1, return_onesided=True) # Show result in THz
                 # I mean over all atoms of this species and directions
-                pd_mean = pd.mean(axis=(2,3))
-                power_spectrum.set_array('periodogram_{}_{}'.format( atomic_species, itraj), pd_mean)
+                # In the future, maybe consider having a direction resolved periodogram?
+                pd_this_species_this_traj = pd.mean(axis=(2,3))
+                # Smothening the array:
+                
+                if smothening > 1:
+                    split_number = pd_this_species_this_traj.shape[1] / smothening
+                    pd_this_species_this_traj = np.mean(pd_this_species_this_traj[:,:split_number*smothening].reshape( nblocks, -1, smothening), axis=2)
+                    freq_mean = np.mean(freq[:split_number*smothening].reshape( -1, smothening), axis=1)
+                else:
+                    freq_mean = freq
+
+                power_spectrum.set_array('periodogram_{}_{}'.format( atomic_species, itraj), pd_this_species_this_traj)
                 if not index_of_species:
                     # I need to save the frequencies only once, so I save them only for the first species.
                     # I do not see any problem here, but maybe I missed something.
-                    power_spectrum.set_array('frequency_{}'.format(itraj), freq)
+                    power_spectrum.set_array('frequency_{}'.format(itraj), freq_mean)
+                for block in pd_this_species_this_traj:
+                    periodogram_this_species.append(block)
+            try:
+                length_last_block = len(block)
+                for pd in periodogram_this_species:
+                    if len(pd) != length_last_block:
+                        raise Exception("Cannot calculate mean signal because of different lengths")
+                periodogram_this_species = np.array(periodogram_this_species)
+                power_spectrum.set_array('periodogram_{}_mean'.format( atomic_species), periodogram_this_species.mean(axis=0))
+                std = periodogram_this_species.std(axis=0)
+                power_spectrum.set_array('periodogram_{}_std'.format( atomic_species), std)
+                power_spectrum.set_array('periodogram_{}_sem'.format( atomic_species), std/np.sqrt(len(periodogram_this_species)-1))
+            except Exception as e:
+                # Not the end of the world, I just don't calculate the mean
+                print e
+
+
         for k,v in (('species_of_interest',species_of_interest),
                     ('nr_of_trajectories', len(trajectories)),):
             power_spectrum.set_attr(k,v)

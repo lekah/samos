@@ -88,7 +88,7 @@ class VoronoiNetwork():
     def strategies(cls):
         return cls._strategies
 
-    def __init__(self, verbosity=False, log=sys.stdout, correct_drift=False):
+    def __init__(self, verbosity=False, **kwargs):
         """
         Initializes the VoronoiNetwork.
 
@@ -106,10 +106,10 @@ class VoronoiNetwork():
     def set_atoms(self, atoms, host=None):
         """
         Set the atomic structure.
-        :param atoms: a structure, has to be an instance of ase.Atoms
+        :param atoms: an instance of ase.Atoms
         :param host:
             The host atoms that define the decomposition.
-            They can be a list of indices in the cell, or the specification of an element
+            They can be a list of indices or element names in the structure
         """
         def set_indices(spec):
             """
@@ -138,8 +138,6 @@ class VoronoiNetwork():
                 raise ValueError("I don't know what to do with {} {}\n"
                             "as a specification in set_atoms".format(type(spec), spec))
             return sorted(set(indices))
-
-
 
         if not isinstance(atoms, Atoms):
             raise InputValidationError("atoms has to be an instance of {}".format(Atoms))
