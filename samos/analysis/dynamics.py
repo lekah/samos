@@ -195,11 +195,11 @@ class DynamicsAnalyzer(object):
     def get_msd(self, decomposed=False, **kwargs):
         """
         Calculates the mean square discplacement (MSD),
-    
+
         #.  Calculate the MSD for each block
         #.  Calculate the mean and the standard deviation of the slope
         #.  Calculate the conductivity, including error propagation.
-    
+
         :param list species_of_interest:
             The species of interest for which to calculate the MSD, for example ["O", "H"]
         :param int stepsize_t:
@@ -219,7 +219,7 @@ class DynamicsAnalyzer(object):
             )
 
 
-        (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, 
+        (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt,
             nr_of_t, stepsize_t, stepsize_tau, block_length_dt, do_com) = self._get_running_params(timestep_fs, **kwargs)
 
         msd = TimeSeries()
@@ -232,12 +232,12 @@ class DynamicsAnalyzer(object):
         #self.msd_averaged = []
         # Setting params for calculation of MSD and conductivity
         # Future: Maybe allow for element specific parameter settings?
-    
+
         for atomic_species in species_of_interest:
             msd_this_species = [] # Here I collect the trajectories
-            slopes = [] # That's where I collect slopes for the final estimate of diffusion 
+            slopes = [] # That's where I collect slopes for the final estimate of diffusion
 
-    
+
             for itraj, trajectory in enumerate(trajectories):
 
                 positions = trajectory.get_positions()
@@ -293,7 +293,7 @@ class DynamicsAnalyzer(object):
                     print('      Done\n')
 
                 range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt/stepsize_t, t_end_fit_dt/stepsize_t)
-    
+
                 for iblock, block in enumerate(msd_this_species_this_traj):
                     if decomposed:
                         for ipol in range(3):
@@ -309,10 +309,10 @@ class DynamicsAnalyzer(object):
                         slopes_intercepts[iblock, 1] = intercept
                         slopes.append(slope)
                     msd_this_species.append(block)
-                
-                msd.set_array('msd_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic', 
+
+                msd.set_array('msd_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic',
                         atomic_species, itraj), msd_this_species_this_traj)
-                msd.set_array('slopes_intercepts_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic', 
+                msd.set_array('slopes_intercepts_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic',
                         atomic_species, itraj), slopes_intercepts)
 
             # Calculating the average sem/std for each point in time:
@@ -367,7 +367,7 @@ class DynamicsAnalyzer(object):
         })
         for k,v in results_dict.items():
             msd.set_attr(k,v)
-        
+
         return msd
 
 
@@ -448,8 +448,8 @@ class DynamicsAnalyzer(object):
 
 
                 for iblock in range(nr_of_blocks):
-                    
-                    #~ D =  0.1 / 3. * prefactor * vaf_integral[iblock]  
+
+                    #~ D =  0.1 / 3. * prefactor * vaf_integral[iblock]
                     vaf_this_species.append(vaf[iblock])
                     #~ print vaf[iblock,0]
                     vaf_integral_this_species.append(vaf_integral[iblock])
@@ -579,7 +579,7 @@ class DynamicsAnalyzer(object):
 
     def get_power_spectrum(self, smoothing_factor_fs=1., **kwargs):
         """
-        
+
         Power spectrum
         """
         def myfilter(arr, window, freq):
@@ -594,7 +594,7 @@ class DynamicsAnalyzer(object):
                     return newarr[:idx], freq[:idx]
 
             return newarr, freq
-        
+
 
         from scipy import signal
         from scipy.stats import sem
@@ -629,6 +629,7 @@ class DynamicsAnalyzer(object):
         else:
             nr_of_blocks = 1
             block_length_dt = None
+        species_of_interest = kwargs.pop('species_of_interest', None) or self.get_species_of_interest()
         if kwargs:
             raise InputError("Uncrecognized keywords: {}".format(kwargs.keys()))
 
@@ -640,11 +641,14 @@ class DynamicsAnalyzer(object):
 
         fourier_velocities = []
         fourier_results = dict(smoothing_factor_fs=smoothing_factor_fs)
-        for index_of_species, atomic_species in enumerate(self.get_species_of_interest()):
+        power_spectrum = TimeSeries()
+        frequencies = []
+
+        for index_of_species, atomic_species in enumerate(species_of_interest):
             periodogram_this_species = []
 
             for itraj, trajectory in enumerate(trajectories):
-                vel_array = trajectory.get_velocities()
+                vel_array = trajectory.get_velocities()[:, trajectory.get_indices_of_species(atomic_species, start=0), :]
                 nstep, _, _ = vel_array.shape
 
                 if nr_of_blocks > 0:
@@ -657,41 +661,51 @@ class DynamicsAnalyzer(object):
                 # I need to have blocks of equal length, and use the split method
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
                 split_number = vel_array.shape[0] / nr_of_blocks_this_traj
-                print vel_array.shape, split_number*nr_of_blocks_this_traj
-                blocks = np.array_split(vel_array, nr_of_blocks_this_traj, axis=0)
-                
-                print vel_array.shape
-                print len(blocks), [b.shape for b in blocks]
-                return 
-                zero_freq_components = []
-                
-                pd_here = []
+                #~ print vel_array.shape, split_number*nr_of_blocks_this_traj
+                #~ print vel_array.shape
+                blocks = np.array(np.split(vel_array[:nr_of_blocks_this_traj*split_number], nr_of_blocks_this_traj, axis=0))
+                #~ print blocks.shape
+                #~ print type(blocks)
+                #~ print vel_array.shape
+                #~ print len(blocks), [b.shape for b in blocks]
+                #~ return
+                #~ for iblock, block in enumerate(blocks):
+                #~ for block in blocks:
+                freq, pd = signal.periodogram(blocks,
+                    fs=1000./timestep_fs, axis=1, return_onesided=True) # Show result in THz
+                # I mean over all atoms of this species and directions
+                pd_mean = pd.mean(axis=(2,3))
+                power_spectrum.set_array('periodogram_{}_{}'.format( atomic_species, itraj), pd_mean)
+                if not index_of_species:
+                    # I need to save the frequencies only once, so I save them only for the first species.
+                    # I do not see any problem here, but maybe I missed something.
+                    power_spectrum.set_array('frequency_{}'.format(itraj), freq)
+        for k,v in (('species_of_interest',species_of_interest),
+                    ('nr_of_trajectories', len(trajectories)),):
+            power_spectrum.set_attr(k,v)
+        return power_spectrum
 
-                freq, pd = signal.periodogram(vel_array[:, trajectory.get_indices_of_species(atomic_species, start=0), :], 
-                        fs=1./timestep_fs, axis=0, return_onesided=True) # Show result in THz
-
-
-                continue
-                for idx in trajectory.get_indices_of_species(atomic_species, start=0):
-                    for ipol in range(3):
-                        # Using signal periodogram to get the vib  signal:
-                        freq, pd = signal.periodogram(vel_array[:, :, :], fs=1./timestep_fs, axis=0, return_onesided=True) # Show result in THz
-                        print vel_array.shape, freq.shape, pd.shape
-                        pd *= 0.5
-                        pd_here.append(pd)
-                counter = 0
-                for frequency in freq:
-                    if -freq_decorrelated < frequency < freq_decorrelated:
-                        counter += 1
-                filter_window = counter
-                # I average over all my directions and trajectories:
-                pd_mean = np.mean(np.array(pd_here), axis=0)
+                #~ continue
+                #~ for idx in trajectory.get_indices_of_species(atomic_species, start=0):
+                    #~ for ipol in range(3):
+                        #~ # Using signal periodogram to get the vib  signal:
+                        #~ freq, pd = signal.periodogram(vel_array[:, :, :], fs=1./timestep_fs, axis=0, return_onesided=True) # Show result in THz
+                        #~ print vel_array.shape, freq.shape, pd.shape
+                        #~ pd *= 0.5
+                        #~ pd_here.append(pd)
+                #~ counter = 0
+                #~ for frequency in freq:
+                    #~ if -freq_decorrelated < frequency < freq_decorrelated:
+                        #~ counter += 1
+                #~ filter_window = counter
+                #~ # I average over all my directions and trajectories:
+                #~ pd_mean = np.mean(np.array(pd_here), axis=0)
                 #~ pd_filtered = signal.lfilter(1./float(filter_window)*np.ones(filter_window),1., pd_mean)
-                # I filter to remove the big wiggles.
-                pd_filtered, freq_filtered = myfilter(pd_mean, filter_window, freq)
+                #~ # I filter to remove the big wiggles.
+                #~ pd_filtered, freq_filtered = myfilter(pd_mean, filter_window, freq)
                 #~ pos_0 = pd_filtered.size/2
                 #~ zero_freq_components.append(pd_filtered[pos_0])
-                periodogram_this_species.append((freq_filtered, pd_filtered))
-            fourier_velocities.append(periodogram_this_species)
+                #~ periodogram_this_species.append((freq_filtered, pd_filtered))
+            #~ fourier_velocities.append(periodogram_this_species)
 
 

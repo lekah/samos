@@ -6,35 +6,40 @@ class TestDynamics(unittest.TestCase):
         from samos.trajectory import Trajectory
         from samos.analysis.dynamics import DynamicsAnalyzer
         from samos.utils.constants import bohr_to_ang
-        from samos.plotting.plot_dynamics import plot_msd_isotropic, plot_vaf_isotropic
+        from samos.plotting.plot_dynamics import plot_msd_isotropic, plot_vaf_isotropic, plot_power_spectrum
         import json
         t = Trajectory.load_file('data/H2O-64-300K.tar.gz')
         t.recenter()
         t.rescale_array(t._VELOCITIES_KEY, bohr_to_ang)
         t.rescale_array(t._POSITIONS_KEY, bohr_to_ang)
         d = DynamicsAnalyzer(verbosity=2)
-        
+
         d.set_trajectories(t)
 
-        pws = d.get_power_spectrum(2000., nr_of_blocks=4)
-        return
-        vaf = d.get_vaf(t_start_fit_fs=2000.,  stepsize_tau=20, t_end_fit_fs=4000., nr_of_blocks=12, species_of_interest=['O'])
+        pws = d.get_power_spectrum(2000., nr_of_blocks=2, species_of_interest='O')
+        #~ return
+        vaf = d.get_vaf(t_start_fit_fs=2000.,
+            stepsize_tau=20, t_end_fit_fs=4000.,
+            nr_of_blocks=12, species_of_interest=['O', 'H'])
 
         msd_iso = d.get_msd(
-                t_start_fit_fs=2000., 
-                t_end_fit_fs=4000., 
+                t_start_fit_fs=2000.,
+                t_end_fit_fs=4000.,
                 #~ nr_of_blocks=12,)
-                block_length_dt=640,
+                block_length_dt=640,species_of_interest=['O']
             )
         if 0:
             msd_iso_dec = d.get_msd(
-                    t_start_fit_fs=2000., 
+                    t_start_fit_fs=2000.,
                     t_end_fit_fs=4000., stepsize_tau=20,
                     nr_of_blocks=12, decomposed=True)
         from matplotlib import pyplot as plt
         fig = plt.figure(figsize=(12,7))
-        plot_msd_isotropic(msd_iso, fig.add_subplot(2,1,1))
-        plot_vaf_isotropic(vaf, fig.add_subplot(2,1,2))
+        plt.suptitle(r'Diffusion TIP4P-$H_2O$ at 300K', fontsize=18)
+        plot_msd_isotropic(msd_iso, fig.add_subplot(3,1,1))
+        plot_vaf_isotropic(vaf, fig.add_subplot(3,1,2))
+        plot_power_spectrum(pws, fig.add_subplot(3,1,3), )
+
         plt.show()
 
         attrs = msd_iso.get_attrs()

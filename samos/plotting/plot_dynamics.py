@@ -6,7 +6,7 @@ from samos.utils.colors import get_color
 
 
 
-def plot_msd_isotropic(msd, 
+def plot_msd_isotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, **kwargs):
     if ax is None:
         fig = plt.figure(**kwargs)
@@ -60,7 +60,7 @@ def plot_msd_isotropic(msd,
         leg.get_frame().set_alpha(0.)
     if show:
         plt.show()
-def plot_vaf_isotropic(vaf, 
+def plot_vaf_isotropic(vaf,
         ax=None, no_legend=False, species_of_interest=None, show=False, **kwargs):
     from matplotlib.ticker import ScalarFormatter
     f = ScalarFormatter()
@@ -77,7 +77,7 @@ def plot_vaf_isotropic(vaf,
     stepsize = attrs.get('stepsize_t', 1)
     timestep_fs = attrs['timestep_fs']
 
-    ax.set_ylabel(r'MSD $\left[ \AA^2 \right]$')
+    ax.set_ylabel(r'VAF $\left[ \AA^2 fs^{-2} \right]$')
     ax.set_xlabel('Time $t$ [fs]')
     axes_D = ax.twinx()
     axes_D.yaxis.set_major_formatter(f)
@@ -127,7 +127,7 @@ def plot_vaf_isotropic(vaf,
 
         axes_D.plot(times ,vaf_integral_mean, color=color, linewidth=3., linestyle='--',
                 label=r'D ({})$\rightarrow D=( {:.2e} \pm {:.2e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem))
-        axes_D.fill_between(times, vaf_integral_mean-vaf_integral_sem, vaf_integral_mean+vaf_integral_sem, 
+        axes_D.fill_between(times, vaf_integral_mean-vaf_integral_sem, vaf_integral_mean+vaf_integral_sem,
                 facecolor=color, alpha=.2, linewidth=1)
 
 
@@ -140,5 +140,37 @@ def plot_vaf_isotropic(vaf,
         leg.get_frame().set_alpha(0.)
         leg = axes_D.legend(loc=1)
         leg.get_frame().set_alpha(0.)
+    if show:
+        plt.show()
+
+
+def plot_power_spectrum(power_spectrum, ax=None, show=False, **kwargs):
+ #~ from matplotlib.ticker import ScalarFormatter
+    #~ f = ScalarFormatter()
+    #~ f.set_powerlimits((-1,1))
+
+    if ax is None:
+        fig = plt.figure(**kwargs)
+        ax = fig.add_subplot(1,1,1)
+    attrs = power_spectrum.get_attrs()
+    species_of_interest = attrs['species_of_interest']
+    nr_of_trajectories = attrs['nr_of_trajectories']
+    frequencies = [power_spectrum.get_array('frequency_{}'.format(itraj)) for itraj in range(nr_of_trajectories)]
+    for index_of_species, atomic_species in enumerate(species_of_interest):
+        color = get_color(atomic_species, scheme='cpk')
+        for itraj in range(nr_of_trajectories):
+            freq = frequencies[itraj]
+            periodogram = power_spectrum.get_array('periodogram_{}_{}'.format( atomic_species, itraj))
+
+            for signal in periodogram:
+                #~ print freq.shape, signal.shape
+                ax.plot(freq, 1e3*signal,color=color,
+                            #~ label=label, linestyle=linestyle,
+                            #~ linewidth=2
+                    )
+
+
+
+
     if show:
         plt.show()
