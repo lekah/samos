@@ -7,7 +7,8 @@ from samos.utils.colors import get_color
 
 
 def plot_msd_isotropic(msd,
-        ax=None, no_legend=False, species_of_interest=None, show=False, **kwargs):
+        ax=None, no_legend=False, species_of_interest=None, show=False,
+        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', **kwargs):
     if ax is None:
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(1,1,1)
@@ -38,12 +39,12 @@ def plot_msd_isotropic(msd,
         diff = attrs[atomic_species]['diffusion_mean_cm2_s']
         diff_sem = attrs[atomic_species]['diffusion_sem_cm2_s']
         diff_std = attrs[atomic_species]['diffusion_std_cm2_s']
-        color = get_color(atomic_species, scheme='cpk')
+        color = get_color(atomic_species, scheme=color_scheme)
         msd_mean = msd.get_array('msd_isotropic_{}_mean'.format(atomic_species))
         msd_sem = msd.get_array('msd_isotropic_{}_sem'.format(atomic_species))
         p1 = ax.fill_between(
                 times_msd, msd_mean-msd_sem, msd_mean+msd_sem,
-                facecolor=color, alpha=.2, linewidth=1,
+                facecolor=color, alpha=alpha_fill, linewidth=1,
             )
         ax.plot(times_msd,msd_mean, color=color, linewidth=3.,
             label=r'MSD ({})$\rightarrow D=( {:.2e} \pm {:.2e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem))
@@ -53,8 +54,8 @@ def plot_msd_isotropic(msd,
             slopes_intercepts_this_traj =  msd.get_array('slopes_intercepts_isotropic_{}_{}'.format(atomic_species, itraj))
             for iblock in range(len(msd_this_traj)):
                 slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
-                ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=0.1,)
-                ax.plot(times_fit, [slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=0.2)
+                ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=alpha_block,)
+                ax.plot(times_fit, [slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=alpha_fit)
     if not(no_legend):
         leg = ax.legend(loc=4)
         leg.get_frame().set_alpha(0.)
