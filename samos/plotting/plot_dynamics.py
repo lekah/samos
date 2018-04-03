@@ -7,8 +7,9 @@ from samos.utils.colors import get_color
 
 
 def plot_msd_isotropic(msd,
-        ax=None, no_legend=False, species_of_interest=None, show=False,
+        ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
         alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', **kwargs):
+
     if ax is None:
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(1,1,1)
@@ -46,8 +47,14 @@ def plot_msd_isotropic(msd,
                 times_msd, msd_mean-msd_sem, msd_mean+msd_sem,
                 facecolor=color, alpha=alpha_fill, linewidth=1,
             )
-        ax.plot(times_msd,msd_mean, color=color, linewidth=3.,
-            label=r'MSD ({})$\rightarrow D=( {:.2e} \pm {:.2e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem))
+        if no_label:
+            label_this_species = None
+        elif label is None:
+            label_this_species=r'MSD ({})$\rightarrow D=( {:.2e} \pm {:.2e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem)
+        else:
+            label_this_species = '{} in {}'.format(atomic_species, label)
+
+        ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
 
         for itraj in range(nr_of_trajectories):
             msd_this_traj =  msd.get_array('msd_isotropic_{}_{}'.format(atomic_species, itraj))
