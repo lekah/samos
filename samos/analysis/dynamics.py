@@ -447,7 +447,7 @@ class DynamicsAnalyzer(object):
 
 
 
-                for iblock in range(nr_of_blocks):
+                for iblock in range(nr_of_blocks_this_traj):
 
                     #~ D =  0.1 / 3. * prefactor * vaf_integral[iblock]
                     vaf_this_species.append(vaf[iblock])
