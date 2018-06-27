@@ -179,14 +179,32 @@ class Trajectory(AttributedArray):
         return atoms
 
 
-    def recenter(self):
+    def recenter(self, sublattice=None):
         """
         Recenter positions and velocities in-place
+        :param tuple sublattice: A tuple or list of element names or indices that define a sublattice of the structure.
+            If given, the trajectory will be centered on the center of mass of that sublattice.
         """
         from samos.lib.mdutils import recenter_positions, recenter_velocities
         masses = self.atoms.get_masses()
-        factors = [1]*len(masses)
+        if sublattice is not None:
+            if not isinstance(sublattice, (tuple, list, set)):
+                raise TypeError("You have to pass a tuple/list/set as sublattice")
+            factors = [0]*len(masses)
+            for item in sublattice:
+                if isinstance(item, int):
+                    try:
+                        factors[item] = 1
+                    except IndexError:
+                        raise IndexError("You passed an integer for the sublattice, but it is out of range")
+                elif isinstance(item, basestring):
+                    for index in self.get_indices_of_species(item):
+                        factors[index] = 1
+                else:
+                    raise TypeError("You passed {} {} as a sublattice specifier, this is not recognized".format(type(item), item))
+        else:
+            factors = [1]*len(masses)
+
         self.set_positions(recenter_positions(self.get_positions(), masses, factors))
         self.set_velocities(recenter_velocities(self.get_velocities(), masses, factors))
-        
-        
+
