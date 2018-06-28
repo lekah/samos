@@ -65,7 +65,7 @@ class DynamicsAnalyzer(object):
         if self._species_of_interest is None:
             return sorted(set(atoms.get_chemical_symbols()))
         else:
-            return self._species_of_interst
+            return self._species_of_interest
 
     def _get_running_params(self, timestep_fs, **kwargs):
         """
@@ -654,7 +654,7 @@ class DynamicsAnalyzer(object):
                 # In the future, maybe consider having a direction resolved periodogram?
                 pd_this_species_this_traj = pd.mean(axis=(2,3))
                 # Smothening the array:
-                
+
                 if smothening > 1:
                     split_number = pd_this_species_this_traj.shape[1] / smothening
                     pd_this_species_this_traj = np.mean(pd_this_species_this_traj[:,:split_number*smothening].reshape( nblocks, -1, smothening), axis=2)
@@ -711,5 +711,3 @@ class DynamicsAnalyzer(object):
                 #~ zero_freq_components.append(pd_filtered[pos_0])
                 #~ periodogram_this_species.append((freq_filtered, pd_filtered))
             #~ fourier_velocities.append(periodogram_this_species)
-
-
