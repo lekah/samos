@@ -100,8 +100,8 @@ class VoronoiNetwork():
             Default is True.
         """
         self._verbosity = verbosity
-        self._log = log
-        self._correct_drift = correct_drift
+        self._log = sys.stdout
+        self._correct_drift = False
 
     def set_atoms(self, atoms, host=None):
         """
@@ -156,7 +156,7 @@ class VoronoiNetwork():
         #~ self._lattice = Lattice(self._atoms.cell)
         #Append the atoms and make a mapping from the indices in the host structure to the
         # corresponding atom in the original structure:
-        
+
         [self._host_structure.append(self._atoms[idx]) for idx in self._host_indices]
 
 
@@ -197,9 +197,9 @@ class VoronoiNetwork():
         """
         def read_qhull_output(text):
             """
-            Read the output of qhull with argument FF to print full information 
+            Read the output of qhull with argument FF to print full information
             on facets. Retuns a list with an integer, the position of the
-            voronoi node and the constituting vertices for each node input 
+            voronoi node and the constituting vertices for each node input
             (for one facets looks like):
 
             - f3264
@@ -269,7 +269,7 @@ class VoronoiNetwork():
                 in host_supercell.positions
             ]
             inputf.flush()
-            
+
             with tempfile.NamedTemporaryFile(
                     'rw',prefix = 'qvor',suffix='.out', delete=True
                 ) as outputf:
@@ -317,13 +317,13 @@ class VoronoiNetwork():
             # I need to map the indices in the host structure to the vertices
             # Don't sort, translations need to be in the same order
             vertices_in_atoms =  [self._host_indices[v] for v in vertices_in_host]
-            
+
             if len(set(vertices_in_atoms)) < 4:
                 continue
                 raise Exception("The number of vertices for this node is less than 4\n",
                     "Your unit cell is too small")
             node = VoronoiNode(center=center, vertices=vertices_in_atoms, translations=translations)
-            
+
             try:
                 # maybe I am unable to create the hull because there
                 # is no volume (might happen)
@@ -388,7 +388,7 @@ class VoronoiNetwork():
                             visited_sites[track_idx] = node_idx
                 print ' '.join(map('{:<3}'.format, visited_sites))
                 return
-                        
+
                 visited_sites = []
                 for ion in res:
                     counts = ion.count(True)
@@ -412,7 +412,7 @@ class VoronoiNetwork():
                 print
                 return
                 for idx in enumerate(tracklist):
-                    
+
                     if prev_visit == -1:
                         self._log.write('Lost an ion\n')
                         self.ionlosses += 1
@@ -595,7 +595,7 @@ class VoronoiNetwork():
                                                       #~ self.atoms.cell))
                                                  #~ for nodeindex, atomindex
                                                  #~ in enumerate(tracklist)]]
-#~ 
+#~
                     #~ self.visited_sites, self.cation_distances, self.center_distances, self.cat_center_distance, self.cat_vertex_distances = zip(*self.visited_sites_with_dist)
 
             except AttributeError as e:
@@ -674,7 +674,7 @@ class VoronoiNetwork():
 
         #~ else:
             #~ self.site_traj, self.volumes, self.total_volume, self.all_cation_dist, self.all_center_dist, self.all_cat_center_dist, self.all_cat_vertex_dist = [i for i in zip(*res)]
-#~ 
+#~
             #~ self.site_traj = np.array(self.site_traj)
             #~ self.volumes = np.array(self.volumes)
             #~ self.total_volume = np.array(self.total_volume)
@@ -1092,7 +1092,7 @@ class VoronoiNetwork():
             :align: center
 
             Site trajectory of a good conductor
-            
+
         Plot the results of the track calculations concerning the volume of each
         site during the trajectory. Assumes that this instance of VoronoiNetwork
         either just ran a track_ions_in_traj or that the volumes were passed  to
@@ -1631,7 +1631,7 @@ class VoronoiNetwork():
             where :math:`M_a / N_a` is the average time an ion spends at A
             before jumping out
             (:math:`M_a = \sum_b M^{\\tau}_{a,b} \\cdot M^s_{a,b}`).
-            Stored in *self.propability_fs_matrix* 
+            Stored in *self.propability_fs_matrix*
             (probability given in :math:`\\frac{1}{fs}`)
         *   the probablity to jump to the neighbor
 
@@ -1759,7 +1759,7 @@ class VoronoiNetwork():
 
 
         ############# STOCHASTIC MATRIX, PROBABILITY MATRIX ############
-        # Let's look at the propabilities that an ion at site i will be found at 
+        # Let's look at the propabilities that an ion at site i will be found at
         # sound j after:
         # We call this matrix stochastic_matrix
         # let's produce another matrix, the propability_matrix
@@ -1973,9 +1973,9 @@ class VoronoiNetwork():
         leg.get_frame().set_alpha(0.3)
 
         # plotting the right side of top row, connectivity graph
-        
+
         ax1 = fig.add_subplot(gs[0,2:], projection='3d')
-        
+
         if aminice is None:
             niceness = ''
             bgcolor = "white"
@@ -1987,7 +1987,7 @@ class VoronoiNetwork():
             bgcolor = "#F7A4A4"
         ax1.set_axis_bgcolor(bgcolor)
         plt.title(r"{}Structure (${}$) and pathways".format(
-                niceness, 
+                niceness,
                 ''.join([
                     '{}_{{{}}}'.format(atom, atoms.count(atom))
                     for atomindex, atom
@@ -2593,7 +2593,7 @@ def collapse_into_unit_cell(point, cell):
     # point in crystal coordinates
     points_in_crystal = np.dot(invcell,point).tolist()[0]
     #point collapsed into unit cell
-    points_in_unit_cell = [i%1 for i in points_in_crystal]
+    points_in_unit_cell = [i%1.0 for i in points_in_crystal]
     return np.dot(cell.T, points_in_unit_cell).tolist()
 
 def is_in_unit_cell(point, cell):
@@ -2601,7 +2601,7 @@ def is_in_unit_cell(point, cell):
     Applies linear transformation to coordinate system based on crystal lattice
     vectors. The inverse of that inverse transformation matrix with the point
     given results in the point being given as a multiples of lattice vectors
-    Than take the integer of the rows to find how many times you have to shift 
+    Than take the integer of the rows to find how many times you have to shift
     the point back
     """
     invcell = np.matrix(cell).T.I
@@ -2647,7 +2647,7 @@ def normalize_positions(positions, cell, indices_to_ignore):
     to each other. Centers only by position, masses are not take into account.
 
     :param positions: A numpy array of positions
-    :param cell: the cell as a list 
+    :param cell: the cell as a list
     :param indices_to_ignore: the indices that should be not considered when
         centering, e.g. indices of the diffusing species
 
@@ -2658,7 +2658,7 @@ def normalize_positions(positions, cell, indices_to_ignore):
     center_of_atoms = np.array([
             np.mean([
                 c
-                for index, c 
+                for index, c
                 in enumerate(components)
                 if index not in indices_to_ignore
             ])
@@ -2736,8 +2736,3 @@ if __name__ == '__main__':
     #~ vn.plot_track_results() # plots
     #~ vn.jump_analysis() # jump analysis, but that should be done only for long trajectories
     #~ vn.plot_jump_analysis() #Plotting the results of jump analysis
-
-    
-    
-    
-    
