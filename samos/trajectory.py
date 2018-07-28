@@ -43,7 +43,7 @@ class Trajectory(AttributedArray):
     *   Femtoseconds for times
     *   Angstrom for coordinates
     *   eV for energies
-    *   Masses and cells are set via the _atoms member, an ase.Atoms instance and units as in ase are used. 
+    *   Masses and cells are set via the _atoms member, an ase.Atoms instance and units as in ase are used.
     """
     _TIMESTEP_KEY = 'timestep_fs'
     _POSITIONS_KEY = 'positions'
@@ -162,7 +162,7 @@ class Trajectory(AttributedArray):
 
     def get_forces(self):
         return self.get_array(self._FORCES_KEY)
-        
+
     def get_step_atoms(self, index):
         """
         For a set stepindex, returns an atoms instance with all the settings from that step.
@@ -206,5 +206,5 @@ class Trajectory(AttributedArray):
             factors = [1]*len(masses)
 
         self.set_positions(recenter_positions(self.get_positions(), masses, factors))
-        self.set_velocities(recenter_velocities(self.get_velocities(), masses, factors))
-
+        if 'velocities' in self:
+            self.set_velocities(recenter_velocities(self.get_velocities(), masses, factors))

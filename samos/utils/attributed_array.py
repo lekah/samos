@@ -45,6 +45,8 @@ class AttributedArray(object):
                 raise ValueError("Second dimension of array does not match the number of atoms")
         self._arrays[name] = array
 
+    def __contains__(self, arrayname):
+        return arrayname in self._arrays
 
     def get_array(self, name):
         try:
@@ -80,7 +82,7 @@ class AttributedArray(object):
         """
         import tarfile, tempfile
         from inspect import getmembers, ismethod
-        
+
         temp_folder = tempfile.mkdtemp()
         for funcname, func in getmembers(self, predicate=ismethod):
             if funcname.startswith('_save_'):
@@ -94,7 +96,7 @@ class AttributedArray(object):
         for arrayname, array in self._arrays.items():
             np.save(join(folder_name, '{}.npy'.format(arrayname)), array)
 
-    
+
 
 
     def _save_attributes(self, folder_name):
@@ -136,4 +138,3 @@ class AttributedArray(object):
                 raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
             new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
         return new
-
