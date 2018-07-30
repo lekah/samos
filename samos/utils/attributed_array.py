@@ -1,6 +1,7 @@
 from json import dumps
 import numpy as np
 
+import shutil
 
 class AttributedArray(object):
     _ATTRIBUTE_FILENAME = 'attributes.json'
@@ -116,25 +117,31 @@ class AttributedArray(object):
         import tarfile, tempfile, json, os
         from os.path import join
         temp_folder = tempfile.mkdtemp()
-        with tarfile.open(filename, "r:gz", format=tarfile.PAX_FORMAT) as tar:
-            tar.extractall(temp_folder)
 
-        files_in_tar = set(os.listdir(temp_folder))
+        try:
+            with tarfile.open(filename, "r:gz", format=tarfile.PAX_FORMAT) as tar:
+                tar.extractall(temp_folder)
 
-        with open(join(temp_folder, cls._ATTRIBUTE_FILENAME)) as f:
-            attributes = json.load(f)
-        files_in_tar.remove(cls._ATTRIBUTE_FILENAME)
-        new = cls()
-        for k,v in attributes.items():
-            new.set_attr(k, v)
+            files_in_tar = set(os.listdir(temp_folder))
 
-        if cls._ATOMS_FILENAME in files_in_tar:
-            from ase.io import read
-            new.set_atoms(read(join(temp_folder, cls._ATOMS_FILENAME)))
-            files_in_tar.remove(cls._ATOMS_FILENAME)
+            with open(join(temp_folder, cls._ATTRIBUTE_FILENAME)) as f:
+                attributes = json.load(f)
+            files_in_tar.remove(cls._ATTRIBUTE_FILENAME)
+            new = cls()
+            for k,v in attributes.items():
+                new.set_attr(k, v)
 
-        for array_file in files_in_tar:
-            if not array_file.endswith('.npy'):
-                raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
-            new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
+            if cls._ATOMS_FILENAME in files_in_tar:
+                from ase.io import read
+                new.set_atoms(read(join(temp_folder, cls._ATOMS_FILENAME)))
+                files_in_tar.remove(cls._ATOMS_FILENAME)
+
+            for array_file in files_in_tar:
+                if not array_file.endswith('.npy'):
+                    raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
+                new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
+        except Exception as e:
+            shutil.rmtree(temp_folder)
+            raise e
+        shutil.rmtree(temp_folder)
         return new
