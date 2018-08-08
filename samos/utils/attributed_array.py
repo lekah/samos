@@ -139,7 +139,7 @@ class AttributedArray(object):
             for array_file in files_in_tar:
                 if not array_file.endswith('.npy'):
                     raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
-                new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file)))
+                new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file), mmap_mode='r'))
         except Exception as e:
             shutil.rmtree(temp_folder)
             raise e
