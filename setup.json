@@ -25,12 +25,11 @@
         "numpy>=1.14.0", 
         "ase>=3.15.0",
         "scipy>=1.0.0",
-        "matplotlib>=2.1.2",
-        "qe-tools==1.1.0"
+        "matplotlib>=2.1.2"
     ],
     "extras_requires":{},
     "license": "MIT License", 
     "name": "samos", 
     "url": "https://github.com/lekah/samos", 
-    "version": "0.1.0"
+    "version": "0.2.0"
 }
