@@ -74,9 +74,9 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
     positions = trajectory.get_positions()
 
     nstep, nat,_ = positions.shape
-    symbols = trajectory.symbols
+    symbols = trajectory.atoms.get_chemical_symbols()
+    starting_pos = trajectory.atoms.get_positions()
 
-    starting_pos = positions[0]
 
     if not outputfile.endswith('.xsf'):
         outputfile += '.xsf'
@@ -110,13 +110,6 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
     print "Box is  {} x {} x {}".format(a,b,c)
     print "Writing xsf file to", format(outputfile)
 
-
-    #~ if pos_units == 'angstrom':
-        #~ conversion=1.0
-    #~ elif pos_units in ('bohr', 'atomic'):
-        #~ conversion=0.529177
-    #~ else:
-        #~ raise NotImplementedError
 
     write_xsf_header(
             [s for i, s in enumerate(symbols, start=1) if i not in indices_i_care],
@@ -165,29 +158,31 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
 if __name__ == '__main__':
     # Defining the command line arguments:
     from argparse import ArgumentParser
+    from ase.io import read
+    from samos.trajectory import Trajectory
+    from samos.io.ase_io import read_positions_with_ase
     ap = ArgumentParser()
-    ap.add_argument('positionsf', type=str)
-    ap.add_argument('-p', '--pos-units', choices=('angstrom', 'bohr'), required=True)
-    ap.add_argument('-o', '--outputfile', default='out.xsf', type=str)
-    ap.add_argument('-q', '--qeinputf', type=str)
+
+
+    ap.add_argument('cif', help='Cif file with structure')
+    ap.add_argument('positions', help='a trajectory file to read')
+    
     ap.add_argument('-n', '--n-sigma', type=int, default=3)
     ap.add_argument('-d', '--density', type=float, default=0.1, help='nr of grid points per angstrom')
-    ap.add_argument('-r', '--recenter', action='store_true')
+    # ap.add_argument('-r', '--recenter', action='store_true')  N
     ap.add_argument('--istart', help='starting point', type=int, default=1)
-    ap.add_argument('--istop', help='ending point', type=int)
+    ap.add_argument('--istop', help='ending point', type=int, default=None)
+    ap.add_argument('-i', '--stepsize', help='stepsize in trajectory', default=1)
     ap.add_argument('-s', '--sigma', help='Value of sigma in ANGSTROM', type=float, default=0.3)
+
     ap.add_argument('-e', '--element', help='Density of this atom-type', type=str, default='Li')
-    ap.add_argument('--nat', type=int, help='different number of atoms in file')
-    ap.add_argument('--with-symbols', action='store_true', help='Position is printed with a symbol before')
+    ap.add_argument('-o', '--outputfile', help='outputfile', default='out.xsf')
 
     # Parsing the arguments:
     parsed_args = vars(ap.parse_args(sys.argv[1:]))
 
-    qeinputf = parsed_args.pop('qeinputf')
-    if qeinputf is None:
-        raise NotImplementedError("I need to read cell and positions from QE-input file")
-
-    cell, symbols, positions, species = get_structuredata_from_qeinput(filepath=qeinputf)
-    main_gaussian_density(cell=cell, symbols=symbols, positions=positions, **parsed_args)
-
+    t = Trajectory()
+    t.set_atoms(read(parsed_args.pop('cif')))
+    t.set_array(t._POSITIONS_KEY, read_positions_with_ase(parsed_args.pop('positions')), check_nat=False)
+    get_gaussian_density(t, **parsed_args)
 
