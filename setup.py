@@ -10,6 +10,10 @@ ext2 = Extension(
         name = 'samos.lib.mdutils',
         sources = ['samos/lib/mdutils.f90'],
     )
+ext3 = Extension(
+        name = 'samos.lib.rdf',
+        sources = ['samos/lib/rdf.f90'],
+    )
 
 if __name__ == '__main__':
     with open('setup.json', 'r') as info:
@@ -18,6 +22,6 @@ if __name__ == '__main__':
         include_package_data=True,
         packages=find_packages(),
         package_data = {'': ['*.f90']},
-        ext_modules = [ext1, ext2],
+        ext_modules = [ext1, ext2, ext3],
         **kwargs
     )
