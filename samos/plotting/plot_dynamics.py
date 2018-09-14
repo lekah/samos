@@ -23,14 +23,14 @@ def plot_msd_isotropic(msd,
     timestep_fs = attrs['timestep_fs']
 
     ax.set_ylabel(r'MSD $\left[ \AA^2 \right]$')
-    ax.set_xlabel('Time $t$ [fs]')
+    ax.set_xlabel('Time $t$ [ps]')
 
-    times_msd = timestep_fs*stepsize*np.arange(
+    times_msd = timestep_fs/1000.0*stepsize*np.arange(
                 attrs.get('t_start_dt')/stepsize,
                 attrs.get('t_end_dt')/stepsize
             )
 
-    times_fit =  timestep_fs*stepsize*np.arange(
+    times_fit =  timestep_fs/1000.0*stepsize*np.arange(
                 attrs.get('t_start_fit_dt')/stepsize,
                 attrs.get('t_end_fit_dt')/stepsize
             )
@@ -62,7 +62,7 @@ def plot_msd_isotropic(msd,
             for iblock in range(len(msd_this_traj)):
                 slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
                 ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=alpha_block,)
-                ax.plot(times_fit, [slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=alpha_fit)
+                ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=alpha_fit)
     if not(no_legend):
         leg = ax.legend(loc=2)
         leg.get_frame().set_alpha(0.)

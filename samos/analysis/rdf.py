@@ -1,10 +1,10 @@
 import numpy as  np
 from ase import Atoms
 from samos.trajectory import Trajectory
+from samos.utils.attributed_array import AttributedArray
 from samos.lib.rdf import calculate_rdf
 import itertools
 
-from matplotlib import pyplot as plt
 
 class RDF(object):
     def __init__(self, **kwargs):
@@ -25,6 +25,7 @@ class RDF(object):
         :param float density: The grid density. The number of bins is given by radius/density
         """
         atoms = self._trajectory.atoms
+        volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
         if istop is None:
             istop = len(positions)
@@ -33,19 +34,17 @@ class RDF(object):
         cell = np.array(atoms.cell)
         cellI = np.linalg.inv(cell)
         chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
-        for spec1,  spec2 in species_pairs:            
+        rdf_res = AttributedArray()
+        rdf_res.set_attr('species_pairs', species_pairs)
+        for spec1,  spec2 in species_pairs:
             ind1 = np.where(chem_sym == spec1)[0] + 1 # +1 for fortran indexing
             ind2 = np.where(chem_sym == spec2)[0] + 1 
-            rdf_this_spec_pair = calculate_rdf(positions, istart, istop, stepsize,
-                radius, cell, 
+            density = float(len(ind2)) / volume
+            rdf, integral, radii = calculate_rdf(positions, istart, istop, stepsize,
+                radius, density, cell, 
                 cellI, ind1, ind2, nbins)
-                
-            binsize = radius/float(nbins)
-            R = np.arange(0, radius, binsize)+0.5*binsize
-            plt.plot(R, rdf_this_spec_pair, label='{}-{}'.format(spec1, spec2))
-        plt.legend()
-        plt.show()
-            # ~ return
-        # ~ positions, istart, istop, stepsize,      & !, stepsize &
-        # ~ radius, cell, invcell , indices1, indices2, nbins, nstep, nat, nat1, nat2 &
-    # ~ )
+            rdf_res.set_array('rdf_{}_{}'.format(spec1, spec2), rdf)
+            rdf_res.set_array('int_{}_{}'.format(spec1, spec2), integral)
+            rdf_res.set_array('radii_{}_{}'.format(spec1, spec2), radii)
+        return rdf_res
+            
