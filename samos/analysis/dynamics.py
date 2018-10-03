@@ -331,15 +331,17 @@ class DynamicsAnalyzer(object):
                     'slope_msd_std':np.std(slopes, axis=0),
                     'slopes_intercepts':slopes_intercepts.tolist()})
                 results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(slopes)-1)
+                dimensionality_factor = float(2)
             else:
                 results_dict[atomic_species].update({
                     'slope_msd_mean':np.mean(slopes),
                     'slope_msd_std':np.std(slopes)})
                 results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(slopes)-1)
+                dimensionality_factor = float(6)
 
-            results_dict[atomic_species]['diffusion_mean_cm2_s'] =  1e-1 / 6.* results_dict[atomic_species]['slope_msd_mean']
-            results_dict[atomic_species]['diffusion_std_cm2_s']  =  1e-1 / 6.* results_dict[atomic_species]['slope_msd_std']
-            results_dict[atomic_species]['diffusion_sem_cm2_s']  =  1e-1 / 6.* results_dict[atomic_species]['slope_msd_sem']
+            results_dict[atomic_species]['diffusion_mean_cm2_s'] =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_mean']
+            results_dict[atomic_species]['diffusion_std_cm2_s']  =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_std']
+            results_dict[atomic_species]['diffusion_sem_cm2_s']  =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_sem']
 
 
             if decomposed:

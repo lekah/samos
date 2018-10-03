@@ -52,6 +52,7 @@ SUBROUTINE calculate_rdf(&
                 distance_real(1:3) = MATMUL(cell, distance_crystal)
                 ! Calculate the norm of vector
                 distance_norm = SQRT(SUM(distance_real(1:3)*distance_real(1:3)))
+                print*, iat1, iat2, distance_norm
                 ! and in which bin it belongs:
                 ! Here I take the nearest bin.
                 bin = nint( distance_norm / binsize )
@@ -78,4 +79,103 @@ SUBROUTINE calculate_rdf(&
     end do
 
 END SUBROUTINE calculate_rdf
+
+
+SUBROUTINE calculate_angular_spec(&
+        positions, istart, istop, stepsize,      & !, stepsize &
+        radius, cell, invcell , indices1, indices2, indices3,  &
+        nbins, angular_spec, radii, &
+        nstep, nat, nat1, nat2, nat3 &
+    )
+    IMPLICIT NONE
+
+    integer, intent(in)         ::          istart, istop, stepsize ! The ionic step I start and I end
+    real*8, intent(in)          ::          cell(3,3), invcell(3,3)
+    
+    integer, intent(in)         ::          nat, nat1, nat2, nat3  ! The total number of atoms, and number of atoms that I calculate the den
+    integer, intent(in)         ::          nstep, nbins  ! The total number of atoms, and number of atoms that I calculate the den
+    real*8, intent(in)          ::          positions(nstep, nat,3)
+
+    integer, intent(in)         ::          indices1(nat1) ! The indices of the atoms that I calculate the density from 
+    integer, intent(in)         ::          indices2(nat2)
+    integer, intent(in)         ::          indices3(nat3)
+
+    real*8, intent(in)          ::          radius ! The maximum radius I should go for
+    real, parameter             ::          pi = 3.1415927
+
+    real*8, intent(out) :: angular_spec(nbins), radii(nbins) ! That's where I count
+    real*8 :: distance_real2(1:3), distance_real3(1:3), distance_crystal(1:3)
+    real*8 :: binsize, distance_norm2, distance_norm3, factor, angle
+
+    integer :: iat1, iat2, iat3, istep, bin, idim !, idim, iat
+    ! This is the amount I augment the counter by, so that I correctly
+    ! mean over the steps and the number of atoms
+    factor = 1.0D0 * DBLE(stepsize) / DBLE(istop+1-istart)  / DBLE(nat1)
+    angular_spec(:) = 0.0D0
+!~     binsize = 180.0D0 / DBLE (nbins)
+    binsize = 180.0D0 / DBLE (nbins)
+    do istep=istart, istop, stepsize
+        do iat1=1,nat1
+            do iat2=1, nat2
+                if ( indices2(iat2) .eq. indices1(iat1) ) CYCLE
+                ! I calculate the distance between atom1 and atom2 in real space:
+                distance_real2(1:3) = positions(istep, indices2(iat2), 1:3) - &
+                        positions(istep, indices1(iat1), 1:3)
+                ! I multiply with invcell to calculate the distance
+                ! in crystal coordinates, and take the modulo 1 to get the distance
+                ! vector into the unit cell
+                distance_crystal(1:3) = MOD(MATMUL(invcell, distance_real2), 1.0)
+                ! The following gets the shortest distance of atom1 to atom2 in
+                ! an orthorhombic system. For accute cells, this might be wrong.
+                DO idim=1, 3
+                    IF ( distance_crystal(idim) < -0.5 ) THEN
+                        distance_crystal(idim) = distance_crystal(idim) + 1.0D0
+                    ELSEIF ( distance_crystal(idim) > 0.5 ) THEN
+                        distance_crystal(idim) = 1.0D0 - distance_crystal(idim)
+                    ENDIF
+                ENDDO
+                distance_real2(1:3) = MATMUL(cell, distance_crystal)
+                ! Calculate the norm of vector
+                distance_norm2 = SQRT(SUM(distance_real2(1:3)*distance_real2(1:3)))
+                if ( distance_norm2 > radius ) CYCLE
+                ! and in which bin it belongs:
+                ! Here I take the nearest bin.
+                do iat3=1, nat3
+                    if ( indices3(iat3) .eq. indices1(iat1) ) CYCLE
+                    if ( indices3(iat3) .eq. indices2(iat2) ) CYCLE
+                    distance_real3(1:3) = positions(istep, indices3(iat3), 1:3) - &
+                            positions(istep, indices1(iat1), 1:3)
+                    ! I multiply with invcell to calculate the distance
+                    ! in crystal coordinates, and take the modulo 1 to get the distance
+                    ! vector into the unit cell
+                    distance_crystal(1:3) = MOD(MATMUL(invcell, distance_real3), 1.0)
+                    ! The following gets the shortest distance of atom1 to atom2 in
+                    ! an orthorhombic system. For accute cells, this might be wrong.
+                    DO idim=1, 3
+                        IF ( distance_crystal(idim) < -0.5 ) THEN
+                            distance_crystal(idim) = distance_crystal(idim) + 1.0D0
+                        ELSEIF ( distance_crystal(idim) > 0.5 ) THEN
+                            distance_crystal(idim) = 1.0D0 - distance_crystal(idim)
+                        ENDIF
+                    ENDDO
+                    distance_real3(1:3) = MATMUL(cell, distance_crystal)
+                    ! Calculate the norm of vector
+                    distance_norm3 = SQRT(SUM(distance_real3(1:3)*distance_real3(1:3)))
+                    if ( distance_norm3 > radius ) CYCLE
+                    angle = 180.0D0/pi * acos(sum(distance_real2(1:3) * distance_real3(1:3)) / ( distance_norm2*distance_norm3))
+!~                     if ( angle > 180.0D0 ) angle = 360.0D0 - angle
+!~                     print*, istep, indices1(iat1), indices2(iat2), indices3(iat3), angle
+                    bin = nint( angle / binsize )
+                    if ( bin > 0 .and. bin <= nbins ) angular_spec(bin) = angular_spec(bin)  + &
+                            factor  / distance_norm2**2 / distance_norm3**2
+                enddo
+            enddo
+        end do
+    enddo
+    do bin=1, nbins
+        radii(bin) = DBLE(bin) * binsize
+    end do
+
+
+END SUBROUTINE calculate_angular_spec
 
