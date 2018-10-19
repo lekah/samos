@@ -52,7 +52,6 @@ SUBROUTINE calculate_rdf(&
                 distance_real(1:3) = MATMUL(cell, distance_crystal)
                 ! Calculate the norm of vector
                 distance_norm = SQRT(SUM(distance_real(1:3)*distance_real(1:3)))
-                print*, iat1, iat2, distance_norm
                 ! and in which bin it belongs:
                 ! Here I take the nearest bin.
                 bin = nint( distance_norm / binsize )

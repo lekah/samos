@@ -19,7 +19,7 @@ def plot_rdf(rdf_res,
         ax2 = ax.twinx()
 
     attrs = rdf_res.get_attrs()
-    
+
     handles = []
     for spec1, spec2 in attrs['species_pairs']:
         rdf = rdf_res.get_array('rdf_{}_{}'.format(spec1, spec2))
@@ -27,13 +27,26 @@ def plot_rdf(rdf_res,
         radii = rdf_res.get_array('radii_{}_{}'.format(spec1, spec2))
         plot_params_ = deepcopy(plot_params)
         plot_params2_ = deepcopy(plot_params2)
+        
+        if 'color' in plot_params_:
+            pass
+        elif 'colordict' in plot_params_:
+            plot_params_['color'] = plot_params_.pop('colordict')['{}_{}'.format(spec1, spec2)]
         if 'label' not in plot_params_ and not no_label:
-            plot_params_['label'] = r'$g(r)$ {}-{}'.format(spec1, spec2)
+            if 'labelspec' in plot_params_:
+                labelspec = plot_params_.pop('labelspec')
+                plot_params_['label'] = r'$g(r)_{{{}-{}}}$ {}'.format(spec1, spec2, labelspec)
+            else:
+                plot_params_['label'] = r'$g(r)$ {}-{}'.format(spec1, spec2)
         if 'label' not in plot_params2_ and not no_label:
             plot_params2_['label'] = r'$\int g(r)$ {} {}'.format(spec1, spec2)
         l, = ax.plot(radii, rdf, **plot_params_)
         handles.append(l)
-        if 'color' not in plot_params2_:
+        if 'color' in plot_params2_:
+            pass
+        if 'colordict'in plot_params2_:
+            plot_params2_['color'] = plot_params2_.pop('colordict')['{}_{}'.format(spec1, spec2)]
+        else:
             plot_params2_['color'] = l.get_color()
         l2, = ax2.plot(radii, integral, '--', **plot_params2_)
         handles.append(l2)

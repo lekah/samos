@@ -22,11 +22,12 @@ class BaseAnalyzer(object):
         pass
 
 class RDF(BaseAnalyzer):
-    def run(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
+    def run_fort(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
         """
         :param float radius: The radius for the calculation of the RDF
         :param float density: The grid density. The number of bins is given by radius/density
         """
+        raise NotImplemented("This is not fully implemented")
         atoms = self._trajectory.atoms
         volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
@@ -51,7 +52,7 @@ class RDF(BaseAnalyzer):
             rdf_res.set_array('radii_{}_{}'.format(spec1, spec2), radii)
         return rdf_res
 
-    def run2(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
+    def run(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
         def get_indices(spec, chem_sym):
             if isinstance(spec, str):
                 return np.where(chem_sym == spec)[0].tolist()
@@ -96,6 +97,7 @@ class RDF(BaseAnalyzer):
             else:
                 pairs_of_atoms = [(i,j) for i in ind1 for j in ind2 if i!=j]
                 pair_factor = 1.0
+
             ind_pair1, ind_pair2 = zip(*pairs_of_atoms)
             diff_real_unwrapped = (positions[istart:istop:stepsize, ind_pair2, :] -  positions[istart:istop:stepsize, ind_pair1, :]).reshape(-1, 3)
             density = float(len(ind2)) / volume
@@ -103,18 +105,22 @@ class RDF(BaseAnalyzer):
             diff_real_wrapped = np.dot(diff_crystal_wrapped, cell)
             
             shortest_distances = cdist(diff_real_wrapped, corners).min(axis=1)
-            hist, bin_edges = np.histogram(shortest_distances, bins=nbins, range=(0,radius), density=len(ind2)*pair_factor)
+
+            hist, bin_edges = np.histogram(shortest_distances, bins=nbins, range=(0,radius))
             radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
 
-            rdf = hist / ((4.0 / 3.0 * np.pi ) * (3.0* radii**2 *binsize + 0.75*binsize**3))
+            # now I need to normalize the histogram, by the number of steps taken, and the number of species1
+            hist = hist *pair_factor /  float(len(np.arange(istart, istop, stepsize))) / float(len(ind1))
+
+            rdf = hist / (4.0 * np.pi * radii**2 * binsize )  / (len(ind2)/volume)
             integral = np.empty(len(rdf))
             sum_ = 0.0 
             for i in xrange(len(integral)):
-                sum_ += rdf[i]
+                sum_ += hist[i]
                 integral[i] = sum_
-            print label
+
             rdf_res.set_array('rdf_{}'.format(label), rdf)
-            rdf_res.set_array('int_{}'.format(label), rdf)
+            rdf_res.set_array('int_{}'.format(label), integral)
             rdf_res.set_array('radii_{}'.format(label), radii)
 
 
