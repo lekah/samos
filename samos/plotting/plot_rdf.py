@@ -51,9 +51,9 @@ def plot_rdf(rdf_res,
         l2, = ax2.plot(radii, integral, '--', **plot_params2_)
         handles.append(l2)
 
-    ax.set_xlabel(r'r / $\AA$')
+    ax.set_xlabel(r'$r$ $\left(\mathrm{\AA}\right)$')
     ax.set_ylabel(r'$g(r)$')
-    ax2.set_ylabel(r'$\int g(r) dr$')
+    ax2.set_ylabel(r'$\int \rho(r) \mathrm{d}r$')
     if show:
         plt.show()
     return handles

@@ -22,8 +22,8 @@ def plot_msd_isotropic(msd,
     stepsize = attrs.get('stepsize_t', 1)
     timestep_fs = attrs['timestep_fs']
 
-    ax.set_ylabel(r'MSD $\left[ \AA^2 \right]$')
-    ax.set_xlabel('Time $t$ [ps]')
+    ax.set_ylabel(r'$\mathrm{MSD}(t)$ $\left( \mathrm{\AA}^2 \right) $ ')
+    ax.set_xlabel(r'$t$ $\left( \mathrm{ps}\right)$')
 
     times_msd = timestep_fs/1000.0*stepsize*np.arange(
                 attrs.get('t_start_dt')/stepsize,
@@ -50,7 +50,7 @@ def plot_msd_isotropic(msd,
         if no_label or (exclude_from_label and atomic_species in exclude_from_label):
             label_this_species = None
         elif label is None:
-            label_this_species=r'$D_{{{}}}^{{MSD}}=( {:.2e} \pm {:.2e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem)
+            label_this_species=r'$D_{{{}}}^{{MSD}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem)
         else:
             label_this_species = '{} in {}'.format(atomic_species, label)
 
@@ -68,6 +68,78 @@ def plot_msd_isotropic(msd,
         leg.get_frame().set_alpha(0.)
     if show:
         plt.show()
+
+def plot_msd_anisotropic(msd,
+        ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False, 
+        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
+        diagonal_only=False, label_diagonal=True, **kwargs):
+
+    if ax is None:
+        fig = plt.figure(**kwargs)
+        ax = fig.add_subplot(1,1,1)
+    attrs = msd.get_attrs()
+    if not(attrs['decomposed']):
+        raise NotImplementedError("Only plotting decomposed with this functions")
+
+    nr_of_trajectories = attrs['nr_of_trajectories']
+    t_start_fit_dt = attrs['t_start_fit_dt']
+    stepsize = attrs.get('stepsize_t', 1)
+    timestep_fs = attrs['timestep_fs']
+
+    ax.set_ylabel(r'$\mathrm{MSD}(t)$ $\left( \mathrm{\AA}^2 \right) $ ')
+    ax.set_xlabel(r'$t$ $\left( \mathrm{ps}\right)$')
+
+    times_msd = timestep_fs/1000.0*stepsize*np.arange(
+                attrs.get('t_start_dt')/stepsize,
+                attrs.get('t_end_dt')/stepsize
+            )
+
+    times_fit =  timestep_fs/1000.0*stepsize*np.arange(
+                attrs.get('t_start_fit_dt')/stepsize,
+                attrs.get('t_end_fit_dt')/stepsize
+            )
+    if species_of_interest is None:
+        species_of_interest = attrs['species_of_interest']
+
+    colors = ['r', 'orange', 'orange', 'orange', 'g', 'orange','orange', 'orange', 'b']
+    for index_of_species, atomic_species in enumerate(species_of_interest):
+        diff = attrs[atomic_species]['diffusion_mean_cm2_s']
+        diff_sem = attrs[atomic_species]['diffusion_sem_cm2_s']
+        diff_std = attrs[atomic_species]['diffusion_std_cm2_s']
+        #color = get_color(atomic_species, scheme=color_scheme)
+        msd_mean = msd.get_array('msd_decomposed_{}_mean'.format(atomic_species))
+        msd_sem = msd.get_array('msd_decomposed_{}_sem'.format(atomic_species))
+
+        if no_label or (exclude_from_label and atomic_species in exclude_from_label):
+            label_this_species = False
+        else:
+            label_this_species = True
+        count=0
+        for i in range(3):
+            for j in range(3):
+                color = colors[count]
+                count += 1
+                if ( diagonal_only and i!=j):
+                    continue
+                label = r'$D_{{{}{}}}^{{{}}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(i,j,
+                     atomic_species, diff[i][j], diff_sem[i][j]) if (label_this_species and (i==j or label_diagonal)) else None
+                
+                ax.plot(times_msd,msd_mean[:,i,j], color=color, 
+                        linewidth=3., label=label)
+                for itraj in range(nr_of_trajectories):
+                    msd_this_traj =  msd.get_array('msd_decomposed_{}_{}'.format(atomic_species, itraj))
+                    slopes_intercepts_this_traj =  msd.get_array('slopes_intercepts_decomposed_{}_{}'.format(atomic_species, itraj))
+                    for iblock in range(len(msd_this_traj)):
+                        slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock][i][j]
+                        ax.plot(times_msd, msd_this_traj[iblock,:,i,j], color=color, alpha=alpha_block,lw=0.5, zorder=1)
+                        ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], 
+                                color=color, linestyle='--', alpha=alpha_fit, zorder=2, lw=0.5)
+    if not(no_legend):
+        leg = ax.legend(loc=2)
+        leg.get_frame().set_alpha(0.)
+    if show:
+        plt.show()
+
 def plot_vaf_isotropic(vaf,
         ax=None, no_legend=False, species_of_interest=None, show=False,
         color_scheme='jmol', **kwargs):

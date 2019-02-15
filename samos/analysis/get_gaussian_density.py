@@ -117,7 +117,6 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
             cell, None, outfilename=outputfile, xdim=n1, ydim=n2, zdim=n3)
 
 
-        
     S = np.matrix(np.diag([1,1,1,-(sigma*n_sigma/density)**2]))
     cellT = cell.T
     cellI = np.matrix(cell).I
