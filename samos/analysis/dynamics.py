@@ -668,9 +668,9 @@ class DynamicsAnalyzer(object):
             block_length_dt = None
         species_of_interest = kwargs.pop('species_of_interest', None) or self.get_species_of_interest()
         smothening = int(kwargs.pop('smothening', 1))
+        window = kwargs.pop('window', 'boxcar')
         if kwargs:
             raise InputError("Uncrecognized keywords: {}".format(kwargs.keys()))
-
 
 
         fourier_results = dict(smothening=smothening)
@@ -686,20 +686,24 @@ class DynamicsAnalyzer(object):
 
                 if nr_of_blocks > 0:
                     nr_of_blocks_this_traj = nr_of_blocks
+                    # Use the number of blocks specified by user
+                    split_number = nstep / nr_of_blocks_this_traj
                 elif block_length_dt > 0:
-                    nr_of_blocks_this_traj   = nstep / block_length_dt
+                    nr_of_blocks_this_traj = nstep / block_length_dt
+                    # Use the precise length specified by user
+                    split_number = block_length_dt
                 else:
                     raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
 
                 # I need to have blocks of equal length, and use the split method
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
-                split_number = vel_array.shape[0] / nr_of_blocks_this_traj
-
                 blocks = np.array(np.split(vel_array[:nr_of_blocks_this_traj*split_number], nr_of_blocks_this_traj, axis=0))
                 nblocks = len(blocks)
+                if (self._verbosity > 0):
+                    print 'nblocks = {}, blocks.shape = {}, block_length_ps = {}'.format(nblocks, blocks.shape, blocks.shape[1]*timestep_fs)
 
                 freq, pd = signal.periodogram(blocks,
-                    fs=timestep_fs, axis=1, return_onesided=True) # Show result in THz
+                    fs=1.e3/timestep_fs, window=window, axis=1, return_onesided=True) # Show result in THz
                 # I mean over all atoms of this species and directions
                 # In the future, maybe consider having a direction resolved periodogram?
                 pd_this_species_this_traj = pd.mean(axis=(2,3))
