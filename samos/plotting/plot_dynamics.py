@@ -4,11 +4,33 @@ import numpy as np
 from ase.data import atomic_numbers
 from samos.utils.colors import get_color
 
+def my_format(real, decimals=2):
+    exp = np.floor(np.log10(real))
+    pref = real / 10**exp
+    return '{:.{prec}f} \cdot 10^{{{}}}'.format(pref, int(exp), prec=decimals)
 
+def format_mean_err(mean, err, decimals=2):
+    if np.isnan(mean):
+        return 'N/A'
+    exp_mean = int(np.floor(np.log10(np.abs(mean))))
+    pref_mean = mean / 10.0**exp_mean
+    if np.isnan(err):
+        return '\left({:.{prec}f}\\right)\cdot 10^{{{}}}'.format(pref_mean, exp_mean, prec=decimals)
+    else:
+        exp_err = int(np.floor(np.log10(np.abs(err))))
+        pref_err = err / 10.0**exp_err
+        if exp_mean == exp_err:
+            return '\left({:.{prec}f} \pm {:.{prec}f} \\right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
+        else:
+            return '\left( {:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}} \\right)'.format(
+                pref_mean,exp_mean, pref_err, exp_err, prec=decimals)
+
+    
 
 def plot_msd_isotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
-        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None, **kwargs):
+        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
+        decimals=1, **kwargs):
 
     if ax is None:
         fig = plt.figure(**kwargs)
@@ -50,11 +72,21 @@ def plot_msd_isotropic(msd,
         if no_label or (exclude_from_label and atomic_species in exclude_from_label):
             label_this_species = None
         elif label is None:
-            label_this_species=r'$D_{{{}}}^{{MSD}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem)
+            # label_this_species=r'$D_{{{}}}=\left( {} \pm {} \right) \frac{{cm^2}}{{s}}$'.format(
+                    # atomic_species, my_format(diff, decimals=decimals), my_format(diff_sem, decimals=decimals))
+            label_this_species=r'$D_{{{}}}={} \, \frac{{cm^2}}{{s}}$'.format(
+                    atomic_species, format_mean_err(diff, diff_sem, decimals=decimals))
+
         else:
             label_this_species = '{} in {}'.format(atomic_species, label)
 
-        ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
+        if attrs.get('do_long', False):
+            # reduce number of lines in plot, customize for later!
+            # Keep the legend though!
+            ax.plot([],[], color=color, linewidth=3., label=label_this_species)
+        else:
+            ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
+        
 
         for itraj in range(nr_of_trajectories):
             msd_this_traj =  msd.get_array('msd_isotropic_{}_{}'.format(atomic_species, itraj))
@@ -63,8 +95,11 @@ def plot_msd_isotropic(msd,
                 slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
                 ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=alpha_block,)
                 ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=alpha_fit)
+            if attrs.get('do_long', False):
+                times_long = timestep_fs/1000.0*stepsize*np.arange(0, attrs['nr_of_t_long_list'][itraj])
+                ax.plot(times_long, msd.get_array('msd_long_{}_{}'.format(atomic_species, itraj)), color=color, linestyle='-', lw=3)
     if not(no_legend):
-        leg = ax.legend(loc=2)
+        leg = ax.legend(loc=2,labelspacing=0.01)
         leg.get_frame().set_alpha(0.)
     if show:
         plt.show()

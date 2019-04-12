@@ -144,6 +144,73 @@ SUBROUTINE calculate_msd_specific_atoms(    &
     msd(:,:) = msd(:, :) / DBLE(block_length_dt) / DBLE(nat_of_interest) * DBLE(stepsize_tau)  ! / DBLE(
 end SUBROUTINE calculate_msd_specific_atoms
 
+
+SUBROUTINE calculate_msd_specific_atoms_max_stats(    &
+        positions,                              &
+        indices_of_interest,                    &
+        msd,                                    &
+        stepsize_t,                             &
+        stepsize_tau,                           &
+        nr_of_t,                                &
+        nstep,                                  &
+        nat,                                    &
+        nat_of_interest                         &
+    )
+
+    ! This subroutine does the same as calculate_msd_specific_atoms,
+    ! but tries to maximize the statistics. It calculates a mean only,
+    ! w/o blocking, but takes every datapoint for it's calculation!
+
+    implicit none
+
+    INTEGER, intent(in)         ::  nstep,  nat,            &   ! Number of timesteps, number of atoms
+                                    nat_of_interest,        &   ! number of atoms of interest
+                                    nr_of_t,                &   ! nr of times of t
+                                    stepsize_t,             &   ! The stepsize, eg 10 to calculate every 10th time
+                                    stepsize_tau                ! The inner stepsize
+
+    REAL*8, intent(in),  dimension(nstep, nat, 3)           :: positions
+    INTEGER, intent(in), dimension(nat_of_interest)         :: indices_of_interest
+    REAL*8, intent(out), dimension(nr_of_t)   :: msd
+
+    ! Local variables:
+    INTEGER                     ::  t, tau,                    &        ! Time variables
+                                    iat, ipol,                  &        ! Atom count
+                                    iat_of_interest, &                      ! Atom count in indices_of interest
+                                    icount
+
+    REAL*8                      ::  msd_this_t, msd_this_t_tau_iat, fcount !, M
+
+    ! Loop over time t. This here is the index that I will give,
+    ! actual time is stepsize_t*t
+    DO t = 1, nr_of_t
+        ! Calculate one value of msd for this t in this block 
+        ! based on the average over atoms and running window defined by tau
+        msd_this_t = 0.0D0
+        icount = 1
+        DO iat_of_interest=1, nat_of_interest
+            iat = indices_of_interest(iat_of_interest)
+            ! Running average achieved by letting tau run through the entire trajectory!
+            DO tau = 1, nstep - t*stepsize_t
+                msd_this_t_tau_iat = 0.0D0
+                ! You do not mean over directions!
+                DO ipol=1, 3
+                    msd_this_t_tau_iat = msd_this_t_tau_iat + &
+                      (positions(tau+stepsize_t*t, iat, ipol)-positions(tau, iat, ipol))**2
+                END DO
+                fcount = DBLE(icount)
+                msd_this_t = (fcount - 1.0D0 ) / fcount * msd_this_t + &
+                        msd_this_t_tau_iat / fcount
+                icount = icount + 1
+
+            END DO
+        END DO
+        msd(t) = msd_this_t
+        print*, t, msd_this_t
+    END DO
+    ! msd(:,:) = msd(:, :) / DBLE(nat_of_interest) * DBLE(stepsize_tau)  ! / DBLE(
+end SUBROUTINE calculate_msd_specific_atoms_max_stats
+
 SUBROUTINE get_com_positions(positions, masses, factors, positions_, nstep, nat)
 
     implicit none
