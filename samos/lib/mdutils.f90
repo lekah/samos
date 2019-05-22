@@ -206,7 +206,6 @@ SUBROUTINE calculate_msd_specific_atoms_max_stats(    &
             END DO
         END DO
         msd(t) = msd_this_t
-        print*, t, msd_this_t
     END DO
     ! msd(:,:) = msd(:, :) / DBLE(nat_of_interest) * DBLE(stepsize_tau)  ! / DBLE(
 end SUBROUTINE calculate_msd_specific_atoms_max_stats
