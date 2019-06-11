@@ -30,7 +30,7 @@ def format_mean_err(mean, err, decimals=2):
 def plot_msd_isotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
         alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
-        decimals=1, **kwargs):
+        color_dict={}, decimals=1, **kwargs):
 
     if ax is None:
         fig = plt.figure(**kwargs)
@@ -62,7 +62,10 @@ def plot_msd_isotropic(msd,
         diff = attrs[atomic_species]['diffusion_mean_cm2_s']
         diff_sem = attrs[atomic_species]['diffusion_sem_cm2_s']
         diff_std = attrs[atomic_species]['diffusion_std_cm2_s']
-        color = get_color(atomic_species, scheme=color_scheme)
+        if atomic_species in color_dict:
+            color = color_dict[atomic_species]
+        else:
+            color = get_color(atomic_species, scheme=color_scheme)
         msd_mean = msd.get_array('msd_isotropic_{}_mean'.format(atomic_species))
         msd_sem = msd.get_array('msd_isotropic_{}_sem'.format(atomic_species))
         p1 = ax.fill_between(
@@ -78,7 +81,7 @@ def plot_msd_isotropic(msd,
                     atomic_species, format_mean_err(diff, diff_sem, decimals=decimals))
 
         else:
-            label_this_species = '{} in {}'.format(atomic_species, label)
+            label_this_species = '{}'.format(label)
 
         if attrs.get('do_long', False):
             # reduce number of lines in plot, customize for later!
