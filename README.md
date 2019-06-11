@@ -8,9 +8,10 @@ Currently implemented are:
   * Radial distribution functions
   * Several plotting utilities
 
-This code is written mostly in Python, the computationally intensive functions are in fortran90 and wrapped with f2py.
+This code is written mostly in Python 2.7, the computationally intensive functions are in fortran90 and wrapped with f2py.
 To install, clone or download this repository, move into the directory of this file, and type:
 
     pip install .
 
 It will install the package and dependencies.
+The transition to Python 3.0 is WIP.
