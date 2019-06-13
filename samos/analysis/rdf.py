@@ -8,10 +8,9 @@ import itertools
 from abc import ABCMeta, abstractmethod
 
 
-class BaseAnalyzer(object):
-    __metaclass__ = ABCMeta
+class BaseAnalyzer(object, metaclass=ABCMeta):
     def __init__(self, **kwargs):
-        for key, val in kwargs.items():
+        for key, val in list(kwargs.items()):
             getattr(self, 'set_{}'.format(key))(val)
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
@@ -72,7 +71,7 @@ class RDF(BaseAnalyzer):
         chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
         cell = np.array(atoms.cell)
         a, b, c = cell
-        range_ = range(0,2)
+        range_ = list(range(0,2))
         corners = [i*a+j*b + k*c for i in range_ for j in range_ for k in range_]
         cellI = np.linalg.inv(cell)
 
@@ -98,7 +97,7 @@ class RDF(BaseAnalyzer):
                 pairs_of_atoms = [(i,j) for i in ind1 for j in ind2 if i!=j]
                 pair_factor = 1.0
 
-            ind_pair1, ind_pair2 = zip(*pairs_of_atoms)
+            ind_pair1, ind_pair2 = list(zip(*pairs_of_atoms))
             diff_real_unwrapped = (positions[istart:istop:stepsize, ind_pair2, :] -  positions[istart:istop:stepsize, ind_pair1, :]).reshape(-1, 3)
             density = float(len(ind2)) / volume
             diff_crystal_wrapped = np.dot(diff_real_unwrapped, cellI) % 1.0
@@ -115,7 +114,7 @@ class RDF(BaseAnalyzer):
             rdf = hist / (4.0 * np.pi * radii**2 * binsize )  / (len(ind2)/volume)
             integral = np.empty(len(rdf))
             sum_ = 0.0 
-            for i in xrange(len(integral)):
+            for i in range(len(integral)):
                 sum_ += hist[i]
                 integral[i] = sum_
 

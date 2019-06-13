@@ -10,7 +10,7 @@ class AttributedArray(object):
         self._arrays = {}
         self._attrs = {}
 
-        for key, val in kwargs.items():
+        for key, val in list(kwargs.items()):
             getattr(self, 'set_{}'.format(key))(val)
 
     def set_array(self, name, array, check_existing=False, check_nstep=False, check_nat=False):
@@ -31,13 +31,13 @@ class AttributedArray(object):
         """
         # First, I call np.array to ensure it's a valid array
         array = np.array(array)
-        if not isinstance(name, basestring):
+        if not isinstance(name, str):
             raise TypeError("Name has to be a string")
         if check_existing:
-            if name in self._arrays.keys():
+            if name in list(self._arrays.keys()):
                 raise ValueError("Name {} already exists".formamt(name))
         if check_nstep:
-            for other_name, other_array in self._arrays.items():
+            for other_name, other_array in list(self._arrays.items()):
                 assert array.shape[0] == other_array.shape[0], (
                     'Number of steps in array {} ({}) is not compliant with array {} ({})'.format(
                             name, array.shape[0],other_name,  other_array.shape[0]))
@@ -94,7 +94,7 @@ class AttributedArray(object):
 
     def _save_arrays(self, folder_name):
         from os.path import join
-        for arrayname, array in self._arrays.items():
+        for arrayname, array in list(self._arrays.items()):
             np.save(join(folder_name, '{}.npy'.format(arrayname)), array)
 
 
@@ -128,7 +128,7 @@ class AttributedArray(object):
                 attributes = json.load(f)
             files_in_tar.remove(cls._ATTRIBUTE_FILENAME)
             new = cls()
-            for k,v in attributes.items():
+            for k,v in list(attributes.items()):
                 new.set_attr(k, v)
 
             if cls._ATOMS_FILENAME in files_in_tar:

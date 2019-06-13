@@ -34,23 +34,23 @@ def read_xsf(filename, fold_positions=False):
             elif skip_lines:
                 skip_lines -= 1
             elif reading_structure:
-                pos = map(float, line.split()[1:])
+                pos = list(map(float, line.split()[1:]))
                 if len(pos) != 3:
                     reading_structure = False
                 else:
                     atoms.append(line.split()[0])
                     positions.append(pos)
             elif reading_nat:
-                nat, _ = map(int, line.split())
+                nat, _ = list(map(int, line.split()))
                 reading_nat = False
                 reading_structure = True
             elif reading_cell:
-                cell.append(map(float, line.split()))
+                cell.append(list(map(float, line.split())))
                 if len(cell) == 3:
                     reading_cell = False
                     reading_grid = True
             elif reading_dims:
-                xdim, ydim, zdim = map(int, line.split())
+                xdim, ydim, zdim = list(map(int, line.split()))
                 rho_of_r = np.zeros([xdim-1,ydim-1,zdim-1])
                 #~ data2 = np.empty(xdim*ydim*zdim)
                 #~ iiii=0
@@ -102,7 +102,7 @@ def write_xsf(
         vals_per_line=6, outfilename=None, 
         is_flattened=False, shape=None,
         **kwargs):
-    if isinstance(outfilename, basestring):
+    if isinstance(outfilename, str):
         f = open(outfilename, 'w')
     elif outfilename is None:
         f = sys.stdout
@@ -158,7 +158,7 @@ DATAGRID_3D_UNKNOWN
 
 def write_grid(data, outfilename=None, vals_per_line=5, **kwargs):
     xdim, ydim, zdim = data.shape
-    if isinstance(outfilename, basestring):
+    if isinstance(outfilename, str):
         f = open(outfilename, 'w')
     elif outfilename is None:
         f = sys.stdout
@@ -197,9 +197,9 @@ python temp.xsf -o grid.xyz
     pa = p.parse_args(sys.argv[1:])
     r = read_xsf(filename=pa.file)
     if pa.min:
-        print r['data'].min()
+        print(r['data'].min())
     elif pa.max:
-        print r['data'].max()
+        print(r['data'].max())
     elif pa.format == 'grid':
         write_grid(outfilename=pa.output,**r)
     elif pa.format == 'xsf':
