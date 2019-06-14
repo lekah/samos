@@ -292,19 +292,19 @@ class DynamicsAnalyzer(object):
                 if self._verbosity > 0:
                     print('      Done\n')
 
-                range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt/stepsize_t, t_end_fit_dt/stepsize_t)
+                range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt//stepsize_t, t_end_fit_dt//stepsize_t)
 
                 for iblock, block in enumerate(msd_this_species_this_traj):
                     if decomposed:
                         for ipol in range(3):
                             for jpol in range(3):
-                                slope, intercept, _, _, _ = linregress(range_for_t, block[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t,ipol, jpol])
+                                slope, intercept, _, _, _ = linregress(range_for_t, block[t_start_fit_dt//stepsize_t:t_end_fit_dt//stepsize_t,ipol, jpol])
                                 slopes_intercepts[iblock, ipol, jpol, 0] = slope
                                 slopes_intercepts[iblock, ipol, jpol, 1] = intercept
                         slopes.append(slopes_intercepts[iblock, :,:,0])
                     else:
                         #~ print range_for_t.shape, block[(t_start_fit_dt-t_start_dt)/stepsize_t:t_end_fit_dt/stepsize_t].shape
-                        slope, intercept, _, _, _ = linregress(range_for_t, block[(t_start_fit_dt-t_start_dt)/stepsize_t:t_end_fit_dt/stepsize_t])
+                        slope, intercept, _, _, _ = linregress(range_for_t, block[(t_start_fit_dt-t_start_dt)//stepsize_t:t_end_fit_dt//stepsize_t])
                         slopes_intercepts[iblock, 0] = slope
                         slopes_intercepts[iblock, 1] = intercept
                         slopes.append(slope)
@@ -394,7 +394,7 @@ class DynamicsAnalyzer(object):
 
         results_dict = dict()
         vaf_all_species = []
-        range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt/stepsize_t, t_end_fit_dt/stepsize_t)
+        range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt//stepsize_t, t_end_fit_dt//stepsize_t)
 
         for atomic_species in species_of_interest:
 
@@ -420,11 +420,11 @@ class DynamicsAnalyzer(object):
 
                 nstep, nat, _= velocities.shape
                 if nr_of_blocks > 0:
-                    block_length_dt_this_traj = (nstep - t_end_dt)  / nr_of_blocks
+                    block_length_dt_this_traj = (nstep - t_end_dt)  // nr_of_blocks
                     nr_of_blocks_this_traj = nr_of_blocks
                 elif block_length_dt > 0:
                     block_length_dt_this_traj = block_length_dt
-                    nr_of_blocks_this_traj   = (nstep - t_end_dt) / block_length_dt
+                    nr_of_blocks_this_traj   = (nstep - t_end_dt) // block_length_dt
                 else:
                     raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
 
@@ -457,7 +457,7 @@ class DynamicsAnalyzer(object):
                     vaf_integral_this_species.append(vaf_integral[iblock])
                     #~ slope, intercept, _, _, _ = linregress(range_for_t, D[t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t])
                     #~ slopes_intercepts[iblock, :] = slope, intercept
-                    fitted_means_of_integral.append(vaf_integral[iblock, t_start_fit_dt/stepsize_t:t_end_fit_dt/stepsize_t].mean())
+                    fitted_means_of_integral.append(vaf_integral[iblock, t_start_fit_dt//stepsize_t:t_end_fit_dt//stepsize_t].mean())
 
                 vaf_time_series.set_array('vaf_isotropic_{}_{}'.format(atomic_species, itraj), vaf)
                 vaf_time_series.set_array('vaf_integral_isotropic_{}_{}'.format(atomic_species, itraj), vaf_integral)
@@ -639,13 +639,13 @@ class DynamicsAnalyzer(object):
                 if nr_of_blocks > 0:
                     nr_of_blocks_this_traj = nr_of_blocks
                 elif block_length_dt > 0:
-                    nr_of_blocks_this_traj   = nstep / block_length_dt
+                    nr_of_blocks_this_traj   = nstep // block_length_dt
                 else:
                     raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
 
                 # I need to have blocks of equal length, and use the split method
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
-                split_number = vel_array.shape[0] / nr_of_blocks_this_traj
+                split_number = vel_array.shape[0] // nr_of_blocks_this_traj
 
                 blocks = np.array(np.split(vel_array[:nr_of_blocks_this_traj*split_number], nr_of_blocks_this_traj, axis=0))
                 nblocks = len(blocks)
@@ -658,7 +658,7 @@ class DynamicsAnalyzer(object):
                 # Smothening the array:
 
                 if smothening > 1:
-                    split_number = pd_this_species_this_traj.shape[1] / smothening
+                    split_number = pd_this_species_this_traj.shape[1] // smothening
                     pd_this_species_this_traj = np.mean(pd_this_species_this_traj[:,:split_number*smothening].reshape( nblocks, -1, smothening), axis=2)
                     freq_mean = np.mean(freq[:split_number*smothening].reshape( -1, smothening), axis=1)
                 else:
