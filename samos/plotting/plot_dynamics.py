@@ -12,17 +12,19 @@ def my_format(real, decimals=2):
 def format_mean_err(mean, err, decimals=2):
     if np.isnan(mean):
         return 'N/A'
-    exp_mean = int(np.floor(np.log10(np.abs(mean))))
-    pref_mean = mean / 10.0**exp_mean
+    mean_rounded_to_prec = float('{:.{prec}e}'.format(mean, prec=decimals))
+    exp_mean = int(np.floor(np.log10(np.abs(mean_rounded_to_prec))))
+    pref_mean = mean_rounded_to_prec / 10.0**exp_mean
     if np.isnan(err):
-        return '\left({:.{prec}f}\\right)\cdot 10^{{{}}}'.format(pref_mean, exp_mean, prec=decimals)
+        return '{:.{prec}f}\cdot 10^{{{}}}'.format(pref_mean, exp_mean, prec=decimals)
     else:
-        exp_err = int(np.floor(np.log10(np.abs(err))))
-        pref_err = err / 10.0**exp_err
+        err_rounded_to_prec = float('{:.{prec}e}'.format(err, prec=decimals))
+        exp_err = int(np.floor(np.log10(np.abs(err_rounded_to_prec))))
+        pref_err = err_rounded_to_prec / 10.0**exp_err
         if exp_mean == exp_err:
             return '\left({:.{prec}f} \pm {:.{prec}f} \\right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
         else:
-            return '\left( {:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}} \\right)'.format(
+            return '{:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}}'.format(
                 pref_mean,exp_mean, pref_err, exp_err, prec=decimals)
 
     
