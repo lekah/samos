@@ -20,21 +20,21 @@ SUBROUTINE make_gaussian_density(&
     integer, intent(in)         ::          istart, istop, stepsize ! The ionic step I start and I end
     real(kind=8), intent(in)    ::          cell(3,3)
     real(kind=8), intent(in)    ::          invcell(3,3)
-    
+
     integer, intent(in)         ::          nat  ! The total number of atoms, and number of atoms that I calculate the den
     integer, intent(in)         ::          nstep  ! The total number of atoms, and number of atoms that I calculate the den
     real(kind=8), intent(in)    ::          positions(nstep, nat,3)
-    ! logical, intent(in)         ::          recenter ! Whether to recenter 
+    ! logical, intent(in)         ::          recenter ! Whether to recenter
 
 
-    integer, intent(in)         ::          indices_i_care(nat_this_species) ! The indices of the atoms that I calculate the density from 
+    integer, intent(in)         ::          indices_i_care(nat_this_species) ! The indices of the atoms that I calculate the density from
     integer, intent(in)         ::          pbar_frequency ! Frequency bar update
 
     integer, intent(in)         ::          nat_this_species   ! and number of atoms that I calculate the density of
     real(kind=8), intent(in)    ::          sigma   ! Sigma value
     ! real(kind=8), intent(in)    ::          box_a, box_b, box_c   ! The cell dimensions in angstrom, and the conversion from positions read to angstrom
     ! IMPORTANT! I removed recentering, this should be handled by a different function!
-    
+
     real(kind=8), allocatable :: counted(:,:,:) ! That's where I count
 
     integer      :: cont, iat, istep, iat_i_care, in1, in2, in3, idir
@@ -78,7 +78,7 @@ SUBROUTINE make_gaussian_density(&
             ! the unit cell
             pos_atom_real(1:3) = MATMUL(cell, pos_atom_crystal)
             ! Now I need to find the closest grid point in the cell.
-            ! Since I have boxes n1,n2,n3 I am at 
+            ! Since I have boxes n1,n2,n3 I am at
             in1 = int(pos_atom_crystal(1) * n1) + 1
             in2 = int(pos_atom_crystal(2) * n2) + 1
             in3 = int(pos_atom_crystal(3) * n3) + 1
@@ -146,7 +146,7 @@ SUBROUTINE make_gaussian_density(&
     do in3=0,n3
         do in2=0,n2
             do in1=0,n1
-                if (cont<=5) then 
+                if (cont<=5) then
                     write(21,'(f20.10)', advance='no')  counted(MOD(in1, n1)+1, MOD(in2, n2)+1, MOD(in3, n3)+1)
                     cont=cont+1
                 else
@@ -168,15 +168,15 @@ END SUBROUTINE make_gaussian_density
 
 
 real(kind=8) function get_from_gaussian(sigma, vector )
-! 
+!
     implicit none
-    
+
     real(kind=8) :: sigma, vector(3)
     real(kind=8) :: sq_modulus
     !
-    sq_modulus = vector(1) * vector(1) + vector(2) * vector(2) + vector(3) * vector(3) 
+    sq_modulus = vector(1) * vector(1) + vector(2) * vector(2) + vector(3) * vector(3)
     !
     get_from_gaussian = exp(- sq_modulus / (2.d0 * sigma * sigma) )
 
-!    
+!
 end function

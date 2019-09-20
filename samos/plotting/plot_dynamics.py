@@ -27,7 +27,7 @@ def format_mean_err(mean, err, decimals=2):
             return '{:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}}'.format(
                 pref_mean,exp_mean, pref_err, exp_err, prec=decimals)
 
-    
+
 
 def plot_msd_isotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
@@ -91,7 +91,7 @@ def plot_msd_isotropic(msd,
             ax.plot([],[], color=color, linewidth=3., label=label_this_species)
         else:
             ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
-        
+
 
         for itraj in range(nr_of_trajectories):
             msd_this_traj =  msd.get_array('msd_isotropic_{}_{}'.format(atomic_species, itraj))
@@ -110,7 +110,7 @@ def plot_msd_isotropic(msd,
         plt.show()
 
 def plot_msd_anisotropic(msd,
-        ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False, 
+        ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
         alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
         diagonal_only=False, label_diagonal=True, **kwargs):
 
@@ -163,8 +163,8 @@ def plot_msd_anisotropic(msd,
                     continue
                 label = r'$D_{{{}{}}}^{{{}}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(i,j,
                      atomic_species, diff[i][j], diff_sem[i][j]) if (label_this_species and (i==j or label_diagonal)) else None
-                
-                ax.plot(times_msd,msd_mean[:,i,j], color=color, 
+
+                ax.plot(times_msd,msd_mean[:,i,j], color=color,
                         linewidth=3., label=label)
                 for itraj in range(nr_of_trajectories):
                     msd_this_traj =  msd.get_array('msd_decomposed_{}_{}'.format(atomic_species, itraj))
@@ -172,7 +172,7 @@ def plot_msd_anisotropic(msd,
                     for iblock in range(len(msd_this_traj)):
                         slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock][i][j]
                         ax.plot(times_msd, msd_this_traj[iblock,:,i,j], color=color, alpha=alpha_block,lw=0.5, zorder=1)
-                        ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], 
+                        ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit],
                                 color=color, linestyle='--', alpha=alpha_fit, zorder=2, lw=0.5)
     if not(no_legend):
         leg = ax.legend(loc=2)

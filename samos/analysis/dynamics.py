@@ -208,7 +208,7 @@ class DynamicsAnalyzer(object):
 
 
         # Irrespective of whether do_long is false or true, I see whether factors are calculated:
-        
+
         if kwargs:
             raise InputError("Uncrecognized keywords: {}".format(kwargs.keys()))
 
@@ -229,7 +229,7 @@ class DynamicsAnalyzer(object):
             This tells me whether I will have a stepsize larger than 1 (the default)
             when looping over the trajectory.
         """
-        from samos.lib.mdutils import (calculate_msd_specific_atoms, calculate_msd_specific_atoms_decompose_d, 
+        from samos.lib.mdutils import (calculate_msd_specific_atoms, calculate_msd_specific_atoms_decompose_d,
                 calculate_msd_specific_atoms_max_stats, get_com_positions)
         try:
             timestep_fs = self._timestep_fs
@@ -244,7 +244,7 @@ class DynamicsAnalyzer(object):
 
 
         (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt,
-            nr_of_t, stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt, 
+            nr_of_t, stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt,
             t_long_factor) = self._get_running_params(timestep_fs, **kwargs)
 
 
@@ -261,7 +261,7 @@ class DynamicsAnalyzer(object):
         #self.msd_averaged = []
         # Setting params for calculation of MSD and conductivity
         # Future: Maybe allow for element specific parameter settings?
-        
+
         for atomic_species in species_of_interest:
             msd_this_species = [] # Here I collect the trajectories
             slopes = [] # That's where I collect slopes for the final estimate of diffusion
@@ -433,7 +433,7 @@ class DynamicsAnalyzer(object):
             )
 
         (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
-            stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt, 
+            stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt,
             t_long_factor) = self._get_running_params(timestep_fs, **kwargs)
         if do_long:
             raise NotImplementedError("Do_long is not implemented for VAF")

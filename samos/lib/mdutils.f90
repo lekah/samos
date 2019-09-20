@@ -1,10 +1,10 @@
  ! fortran   f90
- 
+
  ! To use it with python, compile with f2py
 
 
 
- 
+
 SUBROUTINE recenter_positions(positions, masses, factors, positions_, nstep, nat)
     implicit none
     INTEGER, intent(in)                             ::  nstep, nat
@@ -41,7 +41,7 @@ SUBROUTINE recenter_positions(positions, masses, factors, positions_, nstep, nat
         END DO
     END DO
 END SUBROUTINE recenter_positions
- 
+
 
 SUBROUTINE recenter_velocities(velocities, masses, factors, velocities_, nstep, nat)
     implicit none
@@ -94,8 +94,8 @@ SUBROUTINE calculate_msd_specific_atoms(    &
         nat_of_interest                         &
     )
 
-    ! Fastest routine, instead of manipulating the trajectories 
-    ! and passing only the trajectories of interest, 
+    ! Fastest routine, instead of manipulating the trajectories
+    ! and passing only the trajectories of interest,
     ! pass the indices of interest (remember index counting starts at 1)
     ! and let fortran do the magic
     ! Faster (x2) because no array manipulation is necessary
@@ -125,7 +125,7 @@ SUBROUTINE calculate_msd_specific_atoms(    &
     DO iblock = 1, nr_of_blocks
         ! Loop over time t
         DO t = 1, nr_of_t
-            ! Calculate one value of msd for this t in this block 
+            ! Calculate one value of msd for this t in this block
             ! based on the average over atoms and running window defined by tau
             msd_this_t = 0.0d0
             ! loop over atoms (remember this code only deals with single species
@@ -184,7 +184,7 @@ SUBROUTINE calculate_msd_specific_atoms_max_stats(    &
     ! Loop over time t. This here is the index that I will give,
     ! actual time is stepsize_t*t
     DO t = 1, nr_of_t
-        ! Calculate one value of msd for this t in this block 
+        ! Calculate one value of msd for this t in this block
         ! based on the average over atoms and running window defined by tau
         msd_this_t = 0.0D0
         icount = 1
@@ -315,11 +315,11 @@ SUBROUTINE calculate_msd_specific_atoms_decompose_d(    &
     REAL*8                      ::  msd_this_t !, M
 
     ! Loop over the block
-    
+
     DO iblock = 1, nr_of_blocks
         ! Loop over time t
         DO t = 1, nr_of_t
-            ! Calculate one value of msd for this t in this block 
+            ! Calculate one value of msd for this t in this block
             ! based on the average over atoms and running window defined by tau
             DO ipol=1,3
                 DO jpol=1,3
@@ -336,7 +336,7 @@ SUBROUTINE calculate_msd_specific_atoms_decompose_d(    &
                     msd(iblock, t, ipol, jpol) = msd_this_t
                 END DO
             END DO
-            
+
         END DO
     END DO
     msd(:,:,:,:) = msd(:, :,:, :) / DBLE(block_length_dt) / DBLE(nat_of_interest) * DBLE(stepsize_inner)  ! / DBLE(
@@ -368,7 +368,7 @@ SUBROUTINE calculate_vaf_specific_atoms(        &
                                     nr_of_t, nr_of_blocks,  &   ! nr of times of t
                                     stepsize,               &   ! The stepsize, eg 10 to calculate every 10th time
                                     stepsize_tau, block_length_dt     ! The stepsize for tau, eg 10 to calculate every 10th time
-    CHARACTER*256, intent(in)        ::  integration_method                     
+    CHARACTER*256, intent(in)        ::  integration_method
     ! THE ARRAYS:
     REAL*8, intent(in),  dimension(nstep, nat, 3)           :: velocities
     INTEGER, intent(in), dimension(nat_of_interest)         :: indices_of_interest
@@ -396,7 +396,7 @@ SUBROUTINE calculate_vaf_specific_atoms(        &
             DO iat_of_interest=1, nat_of_interest
                 iat = indices_of_interest(iat_of_interest)
                 DO tau = (iblock -1)*block_length_dt+1,iblock*block_length_dt, stepsize_tau
-                   ! tau = (iblock -1)*block_length_dt+1, 
+                   ! tau = (iblock -1)*block_length_dt+1,
                     vaf_this_t = 0.0d0
                     DO ipol=1, 3
                         vaf_this_t = vaf_this_t + velocities(tau+stepsize*t, iat, ipol)*velocities(tau, iat, ipol)
@@ -408,10 +408,10 @@ SUBROUTINE calculate_vaf_specific_atoms(        &
 
             ! vaf_this_t = vaf_this_t / DBLE(block_length_dt) / DBLE(nat_of_interest) / DBLE(stepsize_tau)
 
-            vaf(iblock, t+1) = vaf_this_t_cumulated 
+            vaf(iblock, t+1) = vaf_this_t_cumulated
 
             ! Using trapezoidal rule to estimate the integral,
-            
+
             SELECT CASE ( integration_method )
                 CASE ( 'trapezoid' )
                     IF ( t .eq. 0 ) THEN
@@ -438,7 +438,7 @@ SUBROUTINE calculate_vaf_specific_atoms(        &
                     ELSEIF ( MOD(t, 2) .eq. 1 ) THEN
                         vaf_integral(iblock, t+1) =  2.0D0 * deltaT / 3.0D0 * vaf_this_t_cumulated+vaf_integral(iblock, t)
                     ENDIF
-            
+
             END SELECT
 
             ! USING simpson's rule
