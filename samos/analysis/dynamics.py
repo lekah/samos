@@ -441,31 +441,42 @@ class DynamicsAnalyzer(object):
 
             # Calculating the mean, std, sem for each point in time (averaging over trajectories)
             msd_mean = np.mean(msd_this_species, axis=0)
-            msd_std = np.std(msd_this_species, axis=0)
-            msd_sem = msd_std / np.sqrt(len(msd_this_species) - 1)
-
+            if (len(msd_this_species) > 1):
+                msd_std = np.std(msd_this_species, axis=0) 
+                msd_sem = msd_std / np.sqrt(len(msd_this_species) - 1)
+            else:
+                msd_std = np.NaN
+                msd_sem = np.NaN
             msd.set_array('msd_{}_{}_mean'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_mean)
             msd.set_array('msd_{}_{}_std'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_std)
             msd.set_array('msd_{}_{}_sem'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_sem)
 
             slopes = np.array(slopes) # 0th axis
-            results_dict[atomic_species].update({
-                'slope_msd_mean': np.mean(slopes, axis=0),
-                'slope_msd_std': np.std(slopes, axis=0)})
-            results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(slopes)-1)
+            results_dict[atomic_species]['slope_msd_mean'] = np.mean(slopes, axis=0)
+            if (len(msd_this_species) > 1):
+                results_dict[atomic_species]['slope_msd_std'] = np.std(slopes, axis=0)
+                results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(slopes)-1)
+            else:
+                results_dict[atomic_species]['slope_msd_std'] = np.NaN
+                results_dict[atomic_species]['slope_msd_sem'] = np.NaN
+
             if decomposed:
                 dimensionality_factor = 2.
             else:
                 dimensionality_factor = 6.
-
-            results_dict[atomic_species]['diffusion_mean_cm2_s'] =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_mean']
-            results_dict[atomic_species]['diffusion_std_cm2_s']  =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_std']
-            results_dict[atomic_species]['diffusion_sem_cm2_s']  =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_sem']
+            results_dict[atomic_species]['diffusion_mean_cm2_s'] = 1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_mean']
+            if (len(msd_this_species) > 1):
+                results_dict[atomic_species]['diffusion_std_cm2_s'] = 1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_std']
+                results_dict[atomic_species]['diffusion_sem_cm2_s'] = 1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_sem']
+            else:
+                results_dict[atomic_species]['diffusion_std_cm2_s'] = np.NaN
+                results_dict[atomic_species]['diffusion_sem_cm2_s'] = np.NaN
 
             # I need to transform to lists, numpy are not json serializable:
             for k in ('slope_msd_mean', 'slope_msd_std', 'slope_msd_sem',
                       'diffusion_mean_cm2_s', 'diffusion_std_cm2_s','diffusion_sem_cm2_s'):
-                results_dict[atomic_species][k] = results_dict[atomic_species][k].tolist()     ######### C'e' UN ERRORE QUI SE slope_msd_mean e' UNA MATRICEEEEEEE
+                if isinstance(results_dict[atomic_species][k], np.ndarray):
+                    results_dict[atomic_species][k] = results_dict[atomic_species][k].tolist()
             if (self._verbosity > 1):
                 print('      Done, these are the results for {}:'.format(atomic_species))
                 for key, val in results_dict[atomic_species].items():
