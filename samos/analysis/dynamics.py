@@ -311,7 +311,6 @@ class DynamicsAnalyzer(object):
                     # I replace the array positions with the COM!
                     masses = self._atoms.get_masses() # Getting the masses for recentering
                     factors = [1]*len(masses)
-                    #~ nstep, nat, _ = positions.shape
                     positions = get_com_positions(positions, masses, factors)
                     indices_of_interest = [1]
                     prefactor = len(trajectory.get_indices_of_species(atomic_species, start=0))
@@ -324,11 +323,13 @@ class DynamicsAnalyzer(object):
                 if (nr_of_blocks > 0):
                     block_length_dt_this_traj = (nstep - t_end_dt) / nr_of_blocks
                     nr_of_blocks_this_traj = nr_of_blocks
-                elif block_length_dt > 0:
+                elif (block_length_dt > 0):
                     block_length_dt_this_traj = block_length_dt
                     nr_of_blocks_this_traj   = (nstep - t_end_dt) / block_length_dt
                 else:
                     raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
+                if (nr_of_blocks_this_traj < 0) or (block_length_dt_this_traj < 0):
+                    raise RuntimeError("t_end_dt (or t_end_fit_dt) is bigger than the trajectory length")
 
                 nat_of_interest = len(indices_of_interest)
 
@@ -359,7 +360,6 @@ class DynamicsAnalyzer(object):
                     msd_this_species.append(block)
                 msd.set_array('msd_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic',
                         atomic_species, itraj), msd_this_species_this_traj)
-
 
                 #
                 # linear regression of MSD
@@ -427,7 +427,9 @@ class DynamicsAnalyzer(object):
                     elif t_long_factor is not None:
                         nr_of_t_long = int(t_long_factor * nstep / stepsize_t)
                     else:
-                        nr_of_t_long = int(nstep -1 / stepsize_t)
+                        nr_of_t_long = int(nstep - 1 / stepsize_t)
+                    if (nr_of_t_long > nstep):
+                        raise RuntimeError("t_long_end_dt is bigger than the trajectory length")
                     nr_of_t_long_list.append(nr_of_t_long)
                     t_list_long_fs = timestep_fs * stepsize_t * np.arange(nr_of_t_long)
                     msd.set_array('t_list_long_fs', t_list_long_fs)
