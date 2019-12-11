@@ -339,11 +339,12 @@ class DynamicsAnalyzer(object):
                     print(
                             '\n    ! Calculating MSD for atomic species {} in trajectory {}\n'
                             '      Structure contains {} atoms of type {}\n'
-                            '      I will calculate {} block(s) of size {}\n'
-                            '      I will fit from {} to {}\n'
+                            '      I will calculate {} block(s) of size {} ({} ps)\n'
+                            '      I will fit from {} ({} ps) to {} ({} ps)\n'
                             '      Outer stepsize is {}, inner is {}\n'
                             ''.format(atomic_species, itraj, nat_of_interest, atomic_species, nr_of_blocks_this_traj, block_length_dt_this_traj,
-                                    t_start_fit_dt, t_end_fit_dt, stepsize_t, stepsize_tau)
+                                      block_length_dt_this_traj * timestep_fs / 1e3, t_start_fit_dt, t_start_fit_dt * timestep_fs / 1e3,
+                                      t_end_fit_dt, t_end_fit_dt * timestep_fs / 1e3, stepsize_t, stepsize_tau)
                         )
                 if decomposed:
                     msd_this_species_this_traj = prefactor * calculate_msd_specific_atoms_decompose_d(
@@ -427,7 +428,7 @@ class DynamicsAnalyzer(object):
                     elif t_long_factor is not None:
                         nr_of_t_long = int(t_long_factor * nstep / stepsize_t)
                     else:
-                        nr_of_t_long = int(nstep - 1 / stepsize_t)
+                        nr_of_t_long = int((nstep - 1) / stepsize_t)
                     if (nr_of_t_long > nstep):
                         raise RuntimeError("t_long_end_dt is bigger than the trajectory length")
                     nr_of_t_long_list.append(nr_of_t_long)
