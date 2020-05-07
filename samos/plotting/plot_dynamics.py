@@ -4,11 +4,35 @@ import numpy as np
 from ase.data import atomic_numbers
 from samos.utils.colors import get_color
 
+def my_format(real, decimals=2):
+    exp = np.floor(np.log10(real))
+    pref = real / 10**exp
+    return '{:.{prec}f} \cdot 10^{{{}}}'.format(pref, int(exp), prec=decimals)
+
+def format_mean_err(mean, err, decimals=2):
+    if np.isnan(mean):
+        return 'N/A'
+    mean_rounded_to_prec = float('{:.{prec}e}'.format(mean, prec=decimals))
+    exp_mean = int(np.floor(np.log10(np.abs(mean_rounded_to_prec))))
+    pref_mean = mean_rounded_to_prec / 10.0**exp_mean
+    if np.isnan(err):
+        return '{:.{prec}f}\cdot 10^{{{}}}'.format(pref_mean, exp_mean, prec=decimals)
+    else:
+        err_rounded_to_prec = float('{:.{prec}e}'.format(err, prec=decimals))
+        exp_err = int(np.floor(np.log10(np.abs(err_rounded_to_prec))))
+        pref_err = err_rounded_to_prec / 10.0**exp_err
+        if exp_mean == exp_err:
+            return '\left({:.{prec}f} \pm {:.{prec}f} \\right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
+        else:
+            return '{:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}}'.format(
+                pref_mean,exp_mean, pref_err, exp_err, prec=decimals)
+
 
 
 def plot_msd_isotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
-        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None, **kwargs):
+        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
+        color_dict={}, decimals=1, **kwargs):
 
     if ax is None:
         fig = plt.figure(**kwargs)
@@ -40,7 +64,10 @@ def plot_msd_isotropic(msd,
         diff = attrs[atomic_species]['diffusion_mean_cm2_s']
         diff_sem = attrs[atomic_species]['diffusion_sem_cm2_s']
         diff_std = attrs[atomic_species]['diffusion_std_cm2_s']
-        color = get_color(atomic_species, scheme=color_scheme)
+        if atomic_species in color_dict:
+            color = color_dict[atomic_species]
+        else:
+            color = get_color(atomic_species, scheme=color_scheme)
         msd_mean = msd.get_array('msd_isotropic_{}_mean'.format(atomic_species))
         msd_sem = msd.get_array('msd_isotropic_{}_sem'.format(atomic_species))
         p1 = ax.fill_between(
@@ -50,11 +77,21 @@ def plot_msd_isotropic(msd,
         if no_label or (exclude_from_label and atomic_species in exclude_from_label):
             label_this_species = None
         elif label is None:
-            label_this_species=r'$D_{{{}}}^{{MSD}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(atomic_species, diff, diff_sem)
-        else:
-            label_this_species = '{} in {}'.format(atomic_species, label)
+            # label_this_species=r'$D_{{{}}}=\left( {} \pm {} \right) \frac{{cm^2}}{{s}}$'.format(
+                    # atomic_species, my_format(diff, decimals=decimals), my_format(diff_sem, decimals=decimals))
+            label_this_species=r'$D_{{{}}}={} \, \frac{{cm^2}}{{s}}$'.format(
+                    atomic_species, format_mean_err(diff, diff_sem, decimals=decimals))
 
-        ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
+        else:
+            label_this_species = '{}'.format(label)
+
+        if attrs.get('do_long', False):
+            # reduce number of lines in plot, customize for later!
+            # Keep the legend though!
+            ax.plot([],[], color=color, linewidth=3., label=label_this_species)
+        else:
+            ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
+
 
         for itraj in range(nr_of_trajectories):
             msd_this_traj =  msd.get_array('msd_isotropic_{}_{}'.format(atomic_species, itraj))
@@ -63,14 +100,17 @@ def plot_msd_isotropic(msd,
                 slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
                 ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=alpha_block,)
                 ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=alpha_fit)
+            if attrs.get('do_long', False):
+                times_long = timestep_fs/1000.0*stepsize*np.arange(0, attrs['nr_of_t_long_list'][itraj])
+                ax.plot(times_long, msd.get_array('msd_long_{}_{}'.format(atomic_species, itraj)), color=color, linestyle='-', lw=3)
     if not(no_legend):
-        leg = ax.legend(loc=2)
+        leg = ax.legend(loc=2,labelspacing=0.01)
         leg.get_frame().set_alpha(0.)
     if show:
         plt.show()
 
 def plot_msd_anisotropic(msd,
-        ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False, 
+        ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
         alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
         diagonal_only=False, label_diagonal=True, **kwargs):
 
@@ -123,8 +163,8 @@ def plot_msd_anisotropic(msd,
                     continue
                 label = r'$D_{{{}{}}}^{{{}}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(i,j,
                      atomic_species, diff[i][j], diff_sem[i][j]) if (label_this_species and (i==j or label_diagonal)) else None
-                
-                ax.plot(times_msd,msd_mean[:,i,j], color=color, 
+
+                ax.plot(times_msd,msd_mean[:,i,j], color=color,
                         linewidth=3., label=label)
                 for itraj in range(nr_of_trajectories):
                     msd_this_traj =  msd.get_array('msd_decomposed_{}_{}'.format(atomic_species, itraj))
@@ -132,7 +172,7 @@ def plot_msd_anisotropic(msd,
                     for iblock in range(len(msd_this_traj)):
                         slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock][i][j]
                         ax.plot(times_msd, msd_this_traj[iblock,:,i,j], color=color, alpha=alpha_block,lw=0.5, zorder=1)
-                        ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], 
+                        ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit],
                                 color=color, linestyle='--', alpha=alpha_fit, zorder=2, lw=0.5)
     if not(no_legend):
         leg = ax.legend(loc=2)

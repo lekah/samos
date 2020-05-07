@@ -104,7 +104,9 @@ class DynamicsAnalyzer(object):
                 ('t_end_fs', 't_end_ps', 't_end_dt'),
                 ('block_length_fs','block_length_ps','block_length_dt', 'nr_of_blocks'),
                 ('t_start_fit_fs', 't_start_fit_ps', 't_start_fit_dt'),
-                ('t_end_fit_fs', 't_end_fit_ps', 't_end_fit_dt')):
+                ('t_end_fit_fs', 't_end_fit_ps', 't_end_fit_dt'),
+                ('t_long_end_fs', 't_long_end_ps', 't_long_end_dt', 't_long_factor'),
+                ):
             keys_provided_this_group = [k for k in mutually_exclusive_keys if k in keywords_provided]
             if len(keys_provided_this_group)>1:
                 raise InputError("This keywords are mutually exclusive: {}".format(', '.join(keys_provided_this_group)))
@@ -151,7 +153,7 @@ class DynamicsAnalyzer(object):
 
         if 't_end_fs' in keywords_provided:
             t_end_dt = int(float(kwargs.pop('t_end_fs')) / timestep_fs)
-        elif 't_end_fs' in keywords_provided:
+        elif 't_end_ps' in keywords_provided:
             t_end_dt = int(1000*float(kwargs.pop('t_end_ps')) / timestep_fs)
         elif 't_end_dt' in keywords_provided:
             t_end_dt = int(kwargs.pop('t_end_dt'))
@@ -186,11 +188,32 @@ class DynamicsAnalyzer(object):
         # Asking whether to calculate COM diffusion
         do_com = kwargs.pop('do_com', False)
 
+        # Asking whether to calculate for every trajectory a time series with maximal statistics:
+        do_long  = kwargs.pop('do_long', False)
+        if 't_long_end_fs' in keywords_provided:
+            t_long_end_dt = int(float(kwargs.pop('t_long_end_fs')) / timestep_fs)
+            t_long_factor = None
+        elif 't_long_end_ps' in keywords_provided:
+            t_long_end_dt = int(1000*float(kwargs.pop('t_long_end_ps')) / timestep_fs)
+            t_long_factor = None
+        elif 't_long_end_dt' in keywords_provided:
+            t_long_end_dt = int(kwargs.pop('t_long_end_dt'))
+            t_long_factor = None
+        elif 't_long_factor' in keywords_provided:
+            t_long_factor = float(kwargs.pop('t_long_factor'))
+            t_long_end_dt = None
+        else:
+            t_long_end_dt = None # will be adapted to trajectory length!!
+            t_long_factor = None # will be adapted to trajectory length!!
+
+
+        # Irrespective of whether do_long is false or true, I see whether factors are calculated:
+
         if kwargs:
             raise InputError("Uncrecognized keywords: {}".format(list(kwargs.keys())))
 
         return (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
-            stepsize_t, stepsize_tau, block_length_dt, do_com)
+            stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt, t_long_factor)
 
     def get_msd(self, decomposed=False, **kwargs):
         """
@@ -206,7 +229,8 @@ class DynamicsAnalyzer(object):
             This tells me whether I will have a stepsize larger than 1 (the default)
             when looping over the trajectory.
         """
-        from samos.lib.mdutils import calculate_msd_specific_atoms, calculate_msd_specific_atoms_decompose_d, get_com_positions
+        from samos.lib.mdutils import (calculate_msd_specific_atoms, calculate_msd_specific_atoms_decompose_d,
+                calculate_msd_specific_atoms_max_stats, get_com_positions)
         try:
             timestep_fs = self._timestep_fs
             atoms = self._atoms
@@ -220,7 +244,11 @@ class DynamicsAnalyzer(object):
 
 
         (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt,
-            nr_of_t, stepsize_t, stepsize_tau, block_length_dt, do_com) = self._get_running_params(timestep_fs, **kwargs)
+            nr_of_t, stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt,
+            t_long_factor) = self._get_running_params(timestep_fs, **kwargs)
+
+
+
 
         msd = TimeSeries()
 
@@ -229,6 +257,7 @@ class DynamicsAnalyzer(object):
                 in species_of_interest
             }
         msd_all_species = []
+        nr_of_t_long_list = []
         #self.msd_averaged = []
         # Setting params for calculation of MSD and conductivity
         # Future: Maybe allow for element specific parameter settings?
@@ -315,6 +344,19 @@ class DynamicsAnalyzer(object):
                 msd.set_array('slopes_intercepts_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic',
                         atomic_species, itraj), slopes_intercepts)
 
+                if do_long:
+                    if  t_long_end_dt is not None:
+                        nr_of_t_long = t_long_end_dt / stepsize_t
+                    elif t_long_factor is not None:
+                        nr_of_t_long = int(t_long_factor*nstep / stepsize_t)
+                    else:
+                        nr_of_t_long = int(nstep -1 / stepsize_t)
+                    nr_of_t_long_list.append(nr_of_t_long)
+                    msd_this_species_this_traj_max_stats = prefactor*calculate_msd_specific_atoms_max_stats(
+                            positions, indices_of_interest, stepsize_t, stepsize_tau,
+                            nr_of_t_long, nstep, nat, nat_of_interest)
+                    msd.set_array('msd_long_{}_{}'.format(atomic_species, itraj), msd_this_species_this_traj_max_stats)
+
             # Calculating the average sem/std for each point in time:
             msd_mean = np.mean(msd_this_species, axis=0)
             msd_std = np.std(msd_this_species, axis=0)
@@ -366,10 +408,12 @@ class DynamicsAnalyzer(object):
             'timestep_fs'           :   timestep_fs,
             'nr_of_t'               :   nr_of_t,
             'decomposed'            :   decomposed,
+            'do_long'               :   do_long,
         })
+        if do_long:
+            results_dict['nr_of_t_long_list'] = nr_of_t_long_list
         for k,v in list(results_dict.items()):
             msd.set_attr(k,v)
-
         return msd
 
 
@@ -388,7 +432,10 @@ class DynamicsAnalyzer(object):
             )
 
         (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
-            stepsize_t, stepsize_tau, block_length_dt, do_com) = self._get_running_params(timestep_fs, **kwargs)
+            stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt,
+            t_long_factor) = self._get_running_params(timestep_fs, **kwargs)
+        if do_long:
+            raise NotImplementedError("Do_long is not implemented for VAF")
 
         vaf_time_series = TimeSeries()
 
