@@ -289,6 +289,6 @@ def plot_power_spectrum(power_spectrum, ax=None, show=False, color_scheme='jmol'
             ax.fill_between(freq, periodogram_mean-periodogram_sem, periodogram_mean+periodogram_sem,
                 facecolor=color, alpha=.2, linewidth=1)
         except Exception as e:
-            print e
+            print(e)
     if show:
         plt.show()

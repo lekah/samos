@@ -7,7 +7,7 @@ bohr_to_ang = 0.52917720859
 def write_xsf_header(
         atoms, positions, cell, data, 
         vals_per_line=6, outfilename=None, **kwargs):
-    if isinstance(outfilename, basestring):
+    if isinstance(outfilename, str):
         f = open(outfilename, 'w')
     elif outfilename is None:
         f = sys.stdout
@@ -84,7 +84,7 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
     if element:
         indices_i_care = trajectory.get_indices_of_species(element, start=1)
     else:
-        indices_i_care = np.array(range(1, nat+1))
+        indices_i_care = np.array(list(range(1, nat+1)))
 
     if not len(indices_i_care):
         raise Exception("Element {} not found in symbols {}".format(element, symbols))
@@ -99,16 +99,16 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
         termwidth = get_terminal_width()
         pbar_frequency = int((istop - istart) / termwidth)
     except Exception as e:
-        print "Warning Could not get progressbar ({})".format(e)
+        print("Warning Could not get progressbar ({})".format(e))
         pbar_frequency = int((istop - istart) / 30)
 
     pbar_frequency = max([pbar_frequency, 1])
     a, b, c    = [np.linalg.norm(cell[i]) for i in range(3)]
     n1, n2, n3 = [int(celldim/density)+1 for celldim in (a,b,c)]
 
-    print "Grid is {} x {} x {}".format(n1, n2, n3)
-    print "Box is  {} x {} x {}".format(a,b,c)
-    print "Writing xsf file to", format(outputfile)
+    print("Grid is {} x {} x {}".format(n1, n2, n3))
+    print("Box is  {} x {} x {}".format(a,b,c))
+    print("Writing xsf file to", format(outputfile))
 
 
     write_xsf_header(

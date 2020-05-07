@@ -61,10 +61,10 @@ def plot_charge(
 
 
     atoms = Atoms(symbols=symbols, positions=positions, cell=cell)
-    print atoms.get_volume()
+    print(atoms.get_volume())
 
     atoms = atoms.repeat(repeat)
-    print len(atoms)
+    print(len(atoms))
 
     
     figure=mlab.figure(1, bgcolor=(1, 1, 1), size=size)  # make a white figure
@@ -111,14 +111,14 @@ def plot_charge(
 
         for forces in forces_list:
             if only_total:
-                color = colors.next()
+                color = next(colors)
             for pos, vecs in zip(atoms.positions, forces):
                 x,y,z = pos
                 if not only_total:
                     colors = iter(( (0.1,0,0), (1,0,0), (0,1,0), (0,0,1), (1., 0.84,0)))
                 for u,v,w in vecs:
                     if not only_total:
-                        color =  colors.next()
+                        color =  next(colors)
                     cyls = mlab.quiver3d(
                             x,y,z, u,v,w, 
                             color=color, line_width=line_width,
@@ -169,11 +169,11 @@ def plot_charge(
             total_charge *= bohr_to_ang**(-3) 
         else:
             raise NotImplemented
-        print "The total charge sums to {:6.3f} electrons".format(total_charge)
+        print("The total charge sums to {:6.3f} electrons".format(total_charge))
         mean_charge_value = rho.sum() / rho.size
-        print "Mean charge value is {:18.16f}".format(mean_charge_value)
+        print("Mean charge value is {:18.16f}".format(mean_charge_value))
         if shift is not None:
-            print shift
+            print(shift)
             rho=rho-shift
         # Now I replicate
         rho = np.concatenate([rho]*n1, axis=0)
@@ -186,7 +186,7 @@ def plot_charge(
             std = rho.std()
             #~ contours=[mean-std, mean, mean+std]
             contours=[mean-std, mean+std]
-            print "Choosing contour lines myself:", contours
+            print("Choosing contour lines myself:", contours)
 
         isos = mlab.pipeline.iso_surface(
                 src, opacity=opacity, colormap=colormap,
@@ -247,7 +247,7 @@ def read_forces(files, atoms_of_interest, take_difference=False):
             
                 forces.append(np.array(
                         [
-                            map(float, pos_match.group('vals').split())
+                            list(map(float, pos_match.group('vals').split()))
                             for match in POS_BLOCK_REGEX_DECOMPOSED.finditer(f.read())
                             for pos_match in POS_REGEX_DECOMPOSED.finditer(match.group(0))
                             if pos_match.group('sym') in atoms_of_interest
@@ -257,7 +257,7 @@ def read_forces(files, atoms_of_interest, take_difference=False):
                 )
     
     for f in forces:
-        print f.shape
+        print(f.shape)
         #~ for lin in f:
             #~ print lin
         #~ raw_input()
@@ -325,7 +325,7 @@ if __name__ == '__main__':
             forces = forces.reshape(nat, idim/3, 3)
             if pa.flog:
                 forces = [ 
-                        map(logarithmize_vector, vecs)
+                        list(map(logarithmize_vector, vecs))
                         for vecs in forces
                     ]
             forces_list.append(forces)

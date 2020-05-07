@@ -122,7 +122,7 @@ class Trajectory(AttributedArray):
         :returns: The number of trajectory steps
         :raises: ValueError if no unique number of steps can be determined.
         """
-        nstep_set = set([array.shape[0] for array in self._arrays.values()])
+        nstep_set = set([array.shape[0] for array in list(self._arrays.values())])
         if len(nstep_set) == 0:
             raise ValueError("No arrays have been set, yet")
         elif len(nstep_set) > 1:
@@ -171,7 +171,7 @@ class Trajectory(AttributedArray):
         """
         assert isinstance(index, int)
         atoms = self.atoms.copy()
-        for k,v in self._arrays.items():
+        for k,v in list(self._arrays.items()):
             try:
                 getattr(atoms, 'set_{}'.format(k))(v[index])
             except AttributeError:
@@ -197,7 +197,7 @@ class Trajectory(AttributedArray):
                         factors[item] = 1
                     except IndexError:
                         raise IndexError("You passed an integer for the sublattice, but it is out of range")
-                elif isinstance(item, basestring):
+                elif isinstance(item, str):
                     for index in self.get_indices_of_species(item):
                         factors[index] = 1
                 else:
