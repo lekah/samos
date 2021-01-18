@@ -3,6 +3,7 @@ from ase import Atoms
 import numpy as np
 from scipy.stats import linregress
 from scipy.stats import sem as standard_error_of_mean
+from scipy.signal import convolve
 from samos.trajectory import check_trajectory_compatibility, Trajectory
 from samos.utils.attributed_array import AttributedArray
 from samos.utils.exceptions import InputError
@@ -705,17 +706,17 @@ class DynamicsAnalyzer(object):
                 # Smothening the array:
 
                 if smothening > 1:
-                    split_number = pd_this_species_this_traj.shape[1] // smothening
-                    pd_this_species_this_traj = np.mean(pd_this_species_this_traj[:,:split_number*smothening].reshape( nblocks, -1, smothening), axis=2)
-                    freq_mean = np.mean(freq[:split_number*smothening].reshape( -1, smothening), axis=1)
-                else:
-                    freq_mean = freq
+                    # Applying a simple convolution to get the mean
+                    kernel = np.ones((nblocks, smothening)) / smothening
+                    pd_this_species_this_traj = convolve(
+                                pd_this_species_this_traj,
+                                kernel, mode='same')
 
                 power_spectrum.set_array('periodogram_{}_{}'.format( atomic_species, itraj), pd_this_species_this_traj)
                 if not index_of_species:
                     # I need to save the frequencies only once, so I save them only for the first species.
                     # I do not see any problem here, but maybe I missed something.
-                    power_spectrum.set_array('frequency_{}'.format(itraj), freq_mean)
+                    power_spectrum.set_array('frequency_{}'.format(itraj), freq)
                 for block in pd_this_species_this_traj:
                     periodogram_this_species.append(block)
             try:
