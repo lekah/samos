@@ -265,29 +265,31 @@ def plot_vaf_isotropic(vaf,
         plt.show()
 
 
-def plot_power_spectrum(power_spectrum, ax=None, show=False, color_scheme='jmol', **kwargs):
+def plot_power_spectrum(power_spectrum, ax=None, show=False, color_scheme='jmol', alpha_signals=0.1,
+                        alpha_fill=0.2, **kwargs):
     if ax is None:
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(1,1,1)
     attrs = power_spectrum.get_attrs()
-    ax.set_xlabel(r'$\omega [GHz]$')
+    ax.set_xlabel(r'$\omega$ $\left[THz\right]$')
     ax.set_ylabel(r'Signal $[\AA^2 fs^{-1}]$')
     species_of_interest = attrs['species_of_interest']
     nr_of_trajectories = attrs['nr_of_trajectories']
     frequencies = [power_spectrum.get_array('frequency_{}'.format(itraj)) for itraj in range(nr_of_trajectories)]
     for index_of_species, atomic_species in enumerate(species_of_interest):
         color = get_color(atomic_species, scheme=color_scheme)
-        for itraj in range(nr_of_trajectories):
-            freq = frequencies[itraj]
-            periodogram = power_spectrum.get_array('periodogram_{}_{}'.format( atomic_species, itraj))
-            for signal in periodogram:
-                ax.plot(freq, signal,color=color, alpha=0.1)
+        if alpha_signals > 1e-4:
+            for itraj in range(nr_of_trajectories):
+                freq = frequencies[itraj]
+                periodogram = power_spectrum.get_array('periodogram_{}_{}'.format( atomic_species, itraj))
+                for signal in periodogram:
+                    ax.plot(freq, signal,color=color, alpha=alpha_signals)
         try:
             periodogram_mean = power_spectrum.get_array('periodogram_{}_mean'.format( atomic_species))
             periodogram_sem = power_spectrum.get_array('periodogram_{}_sem'.format( atomic_species))
-            ax.plot(freq, signal,color=color, alpha=1, linewidth=1)
-            ax.fill_between(freq, periodogram_mean-periodogram_sem, periodogram_mean+periodogram_sem,
-                facecolor=color, alpha=.2, linewidth=1)
+            ax.plot(frequencies[0], periodogram_mean, color=color, alpha=1, linewidth=1)
+            ax.fill_between(frequencies[0], periodogram_mean-periodogram_sem, periodogram_mean+periodogram_sem,
+                facecolor=color, alpha=alpha_fill, linewidth=1)
         except Exception as e:
             print(e)
     if show:

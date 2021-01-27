@@ -638,6 +638,8 @@ class DynamicsAnalyzer(object):
         try:
             trajectories = self._trajectories
             timestep_fs = self._timestep_fs
+            # Calculating the sampling frequency of the trajectory in THz (the inverse of a picosecond)
+            sampling_frequncy_THz = 1e3/timestep_fs
         except AttributeError as e:
             raise Exception(
                 "\n\n\n"
@@ -699,7 +701,7 @@ class DynamicsAnalyzer(object):
                 nblocks = len(blocks)
 
                 freq, pd = signal.periodogram(blocks,
-                    fs=timestep_fs, axis=1, return_onesided=True) # Show result in THz
+                    fs=sampling_frequncy_THz, axis=1, return_onesided=True) # Show result in THz
                 # I mean over all atoms of this species and directions
                 # In the future, maybe consider having a direction resolved periodogram?
                 pd_this_species_this_traj = pd.mean(axis=(2,3))
