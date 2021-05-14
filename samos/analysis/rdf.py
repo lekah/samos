@@ -53,6 +53,9 @@ class RDF(BaseAnalyzer):
 
     def run(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
         def get_indices(spec, chem_sym):
+            """
+            get the indices for specification spec
+            """
             if isinstance(spec, str):
                 return np.where(chem_sym == spec)[0].tolist()
             elif isinstance(spec, int):
@@ -60,11 +63,19 @@ class RDF(BaseAnalyzer):
             elif isinstance(spec, (tuple, list)):
                 list_ = []
                 for item in spec:
-                    list_ += get_indices(spec, chem_sym)
+                    list_ += get_indices(item, chem_sym)
                 return list_
             else:
                 raise TypeError('{} can not be transformed to index'.format(spec))
-                
+        def get_label(spec, ispec):
+            """
+            Get a good label for scpecification spec. If none can befound
+            give on based on iteration counter ispec
+            """
+            if isinstance(spec,str):
+                return spec
+            elif isinstance(spec, (tuple, list)):
+                return "spec_{}".format(ispec)
         atoms = self._trajectory.atoms
         volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
@@ -81,9 +92,11 @@ class RDF(BaseAnalyzer):
             species_pairs = list(itertools.combinations_with_replacement(set(atoms.get_chemical_symbols()), 2))
         indices_pairs = []
         labels = []
-        for spec1, spec2 in species_pairs:
+        for ispec, (spec1, spec2) in enumerate(species_pairs):
             indices_pairs.append((get_indices(spec1, chem_sym), get_indices(spec2, chem_sym)))
-            labels.append('{}_{}'.format(spec1, spec2))
+            spec1_label = get_label(spec1, ispec)
+            spec2_label = get_label(spec2, ispec)
+            labels.append('{}_{}'.format(spec1_label, spec2_label))
 
         rdf_res = AttributedArray()
         rdf_res.set_attr('species_pairs', species_pairs)

@@ -166,6 +166,8 @@ def plot_msd_anisotropic(msd,
 
                 ax.plot(times_msd,msd_mean[:,i,j], color=color,
                         linewidth=3., label=label)
+                ax.fill_between(times_msd, msd_mean[:,i,j] - msd_sem[:,i,j], msd_mean[:,i,j] + msd_sem[:,i,j],
+                                                            facecolor=color, alpha=alpha_fill, linewidth=1)
                 for itraj in range(nr_of_trajectories):
                     msd_this_traj =  msd.get_array('msd_decomposed_{}_{}'.format(atomic_species, itraj))
                     slopes_intercepts_this_traj =  msd.get_array('slopes_intercepts_decomposed_{}_{}'.format(atomic_species, itraj))

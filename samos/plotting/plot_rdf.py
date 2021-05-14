@@ -7,11 +7,11 @@ from copy import deepcopy
 
 def plot_rdf(rdf_res,
         ax=None, ax2=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
-        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None, plot_params={}, plot_params2={}):
+        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None, plot_params={}, plot_params2={}):    
 
 
     if ax is None:
-        fig = plt.figure(**kwargs)
+        fig = plt.figure()
         ax = fig.add_subplot(1,1,1)
         
 
