@@ -6,8 +6,10 @@ from samos.utils.colors import get_color
 from copy import deepcopy
 
 def plot_rdf(rdf_res,
-        ax=None, ax2=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
-        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None, plot_params={}, plot_params2={}):
+        ax=None, ax2=None, no_legend=False, species_of_interest=None, show=False,
+        label=None, no_label=False, alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4,
+        color_scheme='jmol', exclude_from_label=None, plot_params={}, plot_params2={},
+        **kwargs):
 
 
     if ax is None:
@@ -22,7 +24,11 @@ def plot_rdf(rdf_res,
 
     handles = []
     for spec1, spec2 in attrs['species_pairs']:
-        rdf = rdf_res.get_array('rdf_{}_{}'.format(spec1, spec2))
+        try:
+            rdf = rdf_res.get_array('rdf_{}_{}'.format(spec1, spec2))
+        except KeyError:
+            print("Warning: RDF for {}-{} was not calculated, skipping".format(spec1, spec2))
+            continue
         integral = rdf_res.get_array('int_{}_{}'.format(spec1, spec2))
         radii = rdf_res.get_array('radii_{}_{}'.format(spec1, spec2))
         plot_params_ = deepcopy(plot_params)

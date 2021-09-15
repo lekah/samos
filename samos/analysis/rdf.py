@@ -81,12 +81,19 @@ class RDF(BaseAnalyzer):
             species_pairs = list(itertools.combinations_with_replacement(set(atoms.get_chemical_symbols()), 2))
         indices_pairs = []
         labels = []
+        species_pairs_pruned = []
         for spec1, spec2 in species_pairs:
-            indices_pairs.append((get_indices(spec1, chem_sym), get_indices(spec2, chem_sym)))
+            ind_spec1, ind_spec2 = get_indices(spec1, chem_sym), get_indices(spec2, chem_sym)
+            # special situation if there's only one atom of a species
+            # and we're making the RDF of that species with itself.
+            # there will be empty pairs_of_atoms and the code below would crash!
+            if ind_spec1==ind_spec2 and len(ind_spec1) ==1:
+                continue
+            indices_pairs.append((ind_spec1, ind_spec2))
             labels.append('{}_{}'.format(spec1, spec2))
-
+            species_pairs_pruned.append((spec1, spec2))
         rdf_res = AttributedArray()
-        rdf_res.set_attr('species_pairs', species_pairs)
+        rdf_res.set_attr('species_pairs', species_pairs_pruned)
         binsize=float(radius)/nbins
         for label, (ind1, ind2) in zip(labels, indices_pairs):
             if ind1==ind2:
@@ -96,7 +103,7 @@ class RDF(BaseAnalyzer):
             else:
                 pairs_of_atoms = [(i,j) for i in ind1 for j in ind2 if i!=j]
                 pair_factor = 1.0
-
+            # It can happen that pairs_of_atoms
             ind_pair1, ind_pair2 = list(zip(*pairs_of_atoms))
             diff_real_unwrapped = (positions[istart:istop:stepsize, ind_pair2, :] -  positions[istart:istop:stepsize, ind_pair1, :]).reshape(-1, 3)
             density = float(len(ind2)) / volume
