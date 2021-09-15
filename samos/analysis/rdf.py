@@ -53,6 +53,9 @@ class RDF(BaseAnalyzer):
 
     def run(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
         def get_indices(spec, chem_sym):
+            """
+            get the indices for specification spec
+            """
             if isinstance(spec, str):
                 return np.where(chem_sym == spec)[0].tolist()
             elif isinstance(spec, int):
@@ -60,11 +63,21 @@ class RDF(BaseAnalyzer):
             elif isinstance(spec, (tuple, list)):
                 list_ = []
                 for item in spec:
-                    list_ += get_indices(spec, chem_sym)
+                    list_ += get_indices(item, chem_sym)
                 return list_
             else:
                 raise TypeError('{} can not be transformed to index'.format(spec))
-                
+        def get_label(spec, ispec):
+            """
+            Get a good label for scpecification spec. If none can befound
+            give on based on iteration counter ispec
+            """
+            if isinstance(spec,str):
+                return spec
+            elif isinstance(spec, (tuple, list)):
+                return "spec_{}".format(ispec)
+            else:
+                print( type(spec))
         atoms = self._trajectory.atoms
         volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
@@ -82,7 +95,7 @@ class RDF(BaseAnalyzer):
         indices_pairs = []
         labels = []
         species_pairs_pruned = []
-        for spec1, spec2 in species_pairs:
+        for ispec, (spec1, spec2) in enumerate(species_pairs):
             ind_spec1, ind_spec2 = get_indices(spec1, chem_sym), get_indices(spec2, chem_sym)
             # special situation if there's only one atom of a species
             # and we're making the RDF of that species with itself.
@@ -90,7 +103,7 @@ class RDF(BaseAnalyzer):
             if ind_spec1==ind_spec2 and len(ind_spec1) ==1:
                 continue
             indices_pairs.append((ind_spec1, ind_spec2))
-            labels.append('{}_{}'.format(spec1, spec2))
+            labels.append('{}_{}'.format(get_label(spec1, ispec), get_label(spec2, ispec)))
             species_pairs_pruned.append((spec1, spec2))
         rdf_res = AttributedArray()
         rdf_res.set_attr('species_pairs', species_pairs_pruned)
@@ -129,9 +142,6 @@ class RDF(BaseAnalyzer):
             rdf_res.set_array('int_{}'.format(label), integral)
             rdf_res.set_array('radii_{}'.format(label), radii)
 
-
-            #~ rdf_res.set_array('int_{}_{}'.format(spec1, spec2), integral)
-            #~ rdf_res.set_array('radii_{}_{}'.format(spec1, spec2), radii)
         return rdf_res
 
 class AngularSpectrum(BaseAnalyzer):

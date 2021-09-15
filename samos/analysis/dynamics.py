@@ -216,7 +216,7 @@ class DynamicsAnalyzer(object):
         return (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
             stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt, t_long_factor)
 
-    def get_msd(self, decomposed=False, **kwargs):
+    def get_msd(self, decomposed=False, atom_indices=None, **kwargs):
         """
         Calculates the mean square discplacement (MSD),
 
@@ -226,6 +226,9 @@ class DynamicsAnalyzer(object):
 
         :param list species_of_interest:
             The species of interest for which to calculate the MSD, for example ["O", "H"]
+        :param list atom_indices:
+            The indices of interest for which to calculate the MSD, for example [0, 1, 2, 5].
+            The intersection of atom_indices and species_of_interest is taken, so aotm_indices can be used to narrow the list of atoms
         :param int stepsize_t:
             This tells me whether I will have a stepsize larger than 1 (the default)
             when looping over the trajectory.
@@ -283,7 +286,8 @@ class DynamicsAnalyzer(object):
                 else:
                     indices_of_interest = trajectory.get_indices_of_species(atomic_species, start=1)
                     prefactor = 1
-
+                if atom_indices is not None:
+                    indices_of_interest = [i for i in indices_of_interest if i in atom_indices]
                 nstep, nat, _= positions.shape
                 if nr_of_blocks > 0:
                     block_length_dt_this_traj = (nstep - t_end_dt)  / nr_of_blocks
@@ -638,6 +642,8 @@ class DynamicsAnalyzer(object):
         try:
             trajectories = self._trajectories
             timestep_fs = self._timestep_fs
+            # Calculating the sampling frequency of the trajectory in THz (the inverse of a picosecond)
+            sampling_frequncy_THz = 1e3/timestep_fs
         except AttributeError as e:
             raise Exception(
                 "\n\n\n"
@@ -699,7 +705,7 @@ class DynamicsAnalyzer(object):
                 nblocks = len(blocks)
 
                 freq, pd = signal.periodogram(blocks,
-                    fs=timestep_fs, axis=1, return_onesided=True) # Show result in THz
+                    fs=sampling_frequncy_THz, axis=1, return_onesided=True) # Show result in THz
                 # I mean over all atoms of this species and directions
                 # In the future, maybe consider having a direction resolved periodogram?
                 pd_this_species_this_traj = pd.mean(axis=(2,3))
