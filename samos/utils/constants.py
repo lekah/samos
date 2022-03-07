@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 # constants
 kB =  1.38064852e-23

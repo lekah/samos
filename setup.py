@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from setuptools import find_packages
 from numpy.distutils.core import setup, Extension
 from json import load as json_load

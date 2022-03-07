@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 from ase import Atoms
 import numpy as np

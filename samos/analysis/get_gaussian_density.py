@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import sys, numpy as np, re, os
 from samos.lib.gaussian_density import make_gaussian_density
 from samos.utils.terminal import get_terminal_width

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import sys, numpy as np
 bohr_to_ang = 0.52917720859
 

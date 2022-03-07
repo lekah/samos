@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 from ase.data.colors import jmol_colors, cpk_colors
 from ase.data import atomic_numbers

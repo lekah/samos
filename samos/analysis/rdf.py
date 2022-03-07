@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import numpy as  np
 from scipy.spatial.distance import cdist
 from ase import Atoms

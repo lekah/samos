@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 from mayavi import mlab
 import sys, numpy as np, re
 from ase.data.colors import jmol_colors
@@ -276,6 +278,8 @@ def read_forces(files, atoms_of_interest, take_difference=False):
     else:
         returnlist = forces
     return returnlist
+
+
 if __name__ == '__main__':
     def logarithmize_vector(vector):
         norm = np.linalg.norm(vector)
