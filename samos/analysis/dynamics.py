@@ -92,6 +92,11 @@ class DynamicsAnalyzer(object):
         :param float t_end_fit_fs: Time to end the fitting of the time series in femtoseconds.
         :param float t_end_fit_ps: Time to end the fitting of the time series in picoseconds.
         :param int t_end_fit_dt: Time to end the fitting of the time series in multiples of the trajectory timestep.
+        :param bool do_long:  whether to perform a maximum-statistics MSD calculation, using the whole trajectory and no blocks.
+        :param float t_long_end_fs: Maximum value of the sliding window in femtoseconds used in maximum-statistics calculation.
+        :param float t_long_end_ps: Maximum value of the sliding window in picoseconds used in maximum-statistics calculation.
+        :param int t_long_end_dt: Maximum value of the sliding window in multiples of the trajectory timestep used in maximum-statistics calculation.
+        :param bool do_com: whether to calculate center-of-mass diffusion instead of tracer diffusion.
         """
 
         species_of_interest = kwargs.pop("species_of_interest", self.get_species_of_interest())
@@ -109,13 +114,13 @@ class DynamicsAnalyzer(object):
                 ('t_long_end_fs', 't_long_end_ps', 't_long_end_dt', 't_long_factor'),
                 ):
             keys_provided_this_group = [k for k in mutually_exclusive_keys if k in keywords_provided]
-            if len(keys_provided_this_group)>1:
+            if len(keys_provided_this_group) > 1:
                 raise InputError("This keywords are mutually exclusive: {}".format(', '.join(keys_provided_this_group)))
 
         if 't_start_fit_fs' in keywords_provided:
             t_start_fit_dt = int(float(kwargs.pop('t_start_fit_fs')) / timestep_fs)
         elif 't_start_fit_ps' in keywords_provided:
-            t_start_fit_dt = int(1000*float(kwargs.pop('t_start_fit_ps')) / timestep_fs)
+            t_start_fit_dt = int(1000 * float(kwargs.pop('t_start_fit_ps')) / timestep_fs)
         elif 't_start_fit_dt' in keywords_provided:
             t_start_fit_dt = int(kwargs.pop('t_start_fit_dt'))
         else:
@@ -127,27 +132,26 @@ class DynamicsAnalyzer(object):
         if 't_end_fit_fs' in keywords_provided:
             t_end_fit_dt = int(float(kwargs.pop('t_end_fit_fs')) / timestep_fs)
         elif 't_end_fit_ps' in keywords_provided:
-            t_end_fit_dt = int(1000*float(kwargs.pop('t_end_fit_ps')) / timestep_fs)
+            t_end_fit_dt = int(1000 * float(kwargs.pop('t_end_fit_ps')) / timestep_fs)
         elif 't_end_fit_dt' in keywords_provided:
             t_end_fit_dt = int(kwargs.pop('t_end_fit_dt'))
         else:
             raise InputError("Provide a time to end fitting the time series")
         if not isinstance(t_end_fit_dt, int):
             raise InputError("t_end_fit_dt is not an integer")
-        if not t_end_fit_dt > t_start_fit_dt:
+        if not (t_end_fit_dt > t_start_fit_dt):
             raise InputError("t_end_fit_dt not larger than t_start_fit_dt")
-
 
         if 't_start_fs' in keywords_provided:
             t_start_dt = int(float(kwargs.pop('t_start_fs')) / timestep_fs)
         elif 't_start_ps' in keywords_provided:
-            t_start_dt = int(1000*float(kwargs.pop('t_start_ps')) / timestep_fs)
+            t_start_dt = int(1000 * float(kwargs.pop('t_start_ps')) / timestep_fs)
         elif 't_start_dt' in keywords_provided:
             t_start_dt = int(kwargs.pop('t_start_dt'))
         else:
-            t_start_dt = 0 # By default I create the time series from the strt
+            t_start_dt = 0  # By default I create the time series from the start
 
-        if not  t_start_dt >= 0:
+        if not (t_start_dt >= 0):
             raise InputError("t_start_dt is not positive or 0")
         if t_start_dt > 0:
             raise NotImplementedError("t_start has not been implemented yet!")
@@ -155,14 +159,16 @@ class DynamicsAnalyzer(object):
         if 't_end_fs' in keywords_provided:
             t_end_dt = int(float(kwargs.pop('t_end_fs')) / timestep_fs)
         elif 't_end_ps' in keywords_provided:
-            t_end_dt = int(1000*float(kwargs.pop('t_end_ps')) / timestep_fs)
+            t_end_dt = int(1000 * float(kwargs.pop('t_end_ps')) / timestep_fs)
         elif 't_end_dt' in keywords_provided:
             t_end_dt = int(kwargs.pop('t_end_dt'))
         else:
             t_end_dt = t_end_fit_dt
 
-        if not t_end_dt > t_start_dt:
-            raise InputError( "t_end_dt is not larger than t_start_dt")
+        if not (t_end_dt > t_start_dt):
+            raise InputError("t_end_dt is not larger than t_start_dt")
+        if not (t_end_dt >= t_end_fit_dt):
+            raise InputError("t_end_dt must not be smaller than t_end_fit_dt")
 
 
         # The number of timesteps I will calculate:
@@ -174,7 +180,7 @@ class DynamicsAnalyzer(object):
             block_length_dt = int(float(kwargs.pop('block_length_fs')) / timestep_fs)
             nr_of_blocks = None
         elif 'block_length_ps' in keywords_provided:
-            block_length_dt = int(1000*float(kwargs.pop('block_length_ps')) / timestep_fs)
+            block_length_dt = int(1000 * float(kwargs.pop('block_length_ps')) / timestep_fs)
             nr_of_blocks = None
         elif 'block_length_dt' in keywords_provided:
             block_length_dt = int(kwargs.pop('block_length_dt'))
@@ -195,7 +201,7 @@ class DynamicsAnalyzer(object):
             t_long_end_dt = int(float(kwargs.pop('t_long_end_fs')) / timestep_fs)
             t_long_factor = None
         elif 't_long_end_ps' in keywords_provided:
-            t_long_end_dt = int(1000*float(kwargs.pop('t_long_end_ps')) / timestep_fs)
+            t_long_end_dt = int(1000 * float(kwargs.pop('t_long_end_ps')) / timestep_fs)
             t_long_factor = None
         elif 't_long_end_dt' in keywords_provided:
             t_long_end_dt = int(kwargs.pop('t_long_end_dt'))
@@ -252,17 +258,14 @@ class DynamicsAnalyzer(object):
             t_long_factor) = self._get_running_params(timestep_fs, **kwargs)
 
 
-
-
         msd = TimeSeries()
+        # list of t at which MSD will be computed
+        t_list_fs = timestep_fs * stepsize_t * np.arange(t_end_dt / stepsize_t)
+        msd.set_array('t_list_fs', t_list_fs)
 
-        results_dict = {atomic_species: {}
-                for atomic_species
-                in species_of_interest
-            }
+        results_dict = {atomic_species: {} for atomic_species in species_of_interest}
         msd_all_species = []
         nr_of_t_long_list = []
-        #self.msd_averaged = []
         # Setting params for calculation of MSD and conductivity
         # Future: Maybe allow for element specific parameter settings?
 
@@ -270,11 +273,8 @@ class DynamicsAnalyzer(object):
             msd_this_species = [] # Here I collect the trajectories
             slopes = [] # That's where I collect slopes for the final estimate of diffusion
 
-
             for itraj, trajectory in enumerate(trajectories):
-
                 positions = trajectory.get_positions()
-
                 if do_com:
                     # I replace the array positions with the COM!
                     masses = self._atoms.get_masses() # Getting the masses for recentering
@@ -288,6 +288,8 @@ class DynamicsAnalyzer(object):
                     prefactor = 1
                 if atom_indices is not None:
                     indices_of_interest = [i for i in indices_of_interest if i in atom_indices]
+
+                # make blocks
                 nstep, nat, _= positions.shape
                 if nr_of_blocks > 0:
                     block_length_dt_this_traj = (nstep - t_end_dt)  / nr_of_blocks
@@ -304,6 +306,7 @@ class DynamicsAnalyzer(object):
 
                 nat_of_interest = len(indices_of_interest)
 
+                # compute MSD (using defined blocks, nstep, nr_of_t, ...)
                 if self._verbosity > 0:
                     print((
                             '\n    ! Calculating MSD for atomic species {} in trajectory {}\n'
@@ -315,30 +318,30 @@ class DynamicsAnalyzer(object):
                                     t_start_fit_dt, t_end_fit_dt, stepsize_t, stepsize_tau)
                         ))
                 if decomposed:
-                    msd_this_species_this_traj = prefactor*calculate_msd_specific_atoms_decompose_d(
+                    msd_this_species_this_traj = prefactor * calculate_msd_specific_atoms_decompose_d(
                             positions, indices_of_interest, stepsize_t, stepsize_tau, block_length_dt_this_traj,
                             nr_of_blocks_this_traj, nr_of_t, nstep, nat, nat_of_interest)
                 else:
-                    msd_this_species_this_traj = prefactor*calculate_msd_specific_atoms(
+                    msd_this_species_this_traj = prefactor * calculate_msd_specific_atoms(
                             positions, indices_of_interest, stepsize_t, stepsize_tau, block_length_dt_this_traj,
                             nr_of_blocks_this_traj, nr_of_t, nstep, nat, nat_of_interest)
-
                 if self._verbosity > 0:
                     print('      Done\n')
 
-                range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt//stepsize_t, t_end_fit_dt//stepsize_t)
-
+                # linear regression of MSD
+                t_list_fit_fs = timestep_fs * stepsize_t * np.arange(t_start_fit_dt//stepsize_t, t_end_fit_dt//stepsize_t)
                 for iblock, block in enumerate(msd_this_species_this_traj):
                     if decomposed:
                         for ipol in range(3):
                             for jpol in range(3):
-                                slope, intercept, _, _, _ = linregress(range_for_t, block[t_start_fit_dt//stepsize_t:t_end_fit_dt//stepsize_t,ipol, jpol])
+                                slope, intercept, _, _, _ = linregress(t_list_fit_fs,
+                                        block[t_start_fit_dt//stepsize_t:t_end_fit_dt//stepsize_t, ipol, jpol])
                                 slopes_intercepts[iblock, ipol, jpol, 0] = slope
                                 slopes_intercepts[iblock, ipol, jpol, 1] = intercept
                         slopes.append(slopes_intercepts[iblock, :,:,0])
                     else:
-                        #~ print range_for_t.shape, block[(t_start_fit_dt-t_start_dt)/stepsize_t:t_end_fit_dt/stepsize_t].shape
-                        slope, intercept, _, _, _ = linregress(range_for_t, block[(t_start_fit_dt-t_start_dt)//stepsize_t:t_end_fit_dt//stepsize_t])
+                        slope, intercept, _, _, _ = linregress(t_list_fit_fs,
+                                block[(t_start_fit_dt-t_start_dt)//stepsize_t:t_end_fit_dt//stepsize_t])
                         slopes_intercepts[iblock, 0] = slope
                         slopes_intercepts[iblock, 1] = intercept
                         slopes.append(slope)
@@ -349,18 +352,21 @@ class DynamicsAnalyzer(object):
                 msd.set_array('slopes_intercepts_{}_{}_{}'.format('decomposed' if decomposed else 'isotropic',
                         atomic_species, itraj), slopes_intercepts)
 
+                # compute MSD with maximal statistics (whole trajectory, no blocks)
                 if do_long:
+                    # nr_of_t_long may change with the length of the traj (if not set by user)
                     if  t_long_end_dt is not None:
                         nr_of_t_long = t_long_end_dt / stepsize_t
                     elif t_long_factor is not None:
-                        nr_of_t_long = int(t_long_factor*nstep / stepsize_t)
+                        nr_of_t_long = int(t_long_factor * nstep / stepsize_t)
                     else:
-                        nr_of_t_long = int(nstep -1 / stepsize_t)
+                        nr_of_t_long = int(nstep - 1 / stepsize_t)
                     nr_of_t_long_list.append(nr_of_t_long)
-                    msd_this_species_this_traj_max_stats = prefactor*calculate_msd_specific_atoms_max_stats(
+                    msd_this_species_this_traj_max_stats = prefactor * calculate_msd_specific_atoms_max_stats(
                             positions, indices_of_interest, stepsize_t, stepsize_tau,
                             nr_of_t_long, nstep, nat, nat_of_interest)
                     msd.set_array('msd_long_{}_{}'.format(atomic_species, itraj), msd_this_species_this_traj_max_stats)
+
 
             # Calculating the average sem/std for each point in time:
             msd_mean = np.mean(msd_this_species, axis=0)
@@ -368,21 +374,21 @@ class DynamicsAnalyzer(object):
             msd_sem = msd_std / np.sqrt(len(msd_this_species) - 1)
 
             msd.set_array('msd_{}_{}_mean'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_mean)
-            msd.set_array('msd_{}_{}_std'.format('decomposed' if decomposed else 'isotropic',atomic_species), msd_std)
-            msd.set_array('msd_{}_{}_sem'.format('decomposed' if decomposed else 'isotropic',atomic_species), msd_sem)
+            msd.set_array('msd_{}_{}_std'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_std)
+            msd.set_array('msd_{}_{}_sem'.format('decomposed' if decomposed else 'isotropic', atomic_species), msd_sem)
 
             slopes = np.array(slopes) # 0th axis
             if decomposed:
                 results_dict[atomic_species].update({
-                    'slope_msd_mean':np.mean(slopes, axis=0),
-                    'slope_msd_std':np.std(slopes, axis=0),
-                    'slopes_intercepts':slopes_intercepts.tolist()})
+                    'slope_msd_mean': np.mean(slopes, axis=0),
+                    'slope_msd_std': np.std(slopes, axis=0),
+                    'slopes_intercepts': slopes_intercepts.tolist()})
                 results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(slopes)-1)
                 dimensionality_factor = float(2)
             else:
                 results_dict[atomic_species].update({
-                    'slope_msd_mean':np.mean(slopes),
-                    'slope_msd_std':np.std(slopes)})
+                    'slope_msd_mean': np.mean(slopes),
+                    'slope_msd_std': np.std(slopes)})
                 results_dict[atomic_species]['slope_msd_sem'] = results_dict[atomic_species]['slope_msd_std'] / np.sqrt(len(slopes)-1)
                 dimensionality_factor = float(6)
 
@@ -390,15 +396,14 @@ class DynamicsAnalyzer(object):
             results_dict[atomic_species]['diffusion_std_cm2_s']  =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_std']
             results_dict[atomic_species]['diffusion_sem_cm2_s']  =  1e-1 / dimensionality_factor * results_dict[atomic_species]['slope_msd_sem']
 
-
             if decomposed:
                 # I need to transform to lists, numpy are not json serializable:
                 for k in ('slope_msd_mean', 'slope_msd_std', 'slope_msd_sem',
-                    'diffusion_mean_cm2_s', 'diffusion_std_cm2_s','diffusion_sem_cm2_s'):
+                          'diffusion_mean_cm2_s', 'diffusion_std_cm2_s','diffusion_sem_cm2_s'):
                     results_dict[atomic_species][k] = results_dict[atomic_species][k].tolist()
             if self._verbosity > 1:
-                print(('      Done, these are the results for {}:'.format(atomic_species)))
-                for key, val in list(results_dict[atomic_species].items()):
+                print('      Done, these are the results for {}:'.format(atomic_species))
+                for key, val in results_dict[atomic_species].items():
                     if not isinstance(val, (tuple, list, dict)):
                         print((  '          {:<20} {}'.format(key,  val)))
 
@@ -417,7 +422,7 @@ class DynamicsAnalyzer(object):
         })
         if do_long:
             results_dict['nr_of_t_long_list'] = nr_of_t_long_list
-        for k,v in list(results_dict.items()):
+        for k, v in results_dict.items():
             msd.set_attr(k,v)
         return msd
 
@@ -446,7 +451,6 @@ class DynamicsAnalyzer(object):
 
         results_dict = dict()
         vaf_all_species = []
-        range_for_t = timestep_fs*stepsize_t*np.arange(t_start_fit_dt//stepsize_t, t_end_fit_dt//stepsize_t)
 
         for atomic_species in species_of_interest:
 
@@ -704,7 +708,7 @@ class DynamicsAnalyzer(object):
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
                 blocks = np.array(np.split(vel_array[:nr_of_blocks_this_traj*split_number], nr_of_blocks_this_traj, axis=0))
                 nblocks = len(blocks)
-                if (self._verbosity > 0):
+                if self._verbosity > 0:
                     print 'nblocks = {}, blocks.shape = {}, block_length_ps = {}'.format(nblocks, blocks.shape, blocks.shape[1]*timestep_fs)
 
                 freq, pd = signal.periodogram(blocks,
