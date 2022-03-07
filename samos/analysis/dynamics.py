@@ -643,7 +643,7 @@ class DynamicsAnalyzer(object):
             trajectories = self._trajectories
             timestep_fs = self._timestep_fs
             # Calculating the sampling frequency of the trajectory in THz (the inverse of a picosecond)
-            sampling_frequncy_THz = 1e3/timestep_fs
+            sampling_frequency_THz = 1e3 / timestep_fs
         except AttributeError as e:
             raise Exception(
                 "\n\n\n"
@@ -678,7 +678,6 @@ class DynamicsAnalyzer(object):
             raise InputError("Uncrecognized keywords: {}".format(list(kwargs.keys())))
 
 
-
         fourier_results = dict(smothening=smothening)
         power_spectrum = TimeSeries()
         frequencies = []
@@ -692,20 +691,24 @@ class DynamicsAnalyzer(object):
 
                 if nr_of_blocks > 0:
                     nr_of_blocks_this_traj = nr_of_blocks
+                    # Use the number of blocks specified by user
+                    split_number = nstep // nr_of_blocks_this_traj
                 elif block_length_dt > 0:
-                    nr_of_blocks_this_traj   = nstep // block_length_dt
+                    nr_of_blocks_this_traj = nstep // block_length_dt
+                    # Use the precise length specified by user
+                    split_number = block_length_dt
                 else:
                     raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
 
                 # I need to have blocks of equal length, and use the split method
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
-                split_number = vel_array.shape[0] // nr_of_blocks_this_traj
-
                 blocks = np.array(np.split(vel_array[:nr_of_blocks_this_traj*split_number], nr_of_blocks_this_traj, axis=0))
                 nblocks = len(blocks)
+                if (self._verbosity > 0):
+                    print 'nblocks = {}, blocks.shape = {}, block_length_ps = {}'.format(nblocks, blocks.shape, blocks.shape[1]*timestep_fs)
 
                 freq, pd = signal.periodogram(blocks,
-                    fs=sampling_frequncy_THz, axis=1, return_onesided=True) # Show result in THz
+                    fs=sampling_frequency_THz, axis=1, return_onesided=True) # Show result in THz
                 # I mean over all atoms of this species and directions
                 # In the future, maybe consider having a direction resolved periodogram?
                 pd_this_species_this_traj = pd.mean(axis=(2,3))
