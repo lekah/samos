@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import unittest
 
 class TestTrajectory(unittest.TestCase):
@@ -45,7 +47,7 @@ class TestTrajectory(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as f:
             t.save(f.name)
             tnew =  Trajectory.load_file(f.name)
-        
+
         self.assertTrue(np.array_equal(pos, tnew.get_positions()))
         self.assertTrue(np.array_equal(vel, tnew.get_velocities()))
         self.assertTrue(np.array_equal(frc, tnew.get_forces()))
