@@ -34,7 +34,7 @@ def format_mean_err(mean, err, decimals=2):
 def plot_msd_isotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
         alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
-        color_dict={}, decimals=1, **kwargs):
+        color_dict={}, decimals=1, no_block_fits=False, no_long=False, grid=False, **kwargs):
 
     if ax is None:
         fig = plt.figure(**kwargs)
@@ -42,24 +42,24 @@ def plot_msd_isotropic(msd,
     attrs = msd.get_attrs()
     if attrs['decomposed']:
         raise NotImplementedError("Plotting decomposed trajectories is not implemented")
+    multiple_params_fit = attrs.get('multiple_params_fit', False)
 
     nr_of_trajectories = attrs['nr_of_trajectories']
     t_start_fit_dt = attrs['t_start_fit_dt']
     stepsize = attrs.get('stepsize_t', 1)
     timestep_fs = attrs['timestep_fs']
+    plot_long = attrs.get('do_long', False) and not(no_long)
 
     ax.set_ylabel(r'$\mathrm{MSD}(t)$ $\left( \mathrm{\AA}^2 \right) $ ')
     ax.set_xlabel(r'$t$ $\left( \mathrm{ps}\right)$')
 
-    times_msd = timestep_fs/1000.0*stepsize*np.arange(
-                attrs.get('t_start_dt')/stepsize,
-                attrs.get('t_end_dt')/stepsize
-            )
+    times_msd = msd.get_array('t_list_fs') / 1e3
 
-    times_fit =  timestep_fs/1000.0*stepsize*np.arange(
-                attrs.get('t_start_fit_dt')/stepsize,
-                attrs.get('t_end_fit_dt')/stepsize
-            )
+    if not no_block_fits:
+        times_fit =  timestep_fs / 1000.0 * stepsize * np.arange(
+            attrs.get('t_start_fit_dt') // stepsize,
+            attrs.get('t_end_fit_dt') // stepsize
+        )
     if species_of_interest is None:
         species_of_interest = attrs['species_of_interest']
     for index_of_species, atomic_species in enumerate(species_of_interest):
@@ -79,42 +79,47 @@ def plot_msd_isotropic(msd,
         if no_label or (exclude_from_label and atomic_species in exclude_from_label):
             label_this_species = None
         elif label is None:
-            # label_this_species=r'$D_{{{}}}=\left( {} \pm {} \right) \frac{{cm^2}}{{s}}$'.format(
-                    # atomic_species, my_format(diff, decimals=decimals), my_format(diff_sem, decimals=decimals))
-            label_this_species=r'$D_{{{}}}={} \, \frac{{cm^2}}{{s}}$'.format(
+            if not multiple_params_fit:
+                label_this_species = r'$D_{{\mathrm{{{}}}}}={} \, \frac{{cm^2}}{{s}}$'.format(
                     atomic_species, format_mean_err(diff, diff_sem, decimals=decimals))
-
+            else:
+                label_this_species = r'{}'.format(atomic_species)
         else:
             label_this_species = '{}'.format(label)
 
-        if attrs.get('do_long', False):
+        if plot_long:
             # reduce number of lines in plot, customize for later!
             # Keep the legend though!
-            ax.plot([],[], color=color, linewidth=3., label=label_this_species)
+            ax.plot([],[], color=color, linewidth=1.0, label=label_this_species)
+            ax.plot(times_msd, msd_mean, color=color, linewidth=2.)
         else:
-            ax.plot(times_msd,msd_mean, color=color, linewidth=3., label=label_this_species)
+            ax.plot(times_msd, msd_mean, color=color, linewidth=2., label=label_this_species)
 
 
         for itraj in range(nr_of_trajectories):
             msd_this_traj =  msd.get_array('msd_isotropic_{}_{}'.format(atomic_species, itraj))
             slopes_intercepts_this_traj =  msd.get_array('slopes_intercepts_isotropic_{}_{}'.format(atomic_species, itraj))
             for iblock in range(len(msd_this_traj)):
-                slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
-                ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=alpha_block,)
-                ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', alpha=alpha_fit)
-            if attrs.get('do_long', False):
-                times_long = timestep_fs/1000.0*stepsize*np.arange(0, attrs['nr_of_t_long_list'][itraj])
-                ax.plot(times_long, msd.get_array('msd_long_{}_{}'.format(atomic_species, itraj)), color=color, linestyle='-', lw=3)
+                ax.plot(times_msd, msd_this_traj[iblock], color=color, alpha=alpha_block, lw=0.5)
+                if not no_block_fits:
+                    slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock]
+                    ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit], color=color, linestyle='--', lw=1.0, alpha=alpha_fit)
+            if plot_long:
+                times_long = msd.get_array('t_list_long_fs')[itraj] / 1e3
+                ax.plot(times_long, msd.get_array('msd_long_{}_{}'.format(atomic_species, itraj)), color=color, linestyle='-', lw=1.0)
     if not(no_legend):
         leg = ax.legend(loc=2,labelspacing=0.01)
         leg.get_frame().set_alpha(0.)
+    if grid:
+        ax.grid(ls=':')
     if show:
         plt.show()
+    return ax
 
 def plot_msd_anisotropic(msd,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
         alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4, color_scheme='jmol', exclude_from_label=None,
-        diagonal_only=False, label_diagonal=True, **kwargs):
+        diagonal_only=False, label_diagonal=True, no_block_fits=False, grid=False, **kwargs):
 
     if ax is None:
         fig = plt.figure(**kwargs)
@@ -122,6 +127,7 @@ def plot_msd_anisotropic(msd,
     attrs = msd.get_attrs()
     if not(attrs['decomposed']):
         raise NotImplementedError("Only plotting decomposed with this functions")
+    multiple_params_fit = attrs.get('multiple_params_fit', False)
 
     nr_of_trajectories = attrs['nr_of_trajectories']
     t_start_fit_dt = attrs['t_start_fit_dt']
@@ -131,15 +137,13 @@ def plot_msd_anisotropic(msd,
     ax.set_ylabel(r'$\mathrm{MSD}(t)$ $\left( \mathrm{\AA}^2 \right) $ ')
     ax.set_xlabel(r'$t$ $\left( \mathrm{ps}\right)$')
 
-    times_msd = timestep_fs/1000.0*stepsize*np.arange(
-                attrs.get('t_start_dt')/stepsize,
-                attrs.get('t_end_dt')/stepsize
-            )
+    times_msd = msd.get_array('t_list_fs') / 1e3
 
-    times_fit =  timestep_fs/1000.0*stepsize*np.arange(
-                attrs.get('t_start_fit_dt')/stepsize,
-                attrs.get('t_end_fit_dt')/stepsize
-            )
+    if not no_block_fits:
+        times_fit =  timestep_fs / 1000.0 * stepsize * np.arange(
+            attrs.get('t_start_fit_dt') // stepsize,
+            attrs.get('t_end_fit_dt') // stepsize
+        )
     if species_of_interest is None:
         species_of_interest = attrs['species_of_interest']
 
@@ -163,26 +167,36 @@ def plot_msd_anisotropic(msd,
                 count += 1
                 if ( diagonal_only and i!=j):
                     continue
-                label = r'$D_{{{}{}}}^{{{}}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(i,j,
-                     atomic_species, diff[i][j], diff_sem[i][j]) if (label_this_species and (i==j or label_diagonal)) else None
+                if label_this_species and (i==j or label_diagonal):
+                    if multiple_params_fit:
+                        label = r'$\mathrm{{{}}}_{{{}{}}}$'.format(atomic_species, i, j)
+                    else:
+                        label = r'$D_{{{}{}}}^{{{}}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(
+                                    i, j, atomic_species, diff[i][j], diff_sem[i][j])
+                else:
+                    label = None
 
                 ax.plot(times_msd,msd_mean[:,i,j], color=color,
-                        linewidth=3., label=label)
+                        linewidth=2., label=label)
                 ax.fill_between(times_msd, msd_mean[:,i,j] - msd_sem[:,i,j], msd_mean[:,i,j] + msd_sem[:,i,j],
                                                             facecolor=color, alpha=alpha_fill, linewidth=1)
                 for itraj in range(nr_of_trajectories):
                     msd_this_traj =  msd.get_array('msd_decomposed_{}_{}'.format(atomic_species, itraj))
                     slopes_intercepts_this_traj =  msd.get_array('slopes_intercepts_decomposed_{}_{}'.format(atomic_species, itraj))
                     for iblock in range(len(msd_this_traj)):
-                        slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock][i][j]
                         ax.plot(times_msd, msd_this_traj[iblock,:,i,j], color=color, alpha=alpha_block,lw=0.5, zorder=1)
-                        ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit],
-                                color=color, linestyle='--', alpha=alpha_fit, zorder=2, lw=0.5)
+                        if not no_block_fits:
+                            slope_this_block, intercept_this_block = slopes_intercepts_this_traj[iblock][i][j]
+                            ax.plot(times_fit, [1000.*slope_this_block*x+intercept_this_block for x in times_fit],
+                                    color=color, linestyle='--', alpha=alpha_fit, zorder=2, lw=1.0)
     if not(no_legend):
         leg = ax.legend(loc=2)
         leg.get_frame().set_alpha(0.)
+    if grid:
+        ax.grid(ls=':')
     if show:
         plt.show()
+    return ax
 
 def plot_vaf_isotropic(vaf,
         ax=None, no_legend=False, species_of_interest=None, show=False,
