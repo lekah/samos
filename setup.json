@@ -3,8 +3,11 @@
     "author_email": "leonid.kahle@epfl.ch",
     "classifiers": [
         "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 2",
-        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Operating System :: OS Independent",
         "Topic :: Scientific/Engineering :: Physics",
         "Topic :: Scientific/Engineering :: Chemistry",
@@ -12,8 +15,12 @@
     ],
     "description": "Package for Analysis and Tricks for MOlecular Simulations: a set of useful tools to analyze molecular dynamics trajectoris",
     "extras_require": {
-        "dev_precommit": [
-            "pre-commit"
+        "pre-commit": [
+            "pre-commit",
+            "flake8"
+        ],
+        "tests" : [
+            "pytest"
         ],
         "docs": [
             "Sphinx",
@@ -27,7 +34,6 @@
         "scipy>=1.0.0",
         "matplotlib>=2.1.2"
     ],
-    "extras_requires":{},
     "license": "MIT License",
     "name": "samos",
     "url": "https://github.com/lekah/samos",

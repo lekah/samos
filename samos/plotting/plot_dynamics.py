@@ -9,7 +9,7 @@ from samos.utils.colors import get_color
 def my_format(real, decimals=2):
     exp = np.floor(np.log10(real))
     pref = real / 10**exp
-    return '{:.{prec}f} \cdot 10^{{{}}}'.format(pref, int(exp), prec=decimals)
+    return r'{:.{prec}f} \cdot 10^{{{}}}'.format(pref, int(exp), prec=decimals)
 
 def format_mean_err(mean, err, decimals=2):
     if np.isnan(mean):
@@ -18,15 +18,15 @@ def format_mean_err(mean, err, decimals=2):
     exp_mean = int(np.floor(np.log10(np.abs(mean_rounded_to_prec))))
     pref_mean = mean_rounded_to_prec / 10.0**exp_mean
     if np.isnan(err):
-        return '{:.{prec}f}\cdot 10^{{{}}}'.format(pref_mean, exp_mean, prec=decimals)
+        return r'{:.{prec}f}\cdot 10^{{{}}}'.format(pref_mean, exp_mean, prec=decimals)
     else:
         err_rounded_to_prec = float('{:.{prec}e}'.format(err, prec=decimals))
         exp_err = int(np.floor(np.log10(np.abs(err_rounded_to_prec))))
         pref_err = err_rounded_to_prec / 10.0**exp_err
         if exp_mean == exp_err:
-            return '\left({:.{prec}f} \pm {:.{prec}f} \\right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
+            return r'\left({:.{prec}f} \pm {:.{prec}f} \\right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
         else:
-            return '{:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}}'.format(
+            return r'{:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}}'.format(
                 pref_mean,exp_mean, pref_err, exp_err, prec=decimals)
 
 
@@ -171,8 +171,8 @@ def plot_msd_anisotropic(msd,
                     if multiple_params_fit:
                         label = r'$\mathrm{{{}}}_{{{}{}}}$'.format(atomic_species, i, j)
                     else:
-                        label = r'$D_{{{}{}}}^{{{}}}=( {:.1e} \pm {:.1e}) \frac{{cm^2}}{{s}}$'.format(
-                                    i, j, atomic_species, diff[i][j], diff_sem[i][j])
+                        label = r'$D_{{\mathrm{{{}}}}}^{{{}{}}}={} \, \frac{{cm^2}}{{s}}$'.format(
+                            atomic_species, i, j, format_mean_err(diff[i][j], diff_sem[i][j]))
                 else:
                     label = None
 
