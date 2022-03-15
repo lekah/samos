@@ -34,10 +34,10 @@ class AttributedArray(object):
         # First, I call np.array to ensure it's a valid array
         array = np.array(array)
         if not isinstance(name, str):
-            raise TypeError("Name has to be a string")
+            raise TypeError('Name has to be a string')
         if check_existing:
             if name in list(self._arrays.keys()):
-                raise ValueError("Name {} already exists".formamt(name))
+                raise ValueError('Name {} already exists'.formamt(name))
         if check_nstep:
             for other_name, other_array in list(self._arrays.items()):
                 assert array.shape[0] == other_array.shape[0], (
@@ -45,7 +45,7 @@ class AttributedArray(object):
                             name, array.shape[0],other_name,  other_array.shape[0]))
         if check_nat and len(array.shape) > 2:
             if array.shape[1] != len(self.atoms):
-                raise ValueError("Second dimension of array does not match the number of atoms")
+                raise ValueError('Second dimension of array does not match the number of atoms')
         self._arrays[name] = array
 
     def __contains__(self, arrayname):
@@ -55,7 +55,7 @@ class AttributedArray(object):
         try:
             return self._arrays[name]
         except KeyError:
-            raise KeyError("An array with that name ( {} ) has not been set.".format(name))
+            raise KeyError('An array with that name ( {} ) has not been set.'.format(name))
 
     def get_arraynames(self):
         return sorted(self._arrays.keys())
@@ -91,8 +91,8 @@ class AttributedArray(object):
             if funcname.startswith('_save_'):
                 func(temp_folder)
 
-        with tarfile.open(filename, "w:gz", format=tarfile.PAX_FORMAT) as tar:
-            tar.add(temp_folder, arcname="")
+        with tarfile.open(filename, 'w:gz', format=tarfile.PAX_FORMAT) as tar:
+            tar.add(temp_folder, arcname='')
 
     def _save_arrays(self, folder_name):
         from os.path import join
@@ -121,7 +121,7 @@ class AttributedArray(object):
         temp_folder = tempfile.mkdtemp()
 
         try:
-            with tarfile.open(filename, "r:gz", format=tarfile.PAX_FORMAT) as tar:
+            with tarfile.open(filename, 'r:gz', format=tarfile.PAX_FORMAT) as tar:
                 tar.extractall(temp_folder)
 
             files_in_tar = set(os.listdir(temp_folder))
@@ -140,7 +140,7 @@ class AttributedArray(object):
 
             for array_file in files_in_tar:
                 if not array_file.endswith('.npy'):
-                    raise Exception("Unrecognized file in trajectory export: {}".format(array_file))
+                    raise Exception('Unrecognized file in trajectory export: {}'.format(array_file))
                 new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file), mmap_mode='r'))
         except Exception as e:
             shutil.rmtree(temp_folder)

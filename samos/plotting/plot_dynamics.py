@@ -41,7 +41,7 @@ def plot_msd_isotropic(msd,
         ax = fig.add_subplot(1,1,1)
     attrs = msd.get_attrs()
     if attrs['decomposed']:
-        raise NotImplementedError("Plotting decomposed trajectories is not implemented")
+        raise NotImplementedError('Plotting decomposed trajectories is not implemented')
     multiple_params_fit = attrs.get('multiple_params_fit', False)
 
     nr_of_trajectories = attrs['nr_of_trajectories']
@@ -126,7 +126,7 @@ def plot_msd_anisotropic(msd,
         ax = fig.add_subplot(1,1,1)
     attrs = msd.get_attrs()
     if not(attrs['decomposed']):
-        raise NotImplementedError("Only plotting decomposed with this functions")
+        raise NotImplementedError('Only plotting decomposed with this functions')
     multiple_params_fit = attrs.get('multiple_params_fit', False)
 
     nr_of_trajectories = attrs['nr_of_trajectories']

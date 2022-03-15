@@ -17,7 +17,7 @@ def check_trajectory_compatibility(trajectories):
     assert len(trajectories) >= 1, 'No trajectories passed'
     for t in trajectories:
         if not isinstance(t, Trajectory):
-            raise TypeError("{} is not an instance of Trajectory".format(t))
+            raise TypeError('{} is not an instance of Trajectory'.format(t))
     array_names_set = set()
     chemical_symbols_set = set()
     timestep_set = set()
@@ -29,11 +29,11 @@ def check_trajectory_compatibility(trajectories):
         timestep_set.add(timestep)
 
     if len(array_names_set) > 1:
-        raise IncompatibleTrajectoriesException("Different arrays are set")
+        raise IncompatibleTrajectoriesException('Different arrays are set')
     if len(chemical_symbols_set) > 1:
-        raise IncompatibleTrajectoriesException("Different chemical symbols in trajectories")
+        raise IncompatibleTrajectoriesException('Different chemical symbols in trajectories')
     if len(timestep_set) > 1:
-        raise IncompatibleTrajectoriesException("Different timesteps in trajectories")
+        raise IncompatibleTrajectoriesException('Different timesteps in trajectories')
     return atoms, timestep
 
 
@@ -80,7 +80,7 @@ class Trajectory(AttributedArray):
         if self._atoms:
             return self._atoms
         else:
-            raise ValueError("Atoms have not been set")
+            raise ValueError('Atoms have not been set')
     @property
     def atoms(self):
         return self.get_atoms()
@@ -88,7 +88,7 @@ class Trajectory(AttributedArray):
     def set_atoms(self, atoms):
         from ase import Atoms
         if not isinstance(atoms, Atoms):
-            raise ValueError("You have to pass an instance of ase.Atoms")
+            raise ValueError('You have to pass an instance of ase.Atoms')
         self._atoms = atoms
 
     @property
@@ -107,13 +107,13 @@ class Trajectory(AttributedArray):
             The start of indexing, defaults to 0. For fortran indexing, set to 1.
         :return: A numpy array of indices
         """
-        assert isinstance(start, int), "Start is not an integer"
+        assert isinstance(start, int), 'Start is not an integer'
         if isinstance(species, str):
             array_to_index = self.atoms.get_chemical_symbols()
         elif isinstance(species, int):
             array_to_index = self.atoms.get_atomic_numbers()
         else:
-            raise TypeError("species  has  to be an integer or a string, I got {}".format(type(species)))
+            raise TypeError('species  has  to be an integer or a string, I got {}'.format(type(species)))
 
         return np.array([i for i, s in enumerate(array_to_index, start=start) if s==species])
 
@@ -126,9 +126,9 @@ class Trajectory(AttributedArray):
         """
         nstep_set = set([array.shape[0] for array in list(self._arrays.values())])
         if len(nstep_set) == 0:
-            raise ValueError("No arrays have been set, yet")
+            raise ValueError('No arrays have been set, yet')
         elif len(nstep_set) > 1:
-            raise ValueError("Incommensurate arrays")
+            raise ValueError('Incommensurate arrays')
         else:
             return nstep_set.pop()
 
@@ -191,19 +191,19 @@ class Trajectory(AttributedArray):
         masses = self.atoms.get_masses()
         if sublattice is not None:
             if not isinstance(sublattice, (tuple, list, set)):
-                raise TypeError("You have to pass a tuple/list/set as sublattice")
+                raise TypeError('You have to pass a tuple/list/set as sublattice')
             factors = [0]*len(masses)
             for item in sublattice:
                 if isinstance(item, int):
                     try:
                         factors[item] = 1
                     except IndexError:
-                        raise IndexError("You passed an integer for the sublattice, but it is out of range")
+                        raise IndexError('You passed an integer for the sublattice, but it is out of range')
                 elif isinstance(item, str):
                     for index in self.get_indices_of_species(item):
                         factors[index] = 1
                 else:
-                    raise TypeError("You passed {} {} as a sublattice specifier, this is not recognized".format(type(item), item))
+                    raise TypeError('You passed {} {} as a sublattice specifier, this is not recognized'.format(type(item), item))
         else:
             factors = [1]*len(masses)
 

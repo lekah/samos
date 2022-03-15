@@ -45,21 +45,21 @@ class DynamicsAnalyzer(object):
         elif isinstance(species_of_interest, (tuple, set, list)):
             self._species_of_interest = list(species_of_interest)
         else:
-            raise TypeError("Species of interest has to be a list of strings with the atomic symbol")
+            raise TypeError('Species of interest has to be a list of strings with the atomic symbol')
     @property
     def atoms(self):
         try:
             return self._atoms
         except AttributeError as e:
             raise Exception(
-                "\n\n\n"
-                "Please use the set_trajectories method to set trajectories, and I will get the atoms from there."
-                "\n{}\n".format(e)
+                '\n\n\n'
+                'Please use the set_trajectories method to set trajectories, and I will get the atoms from there.'
+                '\n{}\n'.format(e)
             )
 
     def set_verbosity(self, verbosity):
         if not isinstance(verbosity, int):
-            raise TypeError("Verbosity is an integer")
+            raise TypeError('Verbosity is an integer')
         self._verbosity = verbosity
 
     def get_species_of_interest(self):
@@ -100,7 +100,7 @@ class DynamicsAnalyzer(object):
         :param bool do_com: whether to calculate center-of-mass diffusion instead of tracer diffusion.
         """
 
-        species_of_interest = kwargs.pop("species_of_interest", self.get_species_of_interest())
+        species_of_interest = kwargs.pop('species_of_interest', self.get_species_of_interest())
 
         stepsize_t  = int(kwargs.pop('stepsize_t', 1))
         stepsize_tau  = int(kwargs.pop('stepsize_tau', 1))
@@ -116,7 +116,7 @@ class DynamicsAnalyzer(object):
                 ):
             keys_provided_this_group = [k for k in mutually_exclusive_keys if k in keywords_provided]
             if len(keys_provided_this_group) > 1:
-                raise InputError("This keywords are mutually exclusive: {}".format(', '.join(keys_provided_this_group)))
+                raise InputError('This keywords are mutually exclusive: {}'.format(', '.join(keys_provided_this_group)))
 
         if 't_start_fit_fs' in keywords_provided:
             arg = kwargs.pop('t_start_fit_fs')
@@ -137,10 +137,10 @@ class DynamicsAnalyzer(object):
             else:
                 t_start_fit_dt = int(arg)
         else:
-            raise InputError("Provide a time to start fitting the time series")
+            raise InputError('Provide a time to start fitting the time series')
 
         if not np.all(np.array(t_start_fit_dt >= 0)):
-            raise InputError("t_start_fit_dt is not positive or 0")
+            raise InputError('t_start_fit_dt is not positive or 0')
 
         if 't_end_fit_fs' in keywords_provided:
             arg = kwargs.pop('t_end_fit_fs')
@@ -161,20 +161,20 @@ class DynamicsAnalyzer(object):
             else:
                 t_end_fit_dt = int(arg)
         else:
-            raise InputError("Provide a time to end fitting the time series")
+            raise InputError('Provide a time to end fitting the time series')
 
         if not np.all(t_end_fit_dt > t_start_fit_dt):
-            raise InputError("t_end_fit_dt must be larger than t_start_fit_dt")
+            raise InputError('t_end_fit_dt must be larger than t_start_fit_dt')
 #        if ( (isinstance(t_start_fit_dt, int) and not isinstance(t_end_fit_dt, int))
 #                or (not isinstance(t_start_fit_dt, int) and isinstance(t_end_fit_dt, int)) ):
 #            raise InputError("t_start_fit_dt and t_end_fit_dt must be both integers or lists")
         if not isinstance(t_start_fit_dt, int):
             if isinstance(t_end_fit_dt, int):
-                raise InputError("t_start_fit_dt and t_end_fit_dt must be both integers or lists")
+                raise InputError('t_start_fit_dt and t_end_fit_dt must be both integers or lists')
             elif (len(t_start_fit_dt) != len(t_end_fit_dt)):
-                raise InputError("t_start_fit_dt and t_end_fit_dt must be of the same size")
+                raise InputError('t_start_fit_dt and t_end_fit_dt must be of the same size')
         elif not isinstance(t_end_fit_dt, int):
-            raise InputError("t_start_fit_dt and t_end_fit_dt must be both integers or lists")
+            raise InputError('t_start_fit_dt and t_end_fit_dt must be both integers or lists')
 
         if 't_start_fs' in keywords_provided:
             t_start_dt = int(float(kwargs.pop('t_start_fs')) / timestep_fs)
@@ -186,9 +186,9 @@ class DynamicsAnalyzer(object):
             t_start_dt = 0  # By default I create the time series from the start
 
         if not (t_start_dt >= 0):
-            raise InputError("t_start_dt is not positive or 0")
+            raise InputError('t_start_dt is not positive or 0')
         if t_start_dt > 0:
-            raise NotImplementedError("t_start has not been implemented yet!")
+            raise NotImplementedError('t_start has not been implemented yet!')
 
         if 't_end_fs' in keywords_provided:
             t_end_dt = int(float(kwargs.pop('t_end_fs')) / timestep_fs)
@@ -200,9 +200,9 @@ class DynamicsAnalyzer(object):
             t_end_dt = int(np.max(t_end_fit_dt))
 
         if not (t_end_dt > t_start_dt):
-            raise InputError("t_end_dt is not larger than t_start_dt")
+            raise InputError('t_end_dt is not larger than t_start_dt')
         if not (t_end_dt >= np.max(t_end_fit_dt)):
-            raise InputError("t_end_dt must be larger than t_end_fit_dt")
+            raise InputError('t_end_dt must be larger than t_end_fit_dt')
 
 
         # The number of timesteps I will calculate:
@@ -251,7 +251,7 @@ class DynamicsAnalyzer(object):
         # Irrespective of whether do_long is false or true, I see whether factors are calculated:
 
         if kwargs:
-            raise InputError("Uncrecognized keywords: {}".format(list(kwargs.keys())))
+            raise InputError('Uncrecognized keywords: {}'.format(list(kwargs.keys())))
 
         return (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
             stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt, t_long_factor)
@@ -285,9 +285,9 @@ class DynamicsAnalyzer(object):
             trajectories = self._trajectories
         except AttributeError as e:
             raise Exception(
-                "\n\n\n"
-                "Please use the set_trajectories method to set trajectories"
-                "\n{}\n".format(e)
+                '\n\n\n'
+                'Please use the set_trajectories method to set trajectories'
+                '\n{}\n'.format(e)
             )
 
 
@@ -336,9 +336,9 @@ class DynamicsAnalyzer(object):
                     block_length_dt_this_traj = block_length_dt
                     nr_of_blocks_this_traj   = (nstep - t_end_dt) // block_length_dt
                 else:
-                    raise RuntimeError("Neither nr_of_blocks nor block_length_dt was specified")
+                    raise RuntimeError('Neither nr_of_blocks nor block_length_dt was specified')
                 if (nr_of_blocks_this_traj < 0) or (block_length_dt_this_traj < 0):
-                    raise RuntimeError("t_end_dt (or t_end_fit_dt) is bigger than the trajectory length")
+                    raise RuntimeError('t_end_dt (or t_end_fit_dt) is bigger than the trajectory length')
 
                 nat_of_interest = len(indices_of_interest)
 
@@ -439,7 +439,7 @@ class DynamicsAnalyzer(object):
                     else:
                         nr_of_t_long = (nstep - 1) // stepsize_t
                     if nr_of_t_long > nstep:
-                        raise RuntimeError("t_long_end_dt is bigger than the trajectory length")
+                        raise RuntimeError('t_long_end_dt is bigger than the trajectory length')
                     nr_of_t_long_list.append(nr_of_t_long)
                     t_list_long_fs.append(timestep_fs * stepsize_t * np.arange(nr_of_t_long))
                     msd_this_species_this_traj_max_stats = prefactor * calculate_msd_specific_atoms_max_stats(
@@ -527,16 +527,16 @@ class DynamicsAnalyzer(object):
             trajectories = self._trajectories
         except AttributeError as e:
             raise Exception(
-                "\n\n\n"
-                "Please use the set_trajectories method to set trajectories"
-                "\n{}\n".format(e)
+                '\n\n\n'
+                'Please use the set_trajectories method to set trajectories'
+                '\n{}\n'.format(e)
             )
 
         (species_of_interest, nr_of_blocks, t_start_dt, t_end_dt, t_start_fit_dt, t_end_fit_dt, nr_of_t,
             stepsize_t, stepsize_tau, block_length_dt, do_com, do_long, t_long_end_dt,
             t_long_factor) = self._get_running_params(timestep_fs, **kwargs)
         if do_long:
-            raise NotImplementedError("Do_long is not implemented for VAF")
+            raise NotImplementedError('Do_long is not implemented for VAF')
 
         vaf_time_series = TimeSeries()
 
@@ -571,7 +571,7 @@ class DynamicsAnalyzer(object):
                     block_length_dt_this_traj = block_length_dt
                     nr_of_blocks_this_traj   = (nstep - t_end_dt) // block_length_dt
                 else:
-                    raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
+                    raise RuntimeError('Neither nr_of_blocks nor block_length_ft is specified')
 
                 #slopes_intercepts = np.empty((nr_of_blocks_this_traj, 2))
 
@@ -659,16 +659,16 @@ class DynamicsAnalyzer(object):
             trajectories = self._trajectories
         except AttributeError as e:
             raise Exception(
-                "\n\n\n"
-                "Please use the set_trajectories method to set trajectories"
-                "\n{}\n".format(e)
+                '\n\n\n'
+                'Please use the set_trajectories method to set trajectories'
+                '\n{}\n'.format(e)
             )
 
         prefactor = amu_kg* 1e10 / kB
         # * 1.06657254018667
 
         if decompose_atoms and decompose_species:
-            raise Exception("Cannot decompose atoms and decompose species")
+            raise Exception('Cannot decompose atoms and decompose species')
 
 
         kinetic_energies_series = TimeSeries()
@@ -736,9 +736,9 @@ class DynamicsAnalyzer(object):
             sampling_frequency_THz = 1e3 / timestep_fs
         except AttributeError as e:
             raise Exception(
-                "\n\n\n"
-                "Please use the set_trajectories method to set trajectories"
-                "\n{}\n".format(e)
+                '\n\n\n'
+                'Please use the set_trajectories method to set trajectories'
+                '\n{}\n'.format(e)
             )
 
         keywords_provided = list(kwargs.keys())
@@ -746,7 +746,7 @@ class DynamicsAnalyzer(object):
                 ('block_length_fs','block_length_ps','block_length_dt', 'nr_of_blocks'),):
             keys_provided_this_group = [k for k in mutually_exclusive_keys if k in keywords_provided]
             if len(keys_provided_this_group)>1:
-                raise InputError("This keywords are mutually exclusive: {}".format(', '.join(keys_provided_this_group)))
+                raise InputError('This keywords are mutually exclusive: {}'.format(', '.join(keys_provided_this_group)))
         if 'block_length_fs' in keywords_provided:
             block_length_dt = int(float(kwargs.pop('block_length_fs')) / timestep_fs)
             nr_of_blocks = None
@@ -765,7 +765,7 @@ class DynamicsAnalyzer(object):
         species_of_interest = kwargs.pop('species_of_interest', None) or self.get_species_of_interest()
         smothening = int(kwargs.pop('smothening', 1))
         if kwargs:
-            raise InputError("Uncrecognized keywords: {}".format(list(kwargs.keys())))
+            raise InputError('Uncrecognized keywords: {}'.format(list(kwargs.keys())))
 
 
         fourier_results = dict(smothening=smothening)
@@ -788,7 +788,7 @@ class DynamicsAnalyzer(object):
                     # Use the precise length specified by user
                     split_number = block_length_dt
                 else:
-                    raise RuntimeError("Neither nr_of_blocks nor block_length_ft is specified")
+                    raise RuntimeError('Neither nr_of_blocks nor block_length_ft is specified')
 
                 # I need to have blocks of equal length, and use the split method
                 # I need the length of the array to be a multiple of nr_of_blocks_this_traj
@@ -822,7 +822,7 @@ class DynamicsAnalyzer(object):
                 length_last_block = len(block)
                 for pd in periodogram_this_species:
                     if len(pd) != length_last_block:
-                        raise Exception("Cannot calculate mean signal because of different lengths")
+                        raise Exception('Cannot calculate mean signal because of different lengths')
                 periodogram_this_species = np.array(periodogram_this_species)
                 power_spectrum.set_array('periodogram_{}_mean'.format( atomic_species), periodogram_this_species.mean(axis=0))
                 std = periodogram_this_species.std(axis=0)

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 import sys, numpy as np
@@ -30,7 +31,7 @@ def read_xsf(filename, fold_positions=False):
                         if z == zdim-1:
                             finished = True
                             break
-                    
+
                 except ValueError:
                     break
             elif skip_lines:
@@ -59,13 +60,13 @@ def read_xsf(filename, fold_positions=False):
                 reading_dims = False
                 reading_cell = True
                 skip_lines = 1
-            elif "DATAGRID_3D_UNKNOWN" in line:
+            elif 'DATAGRID_3D_UNKNOWN' in line:
                 x = 0
                 y = 0
                 z = 0
                 cell = []
                 reading_dims = True
-            elif "PRIMCOORD" in line:
+            elif 'PRIMCOORD' in line:
                 atoms = []
                 positions = []
                 reading_nat = True
@@ -76,13 +77,13 @@ def read_xsf(filename, fold_positions=False):
     try:
         volume_ang = np.dot(np.cross(cell[0], cell[1]), cell[2])
     except UnboundLocalError:
-        raise Exception("No cell was read in XSF file, stopping")
+        raise Exception('No cell was read in XSF file, stopping')
     volume_au = volume_ang / bohr_to_ang**3
 
     N_el = np.sum(rho_of_r) * volume_au / np.prod(rho_of_r.shape)
 
 
-    
+
     if fold_positions:
         invcell = np.matrix(cell).T.I
         cell = np.array(cell)
@@ -94,14 +95,14 @@ def read_xsf(filename, fold_positions=False):
             positions[idx] = np.dot(cell.T, points_in_unit_cell)
 
     return dict(
-            data=rho_of_r, volume_ang=volume_ang, volume_au=volume_au, 
+            data=rho_of_r, volume_ang=volume_ang, volume_au=volume_au,
             atoms=atoms, positions=positions, cell=cell
         )
 
 
 def write_xsf(
-        atoms, positions, cell, data, 
-        vals_per_line=6, outfilename=None, 
+        atoms, positions, cell, data,
+        vals_per_line=6, outfilename=None,
         is_flattened=False, shape=None,
         **kwargs):
     if isinstance(outfilename, str):
@@ -109,13 +110,13 @@ def write_xsf(
     elif outfilename is None:
         f = sys.stdout
     else:
-        raise Exception("No file")
+        raise Exception('No file')
 
     if is_flattened:
         try:
             xdim, ydim, zdim = shape
         except (TypeError, ValueError):
-            raise Exception("if you pass a flattend array you need to give the original shape")
+            raise Exception('if you pass a flattend array you need to give the original shape')
     else:
         xdim, ydim, zdim = data.shape
         shape = data.shape
@@ -155,7 +156,7 @@ DATAGRID_3D_UNKNOWN
                         col = 1
     if col:
         f.write('\n')
-    f.write("END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n")
+    f.write('END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n')
     f.close()
 
 def write_grid(data, outfilename=None, vals_per_line=5, **kwargs):
@@ -165,10 +166,10 @@ def write_grid(data, outfilename=None, vals_per_line=5, **kwargs):
     elif outfilename is None:
         f = sys.stdout
     else:
-        raise Exception("No file")
+        raise Exception('No file')
 
     xdim, ydim, zdim = data.shape
-    f.write("3         {}         {}         {}\n".format(*[i+1 for i in data.shape]))
+    f.write('3         {}         {}         {}\n'.format(*[i+1 for i in data.shape]))
     col = 0
     for z in range(zdim):
         for y in range(ydim):
@@ -210,4 +211,3 @@ python temp.xsf -o grid.xyz
         pass
     else:
         raise Exception('unknown format {}'.format(pa.format))
-

@@ -46,4 +46,3 @@ Developer's guide
 .. ~ * :ref:`genindex`
 .. ~ * :ref:`modindex`
 .. ~ * :ref:`search`
-

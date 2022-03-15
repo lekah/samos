@@ -1,0 +1,45 @@
+# Install pre-commit hooks via
+# pre-commit install
+
+repos:
+#- repo: https://github.com/pre-commit/mirrors-yapf
+#  rev: v0.30.0
+#  hooks:
+#  - id: yapf
+#    name: yapf
+#    types: [python]
+#    args: ['-i']
+#    exclude: &exclude_files >
+#      (?x)^(
+#        sportran_gui/utils/tk_html_widgets/*.py|
+#        docs/.*|
+#        tests/test_cli/.*|
+#        examples/.*|
+#        setup.py|
+#      )$
+
+- repo: https://github.com/pre-commit/pre-commit-hooks.git
+  rev: v4.1.0
+  hooks:
+  - id: check-ast
+  - id: check-docstring-first
+  - id: check-executables-have-shebangs
+  - id: check-json
+  - id: check-merge-conflict
+  - id: check-shebang-scripts-are-executable
+  - id: check-symlinks
+  - id: check-toml
+  - id: check-yaml
+  - id: double-quote-string-fixer
+  - id: end-of-file-fixer
+    exclude: >
+      (?x)^(
+        tests/ref/.*|
+      )$
+  - id: fix-encoding-pragma
+  - id: trailing-whitespace
+    exclude: >
+      (?x)^(
+        docs/.*|
+        tests/ref/.*|
+      )$

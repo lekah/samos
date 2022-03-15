@@ -1,35 +1,35 @@
 {
-    "author": "Leonid Kahle", 
-    "author_email": "leonid.kahle@epfl.ch", 
+    "author": "Leonid Kahle",
+    "author_email": "leonid.kahle@epfl.ch",
     "classifiers": [
-        "License :: OSI Approved :: MIT License", 
-        "Programming Language :: Python :: 2", 
-        "Programming Language :: Python :: 2.7", 
-        "Operating System :: OS Independent", 
-        "Topic :: Scientific/Engineering :: Physics", 
-        "Topic :: Scientific/Engineering :: Chemistry", 
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 2",
+        "Programming Language :: Python :: 2.7",
+        "Operating System :: OS Independent",
+        "Topic :: Scientific/Engineering :: Physics",
+        "Topic :: Scientific/Engineering :: Chemistry",
         "Topic :: Software Development :: Libraries :: Python Modules"
-    ], 
-    "description": "Package for Analysis and Tricks for MOlecular Simulations: a set of useful tools to analyze molecular dynamics trajectoris", 
+    ],
+    "description": "Package for Analysis and Tricks for MOlecular Simulations: a set of useful tools to analyze molecular dynamics trajectoris",
     "extras_require": {
         "dev_precommit": [
             "pre-commit"
-        ], 
+        ],
         "docs": [
-            "Sphinx", 
-            "docutils", 
+            "Sphinx",
+            "docutils",
             "sphinx_rtd_theme"
         ]
-    }, 
+    },
     "install_requires": [
-        "numpy>=1.14.0", 
+        "numpy>=1.14.0",
         "ase>=3.17.0",
         "scipy>=1.0.0",
         "matplotlib>=2.1.2"
     ],
     "extras_requires":{},
-    "license": "MIT License", 
-    "name": "samos", 
-    "url": "https://github.com/lekah/samos", 
+    "license": "MIT License",
+    "name": "samos",
+    "url": "https://github.com/lekah/samos",
     "version": "0.4.0"
 }

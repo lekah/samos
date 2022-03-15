@@ -46,7 +46,7 @@ def plot_charge(
     for idx, fname in enumerate(files):
         res = read_xsf(filename=fname, fold_positions=True)
         if not idx:
-            
+
             rho = res.get('data')
 
             if log_rho:
@@ -68,7 +68,7 @@ def plot_charge(
     atoms = atoms.repeat(repeat)
     print(len(atoms))
 
-    
+
     figure=mlab.figure(1, bgcolor=(1, 1, 1), size=size)  # make a white figure
     #~ if title is not None:
         #~ mlab.title(title)
@@ -77,13 +77,13 @@ def plot_charge(
 
     opacity_atoms *= 0.7
     opacity_atoms = 1
-    
+
     if atoms_of_interest is None:
         atoms_of_interest = set(symbols)
     A = atoms.cell
     for pos, Z, dpos in zip(atoms.positions, atoms.numbers, delta_tau):
         if chemical_symbols[Z] in atoms_of_interest:
-            
+
             atoms_color=tuple(jmol_colors[Z])
             mlab.points3d(*pos,
                           scale_factor=covalent_radii[Z],
@@ -98,11 +98,11 @@ def plot_charge(
                             x,y,z, u,v,w,
                             color=atoms_color,
                             scale_factor=2  ,
-                            mode='arrow', 
+                            mode='arrow',
                     )
                 cyls.glyph.glyph_source.glyph_source.shaft_radius = 0.2
                 cyls.glyph.glyph_source.glyph_source.tip_radius = 0.4
-                
+
                 # t = mlab.text3d(pos[0], pos[1], pos[2], chemical_symbols[Z], color=(0,0,0), scale=.5)
 
     if forces_list is not None:
@@ -122,16 +122,16 @@ def plot_charge(
                     if not only_total:
                         color =  next(colors)
                     cyls = mlab.quiver3d(
-                            x,y,z, u,v,w, 
+                            x,y,z, u,v,w,
                             color=color, line_width=line_width,
-                            mode='arrow', 
-                            #~ mode='2darrow', 
-                            #~ mode='cylinder', 
+                            mode='arrow',
+                            #~ mode='2darrow',
+                            #~ mode='cylinder',
                             scale_factor=fscale_factor,
                             opacity=opacity
                         )
                     #~ print cyls.glyph.glyph_source.glyph_source.__dict__.keys()
-                    
+
                     cyls.glyph.glyph_source.glyph_source.shaft_radius = 0.2*min([np.sqrt(1./(u**2+v**2+w**2)), 4.5])
                     cyls.glyph.glyph_source.glyph_source.tip_radius = 0.4*min([np.sqrt(1./(u**2+v**2+w**2)), 4.5])
                     #~ cyls.glyph.glyph_source.glyph_source.shaft_radius = np.sqrt(1./(u**2+v**2+w**2))
@@ -139,7 +139,7 @@ def plot_charge(
                     # total is the first 3 columns, so I break out of loop if I do not want to show the rest.
                     if only_total:
                         break
-    
+
 
             opacity *= 0.6
             #~ line_width *= 0.5
@@ -161,19 +161,19 @@ def plot_charge(
 
     if do_isosurface:
         # Here I am calculating the total charge as multiples of electrons
-        # Based on trial and error, I find that if I integrate over each 
-        # element of rho with dV = volume in bohr of the grid point, I get the 
+        # Based on trial and error, I find that if I integrate over each
+        # element of rho with dV = volume in bohr of the grid point, I get the
         # correct number of electrons:
         total_charge = rho.sum() * atoms.get_volume() / rho.size
         if base_unit == 'angstrom':
             pass
         elif base_unit in ('bohr', 'atomic'):
-            total_charge *= bohr_to_ang**(-3) 
+            total_charge *= bohr_to_ang**(-3)
         else:
             raise NotImplemented
-        print("The total charge sums to {:6.3f} electrons".format(total_charge))
+        print('The total charge sums to {:6.3f} electrons'.format(total_charge))
         mean_charge_value = rho.sum() / rho.size
-        print("Mean charge value is {:18.16f}".format(mean_charge_value))
+        print('Mean charge value is {:18.16f}'.format(mean_charge_value))
         if shift is not None:
             print(shift)
             rho=rho-shift
@@ -188,7 +188,7 @@ def plot_charge(
             std = rho.std()
             #~ contours=[mean-std, mean, mean+std]
             contours=[mean-std, mean+std]
-            print("Choosing contour lines myself:", contours)
+            print('Choosing contour lines myself:', contours)
 
         isos = mlab.pipeline.iso_surface(
                 src, opacity=opacity, colormap=colormap,
@@ -206,8 +206,8 @@ def plot_charge(
             pts = np.array(polydata.points) - 1
         except TypeError:
             raise Exception(
-                "I guess the contours you chose are not valid\n"
-                "Valid range is {} to {}".format(rho.min(), rho.max()))
+                'I guess the contours you chose are not valid\n'
+                'Valid range is {} to {}'.format(rho.min(), rho.max()))
         # Transform the points to the unit cell:
 
         polydata.points = np.dot(pts, A / np.array(rho.shape)[:, np.newaxis])
@@ -229,7 +229,7 @@ def plot_charge(
     # Show the 3d plot:
 
 
-    if savefig: 
+    if savefig:
         mlab.savefig(savefig)
     else:
         mlab.show()
@@ -244,9 +244,9 @@ def read_forces(files, atoms_of_interest, take_difference=False):
         #~ raise Exception("unsupported number of files ({}) for forces".format(len(files)))
     forces = []
     for fname in files:
-        
+
         with open(fname) as f:
-            
+
                 forces.append(np.array(
                         [
                             list(map(float, pos_match.group('vals').split()))
@@ -257,7 +257,7 @@ def read_forces(files, atoms_of_interest, take_difference=False):
                         ]
                     )
                 )
-    
+
     for f in forces:
         print(f.shape)
         #~ for lin in f:
@@ -300,7 +300,7 @@ if __name__ == '__main__':
     #~ p.add_argument('--diff', action='store_true', help='Show difference in forces')
     p.add_argument('-a', '--atoms-of-interest', type=str, nargs='+') #, default=['Li'])
     p.add_argument('-m', '--colormap', type=str,  default='spring')
-    p.add_argument('--color', nargs=3, type=float, help="Colors as RGB tuple in range 0->1 (overrides colormap setting)")
+    p.add_argument('--color', nargs=3, type=float, help='Colors as RGB tuple in range 0->1 (overrides colormap setting)')
     p.add_argument('--invert-colors', help='invert the colormap', action='store_true')
     p.add_argument('--log-rho', help='Convert the field to its logarithm', action='store_true')
     p.add_argument('-c', '--contours', type=float, nargs='+')
@@ -328,7 +328,7 @@ if __name__ == '__main__':
 
             forces = forces.reshape(nat, idim/3, 3)
             if pa.flog:
-                forces = [ 
+                forces = [
                         list(map(logarithmize_vector, vecs))
                         for vecs in forces
                     ]
