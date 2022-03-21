@@ -10,6 +10,7 @@ class TestDynamics(unittest.TestCase):
         from samos.utils.constants import bohr_to_ang
         from samos.plotting.plot_dynamics import plot_msd_isotropic, plot_vaf_isotropic, plot_power_spectrum
         import json
+        import numpy as np
         t = Trajectory.load_file('data/H2O-64-300K.tar.gz')
         t.recenter()
         t.rescale_array(t._VELOCITIES_KEY, bohr_to_ang)
@@ -42,7 +43,7 @@ class TestDynamics(unittest.TestCase):
                 #~ json.dump(attrs , f)
             with open('ref/{}_H2O-64-300K.json'.format(name), 'r') as f:
                 ref_attrs = json.load(f)
-            self.assertEqual(ref_attrs, attrs)
+            self.assertAlmostEqual(ref_attrs, attrs, places=12)
 
 
         # Uncomment to test plot:

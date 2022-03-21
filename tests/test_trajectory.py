@@ -18,15 +18,15 @@ class TestTrajectory(unittest.TestCase):
         t.set_velocities(vel)
         t.set_forces(frc)
 
-        self.assertTrue(np.array_equal(pos, t.get_positions()))
-        self.assertTrue(np.array_equal(vel, t.get_velocities()))
-        self.assertTrue(np.array_equal(frc, t.get_forces()))
+        np.testing.assert_almost_equal(pos, t.get_positions(), decimal=12)
+        np.testing.assert_almost_equal(vel, t.get_velocities(), decimal=12)
+        np.testing.assert_almost_equal(frc, t.get_forces(), decimal=12)
 
 
         atoms_step_3 = t.get_step_atoms(3)
 
-        self.assertTrue(np.array_equal(atoms_step_3.get_positions(), pos[3]))
-        self.assertTrue(np.array_equal(atoms_step_3.get_velocities(), vel[3]))
+        np.testing.assert_almost_equal(atoms_step_3.get_positions(), pos[3], decimal=12)
+        np.testing.assert_almost_equal(atoms_step_3.get_velocities(), vel[3], decimal=12)
 
 
     def test_store_and_reload(self):
@@ -48,10 +48,10 @@ class TestTrajectory(unittest.TestCase):
             t.save(f.name)
             tnew =  Trajectory.load_file(f.name)
 
-        self.assertTrue(np.array_equal(pos, tnew.get_positions()))
-        self.assertTrue(np.array_equal(vel, tnew.get_velocities()))
-        self.assertTrue(np.array_equal(frc, tnew.get_forces()))
-        self.assertTrue(np.array_equal(xtr, tnew.get_array('extra')))
+        np.testing.assert_almost_equal(pos, tnew.get_positions(), decimal=12)
+        np.testing.assert_almost_equal(vel, tnew.get_velocities(), decimal=12)
+        np.testing.assert_almost_equal(frc, tnew.get_forces(), decimal=12)
+        np.testing.assert_almost_equal(xtr, tnew.get_array('extra'), decimal=12)
 
     def test_compatibility(self):
         from samos.trajectory import Trajectory, check_trajectory_compatibility, IncompatibleTrajectoriesException
