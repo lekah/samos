@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 from ase.data.colors import jmol_colors, cpk_colors
 from ase.data import atomic_numbers
@@ -14,4 +15,4 @@ def get_color(chemical_symbol, scheme='jmol'):
     elif scheme=='cpk':
         return cpk_colors[atomic_numbers[chemical_symbol]]
     else:
-        raise ValueError("Unknown scheme {}".format(scheme))
+        raise ValueError('Unknown scheme {}'.format(scheme))

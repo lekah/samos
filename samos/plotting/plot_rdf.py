@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from matplotlib import pyplot as plt
 import numpy as np
 
@@ -15,7 +17,7 @@ def plot_rdf(rdf_res,
     if ax is None:
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(1,1,1)
-        
+
 
     if ax2 is None:
         ax2 = ax.twinx()
@@ -27,13 +29,13 @@ def plot_rdf(rdf_res,
         try:
             rdf = rdf_res.get_array('rdf_{}_{}'.format(spec1, spec2))
         except KeyError:
-            print("Warning: RDF for {}-{} was not calculated, skipping".format(spec1, spec2))
+            print('Warning: RDF for {}-{} was not calculated, skipping'.format(spec1, spec2))
             continue
         integral = rdf_res.get_array('int_{}_{}'.format(spec1, spec2))
         radii = rdf_res.get_array('radii_{}_{}'.format(spec1, spec2))
         plot_params_ = deepcopy(plot_params)
         plot_params2_ = deepcopy(plot_params2)
-        
+
         if 'color' in plot_params_:
             pass
         elif 'colordict' in plot_params_:
@@ -63,7 +65,7 @@ def plot_rdf(rdf_res,
     if show:
         plt.show()
     return handles
-        
+
 
 def plot_angular_spec(angspec_res,
         ax=None, no_legend=False, species_of_interest=None, show=False, label=None, no_label=False,
@@ -90,4 +92,3 @@ def plot_angular_spec(angspec_res,
     #~ ax2.set_ylabel(r'$\int g(r) dr$')
     if show:
         plt.show()
-        

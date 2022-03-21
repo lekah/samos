@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import numpy as  np
 from scipy.spatial.distance import cdist
 from ase import Atoms
@@ -14,7 +16,7 @@ class BaseAnalyzer(object, metaclass=ABCMeta):
             getattr(self, 'set_{}'.format(key))(val)
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
-            raise TypeError("You need ot pass a {} as trajectory".format(Trajectory))
+            raise TypeError('You need ot pass a {} as trajectory'.format(Trajectory))
         self._trajectory = trajectory
     @abstractmethod
     def run(*args, **kwargs):
@@ -26,7 +28,7 @@ class RDF(BaseAnalyzer):
         :param float radius: The radius for the calculation of the RDF
         :param float density: The grid density. The number of bins is given by radius/density
         """
-        raise NotImplemented("This is not fully implemented")
+        raise NotImplemented('This is not fully implemented')
         atoms = self._trajectory.atoms
         volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
@@ -41,10 +43,10 @@ class RDF(BaseAnalyzer):
         rdf_res.set_attr('species_pairs', species_pairs)
         for spec1,  spec2 in species_pairs:
             ind1 = np.where(chem_sym == spec1)[0] + 1 # +1 for fortran indexing
-            ind2 = np.where(chem_sym == spec2)[0] + 1 
+            ind2 = np.where(chem_sym == spec2)[0] + 1
             density = float(len(ind2)) / volume
             rdf, integral, radii = calculate_rdf(positions, istart, istop, stepsize,
-                radius, density, cell, 
+                radius, density, cell,
                 cellI, ind1, ind2, nbins)
             rdf_res.set_array('rdf_{}_{}'.format(spec1, spec2), rdf)
             rdf_res.set_array('int_{}_{}'.format(spec1, spec2), integral)
@@ -75,7 +77,7 @@ class RDF(BaseAnalyzer):
             if isinstance(spec,str):
                 return spec
             elif isinstance(spec, (tuple, list)):
-                return "spec_{}".format(ispec)
+                return 'spec_{}'.format(ispec)
             else:
                 print( type(spec))
         atoms = self._trajectory.atoms
@@ -122,7 +124,7 @@ class RDF(BaseAnalyzer):
             density = float(len(ind2)) / volume
             diff_crystal_wrapped = np.dot(diff_real_unwrapped, cellI) % 1.0
             diff_real_wrapped = np.dot(diff_crystal_wrapped, cell)
-            
+
             shortest_distances = cdist(diff_real_wrapped, corners).min(axis=1)
 
             hist, bin_edges = np.histogram(shortest_distances, bins=nbins, range=(0,radius))
@@ -133,7 +135,7 @@ class RDF(BaseAnalyzer):
 
             rdf = hist / (4.0 * np.pi * radii**2 * binsize )  / (len(ind2)/volume)
             integral = np.empty(len(rdf))
-            sum_ = 0.0 
+            sum_ = 0.0
             for i in range(len(integral)):
                 sum_ += hist[i]
                 integral[i] = sum_
@@ -164,12 +166,10 @@ class AngularSpectrum(BaseAnalyzer):
         rdf_res.set_attr('species_pairs', species_pairs)
         for spec1,  spec2, spec3 in species_pairs:
             ind1 = np.where(chem_sym == spec1)[0] + 1 # +1 for fortran indexing
-            ind2 = np.where(chem_sym == spec2)[0] + 1 
-            ind3 = np.where(chem_sym == spec3)[0] + 1 
+            ind2 = np.where(chem_sym == spec2)[0] + 1
+            ind3 = np.where(chem_sym == spec3)[0] + 1
             angular_spec, angles = calculate_angular_spec(positions, istart, istop, stepsize,
                 radius, cell, cellI, ind1, ind2, ind3, nbins)
             rdf_res.set_array('aspec_{}_{}_{}'.format(spec1, spec2, spec3), angular_spec)
             rdf_res.set_array('angles_{}_{}_{}'.format(spec1, spec2, spec3), angles)
         return rdf_res
-
-    

@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import sys, numpy as np, re, os
 from samos.lib.gaussian_density import make_gaussian_density
 from samos.utils.terminal import get_terminal_width
@@ -5,14 +8,14 @@ from samos.utils.terminal import get_terminal_width
 bohr_to_ang = 0.52917720859
 
 def write_xsf_header(
-        atoms, positions, cell, data, 
+        atoms, positions, cell, data,
         vals_per_line=6, outfilename=None, **kwargs):
     if isinstance(outfilename, str):
         f = open(outfilename, 'w')
     elif outfilename is None:
         f = sys.stdout
     else:
-        raise Exception("No file")
+        raise Exception('No file')
     if data is not None:
         xdim, ydim, zdim = data.shape
     else:
@@ -49,10 +52,10 @@ DATAGRID_3D_UNKNOWN
                         col = 1
         if col:
             f.write('\n')
-        f.write("END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n")
+        f.write('END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n')
     f.close()
 
-def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf', 
+def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
         sigma=0.3, n_sigma=3.0, density=0.1, istart=1, istop=None, stepsize=1):
     """
     :param str positionsf: Where to read the positions from.
@@ -87,7 +90,7 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
         indices_i_care = np.array(list(range(1, nat+1)))
 
     if not len(indices_i_care):
-        raise Exception("Element {} not found in symbols {}".format(element, symbols))
+        raise Exception('Element {} not found in symbols {}'.format(element, symbols))
 
     nat_this_species = len(indices_i_care)
 
@@ -99,16 +102,16 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
         termwidth = get_terminal_width()
         pbar_frequency = int((istop - istart) / termwidth)
     except Exception as e:
-        print("Warning Could not get progressbar ({})".format(e))
+        print('Warning Could not get progressbar ({})'.format(e))
         pbar_frequency = int((istop - istart) / 30)
 
     pbar_frequency = max([pbar_frequency, 1])
     a, b, c    = [np.linalg.norm(cell[i]) for i in range(3)]
     n1, n2, n3 = [int(celldim/density)+1 for celldim in (a,b,c)]
 
-    print("Grid is {} x {} x {}".format(n1, n2, n3))
-    print("Box is  {} x {} x {}".format(a,b,c))
-    print("Writing xsf file to", format(outputfile))
+    print('Grid is {} x {} x {}'.format(n1, n2, n3))
+    print('Box is  {} x {} x {}'.format(a,b,c))
+    print('Writing xsf file to', format(outputfile))
 
 
     write_xsf_header(
@@ -165,7 +168,7 @@ if __name__ == '__main__':
 
     ap.add_argument('cif', help='Cif file with structure')
     ap.add_argument('positions', help='a trajectory file to read')
-    
+
     ap.add_argument('-n', '--n-sigma', type=int, default=3)
     ap.add_argument('-d', '--density', type=float, default=0.1, help='nr of grid points per angstrom')
     # ap.add_argument('-r', '--recenter', action='store_true')  N
@@ -184,4 +187,3 @@ if __name__ == '__main__':
     t.set_atoms(read(parsed_args.pop('cif')))
     t.set_array(t._POSITIONS_KEY, read_positions_with_ase(parsed_args.pop('positions')), check_nat=False)
     get_gaussian_density(t, **parsed_args)
-

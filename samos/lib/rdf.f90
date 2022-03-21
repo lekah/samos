@@ -7,13 +7,13 @@ SUBROUTINE calculate_rdf(&
 
     integer, intent(in)         ::          istart, istop, stepsize ! The ionic step I start and I end
     real*8, intent(in)          ::          cell(3,3), invcell(3,3)
-    
+
     integer, intent(in)         ::          nat, nat1, nat2  ! The total number of atoms, and number of atoms that I calculate the den
     integer, intent(in)         ::          nstep, nbins  ! The total number of atoms, and number of atoms that I calculate the den
     real*8, intent(in)          ::          positions(nstep, nat,3)
 
-    integer, intent(in)         ::          indices1(nat1) ! The indices of the atoms that I calculate the density from 
-    integer, intent(in)         ::          indices2(nat2) ! The indices of the atoms that I calculate the density from 
+    integer, intent(in)         ::          indices1(nat1) ! The indices of the atoms that I calculate the density from
+    integer, intent(in)         ::          indices2(nat2) ! The indices of the atoms that I calculate the density from
 
     real*8, intent(in)          ::          radius ! The maximum radius I should go for
     real*8, intent(in)          ::          density ! The density of the atoms
@@ -90,12 +90,12 @@ SUBROUTINE calculate_angular_spec(&
 
     integer, intent(in)         ::          istart, istop, stepsize ! The ionic step I start and I end
     real*8, intent(in)          ::          cell(3,3), invcell(3,3)
-    
+
     integer, intent(in)         ::          nat, nat1, nat2, nat3  ! The total number of atoms, and number of atoms that I calculate the den
     integer, intent(in)         ::          nstep, nbins  ! The total number of atoms, and number of atoms that I calculate the den
     real*8, intent(in)          ::          positions(nstep, nat,3)
 
-    integer, intent(in)         ::          indices1(nat1) ! The indices of the atoms that I calculate the density from 
+    integer, intent(in)         ::          indices1(nat1) ! The indices of the atoms that I calculate the density from
     integer, intent(in)         ::          indices2(nat2)
     integer, intent(in)         ::          indices3(nat3)
 
@@ -177,4 +177,3 @@ SUBROUTINE calculate_angular_spec(&
 
 
 END SUBROUTINE calculate_angular_spec
-
