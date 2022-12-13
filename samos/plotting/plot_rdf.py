@@ -45,7 +45,7 @@ def plot_rdf(rdf_res,
                 labelspec = plot_params_.pop('labelspec')
                 plot_params_['label'] = r'$g(r)_{{{}-{}}}$ {}'.format(spec1, spec2, labelspec)
             else:
-                plot_params_['label'] = r'$g(r)$ {}-{}'.format(spec1, spec2)
+                plot_params_['label'] = r'{}-{}'.format(spec1, spec2)
         if 'label' not in plot_params2_ and not no_label:
             plot_params2_['label'] = r'$\int g(r)$ {} {}'.format(spec1, spec2)
         l, = ax.plot(radii, rdf, **plot_params_)
@@ -61,6 +61,7 @@ def plot_rdf(rdf_res,
 
     ax.set_xlabel(r'$r$ $\left(\mathrm{\AA}\right)$')
     ax.set_ylabel(r'$g(r)$')
+    ax.legend(loc=2)
     ax2.set_ylabel(r'$\int \rho(r) \mathrm{d}r$')
     if show:
         plt.show()

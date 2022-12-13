@@ -15,7 +15,8 @@ class AttributedArray(object):
         for key, val in list(kwargs.items()):
             getattr(self, 'set_{}'.format(key))(val)
 
-    def set_array(self, name, array, check_existing=False, check_nstep=False, check_nat=False):
+    def set_array(self, name, array, check_existing=False, check_nstep=False, check_nat=False,
+                wanted_shape_len=None, wanted_shape_1=None, wanted_shape_2=None):
         """
         Method to set an array with a name to reference it.
         :param str name: A name to reference that array
@@ -38,6 +39,15 @@ class AttributedArray(object):
         if check_existing:
             if name in list(self._arrays.keys()):
                 raise ValueError('Name {} already exists'.formamt(name))
+        if wanted_shape_len:
+            if len(array.shape) != wanted_shape_len:
+                raise TypeError(f"array {name} is of wrong type, has to be of dimension {wanted_shape_len}")
+        if wanted_shape_1:
+            if array.shape[1] != wanted_shape_1:
+                raise IndexError(f"1st dimension of array {name} has to be {wanted_shape_1}")
+        if wanted_shape_2:
+            if array.shape[2] != wanted_shape_2:
+                raise IndexError(f"2nd dimension of array {name} has to be {wanted_shape_2}")
         if check_nstep:
             for other_name, other_array in list(self._arrays.items()):
                 assert array.shape[0] == other_array.shape[0], (

@@ -50,7 +50,9 @@ class Trajectory(AttributedArray):
     _TIMESTEP_KEY = 'timestep_fs'
     _POSITIONS_KEY = 'positions'
     _VELOCITIES_KEY = 'velocities'
+    _CELL_KEY = 'cells'
     _FORCES_KEY = 'forces'
+    _POT_ENER_KEY = 'potential_energy'
     _ATOMS_FILENAME = 'atoms.traj'
     def __init__(self, **kwargs):
         """
@@ -59,6 +61,37 @@ class Trajectory(AttributedArray):
         """
         self._atoms = None
         super(Trajectory, self).__init__(**kwargs)
+
+    @classmethod
+    def from_atoms(cls, atoms_list, timestep_fs=1.0):
+        """
+        Instantiate a new class instance given a set of atoms
+        """
+        from ase import Atoms
+        from ase.data import chemical_symbols
+        chem_sym_set = set()
+        for atoms in atoms_list:
+            if not isinstance(atoms, Atoms):
+                raise TypeError("I have to receive a list/iterable over {}".format(Atoms))
+            chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
+        if len(chem_sym_set) < 1:
+            raise ValueError("Empty list provided")
+        elif len(chem_sym_set) > 1:
+            raise ValueError("The chemical_symbols list of provided atoms are not the same for all, cannot proceed")
+
+        positions = np.array([atoms.get_positions() for atoms in atoms_list])
+        velocities =  np.array([atoms.get_velocities() for atoms in atoms_list])
+        forces =  np.array([atoms.get_forces() for atoms in atoms_list])
+        cells = np.array([atoms.cell for atoms in atoms_list])
+        new = cls(atoms=atoms_list[0])
+        new.set_positions(positions)
+        if (velocities**2).sum() > 1e-12:
+            new.set_velocities(velocities)
+        if (forces**2).sum() > 1e-12:
+            new.set_forces(forces)
+        if (cells.std(axis=0).sum()) > 1e-12:
+            new.set_cells(cells)
+        return new
 
     def _save_atoms(self, folder_name):
         from os.path import join
@@ -95,6 +128,11 @@ class Trajectory(AttributedArray):
     def cell(self):
         return self.atoms.cell
 
+    def set_cells(self, array,check_existing=False):
+        self.set_array(self._CELL_KEY, array, check_existing=check_existing, check_nat=False, check_nstep=True,
+                wanted_shape_len=3, wanted_shape_1=3, wanted_shape_2=3)
+    def get_cell(self):
+        return self.get_array(self._CELL_KEY)
 
     def get_indices_of_species(self, species, start=0):
         """
@@ -138,7 +176,8 @@ class Trajectory(AttributedArray):
         :param array: A numpy array with the positions in absolute values in units of angstrom
         :param bool check_exising: Check if the positions have been set, and raise in such case. Defaults to False.
         """
-        self.set_array(self._POSITIONS_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True)
+        self.set_array(self._POSITIONS_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True,
+                    wanted_shape_len=3, wanted_shape_2=3)
 
     def get_positions(self):
         return self.get_array(self._POSITIONS_KEY)
@@ -149,7 +188,8 @@ class Trajectory(AttributedArray):
         :param array: A numpy array with the velocites in absolute values in units of angstrom/femtoseconds
         :param bool check_exising: Check if the velocities have been set, and raise in such case. Defaults to False.
         """
-        self.set_array(self._VELOCITIES_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True)
+        self.set_array(self._VELOCITIES_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True,
+                    wanted_shape_len=3, wanted_shape_2=3)
 
     def get_velocities(self):
         return self.get_array(self._VELOCITIES_KEY)
@@ -160,10 +200,16 @@ class Trajectory(AttributedArray):
         :param array: A numpy array with the forces in absolute values in units of eV/angstrom
         :param bool check_exising: Check if the forces have been set, and raise in such case. Defaults to False.
         """
-        self.set_array(self._FORCES_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True)
+        self.set_array(self._FORCES_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True,
+                    wanted_shape_len=3, wanted_shape_2=3)
 
     def get_forces(self):
         return self.get_array(self._FORCES_KEY)
+
+    def set_pot_energies(self, array, check_existing=False):
+
+        self.set_array(self._POT_ENER_KEY, array, check_existing=check_existing, check_nat=False, check_nstep=True,
+                    wanted_shape_len=1)
 
     def get_step_atoms(self, index):
         """
@@ -172,12 +218,34 @@ class Trajectory(AttributedArray):
         :returns: an ase.Atoms instance from the trajectory at step
         """
         assert isinstance(index, int)
+
+        need_calculator = False
+        for key in (self._FORCES_KEY, self._POT_ENER_KEY):
+            if key in self.get_arraynames():
+                need_calculator = True
+                break
         atoms = self.atoms.copy()
+
+        if need_calculator:
+            from ase.calculators.singlepoint import SinglePointCalculator
+            calc_kwargs = {}
+
         for k,v in list(self._arrays.items()):
-            try:
-                getattr(atoms, 'set_{}'.format(k))(v[index])
-            except AttributeError:
-                pass
+            if k == self._CELL_KEY:
+                atoms.set_cell(v[index])
+            elif k == self._FORCES_KEY:
+                calc_kwargs['forces'] = v[index]
+            elif k == self._POT_ENER_KEY:
+                calc_kwargs['energy'] = v[index]
+            else:
+                try:
+                    getattr(atoms, 'set_{}'.format(k))(v[index])
+                except AttributeError as e:
+                    print(e)
+        if need_calculator:
+            calc = SinglePointCalculator(atoms, **calc_kwargs)
+            atoms.set_calculator(calc)
+
         return atoms
 
 
