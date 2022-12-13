@@ -137,7 +137,7 @@ class DynamicsAnalyzer(object):
             else:
                 t_start_fit_dt = int(arg)
         else:
-            raise InputError('Provide a time to start fitting the time series')
+            t_start_fit_dt = 0
 
         if not np.all(np.array(t_start_fit_dt >= 0)):
             raise InputError('t_start_fit_dt is not positive or 0')
@@ -518,7 +518,7 @@ class DynamicsAnalyzer(object):
         return msd
 
 
-    def get_vaf(self, integration='trapezoid', **kwargs):
+    def get_vaf(self, arrayname=None, integration='trapezoid', **kwargs):
 
         from samos.lib.mdutils import calculate_vaf_specific_atoms, get_com_velocities
         try:
@@ -550,7 +550,10 @@ class DynamicsAnalyzer(object):
             fitted_means_of_integral = []
 
             for itraj, trajectory in enumerate(trajectories):
-                velocities = trajectory.get_velocities()
+                if arrayname:
+                    velocities = trajectory.get_array(arrayname)
+                else:
+                    velocities = trajectory.get_velocities()
                 if do_com:
                     # I replace the array positions with the COM!
                     masses = self._atoms.get_masses() # Getting the masses for recentering
@@ -721,7 +724,7 @@ class DynamicsAnalyzer(object):
 
         return kinetic_energies_series
 
-    def get_power_spectrum(self, **kwargs):
+    def get_power_spectrum(self, arrayname=None, **kwargs):
         """
         Calculate the power spectrum.
         :param int smothening: Smothen the power spectrum by taking a mean every N steps.
@@ -776,7 +779,10 @@ class DynamicsAnalyzer(object):
             periodogram_this_species = []
 
             for itraj, trajectory in enumerate(trajectories):
-                vel_array = trajectory.get_velocities()[:, trajectory.get_indices_of_species(atomic_species, start=0), :]
+                if arrayname:
+                    vel_array = trajectory.get_array(arrayname)[:, trajectory.get_indices_of_species(atomic_species, start=0), :]
+                else:
+                    vel_array = trajectory.get_velocities()[:, trajectory.get_indices_of_species(atomic_species, start=0), :]
                 nstep, _, _ = vel_array.shape
 
                 if nr_of_blocks > 0:

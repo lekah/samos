@@ -106,7 +106,7 @@ def pos_2_absolute(cell, pos, postype):
     """
     Transforming positions to absolute positions
     """
-    if postype in ("", "w"):
+    if postype in ("u", "w"):
         return pos
     elif postype == 's':
         return pos.dot(cell)
@@ -114,7 +114,7 @@ def pos_2_absolute(cell, pos, postype):
         raise RuntimeError(f"Unknown postype {postype}")
 
 
-def read_lammps_dump(filename, elements=None, types=None, save=None):
+def read_lammps_dump(filename, elements=None, types=None, save=None, timestep=None):
     """
     Read a filedump from lammps. It expects atomid to be printed, and positions to be given in scaled or unwrapped coordinates
     """
@@ -180,11 +180,13 @@ def read_lammps_dump(filename, elements=None, types=None, save=None):
             # print(f"read step {iframe}, timestep {timestep}, from lines {lidx-nat_must-9} to {lidx}")
     print(f"Read trajectory of length {iframe}\nCreating Trajectory")
     atoms = Atoms(symbols, positions[0], cell=cells[0])
-    traj = Trajectory(atoms=atoms, positions=positions)
+    traj = Trajectory(atoms=atoms, positions=positions, )
     if has_vel:
         traj.set_velocities(velocities)
     if has_frc:
         traj.set_forces(forces)
+    if timestep:
+        traj.set_timestep(timestep)
     path_to_save = save or filename +'.traj'
     traj.save(path_to_save)
 
@@ -196,5 +198,6 @@ if __name__== '__main__':
     parser.add_argument('-s', '--save', help='The filename/path to save trajectory at')
     parser.add_argument('-t', '--types', nargs='+', help='list of types, will be matched with types given in lammps')
     parser.add_argument('-e', '--elements', nargs='+', help='list of elements')
+    parser.add_argument('--timestep', type=float, help='The timestep of the trajectory printed')
     args = parser.parse_args()
     read_lammps_dump(**vars(args))
