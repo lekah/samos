@@ -217,7 +217,7 @@ class Trajectory(AttributedArray):
         :param int index: The index of the step
         :returns: an ase.Atoms instance from the trajectory at step
         """
-        assert isinstance(index, int)
+        assert isinstance(index, (int, np.int64)), "step index has to be an integer"
 
         need_calculator = False
         for key in (self._FORCES_KEY, self._POT_ENER_KEY):
@@ -248,6 +248,29 @@ class Trajectory(AttributedArray):
 
         return atoms
 
+    def get_ase_trajectory(self, start=0, end=None, stepsize=1):
+        """
+        :param int stepsize: A step size, defaults to 1
+        :param int start: The start step, defaults to 0
+        :param int end: The last step defaults to length of trajectory
+
+        :returns: a list of atoms instances of this trajectory
+        """
+        if end is None:
+            end = self.nstep
+        assert isinstance(start, int) and start >= 0, "start has to be a positive integer"
+        assert isinstance(end, int) and end >= 0, "end has to be a positive integer"
+        assert isinstance(stepsize, int) and stepsize >= 0, "stepsize has to be a positive integer"
+        if end > self.nstep:
+            raise ValueError("End > nsteps, leave None and it will be set to nstep")
+        indices = np.arange(start, end, stepsize)
+
+        if len(indices) < 1:
+            raise ValueError("No indices for trajectory")
+        assert isinstance(start, int) and start >= 0, "start has to be a positive integer"
+        atomslist = [self.get_step_atoms(idx) for idx in indices]
+
+        return atomslist
 
     def recenter(self, sublattice=None):
         """

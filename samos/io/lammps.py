@@ -8,8 +8,7 @@ from ase.visualize import view
 from samos.trajectory import Trajectory
 
 integer_regex = re.compile('(?P<int>\d+)') # only positvie integers, actually
-#float_regex = re.compile('(?P<float>\d+\.\d+(e[+\-]\d+)?)')
-float_regex = re.compile('(?P<float>\d+\.\d+(e[+\-]\d+)?)')
+float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')
 
 
 def get_indices(header_list, prefix="", postfix=""):
@@ -29,11 +28,11 @@ def get_position_indices(header_list):
             return postfix, idc
     if 'xsu' in header_list:
         raise NotImplementedError("Do not support scaled unwrapped coordinates")
-    
+
     raise TypeError("No position indices found")
 
-            
-        
+
+
     #     return 'u', np.array([header_list.index(f'{dim}u') for dim in 'xyz'])
     # elif 'xs' in header_list:
     #     # scaled coordinates
@@ -66,7 +65,7 @@ def read_step_info(lines, lidx=0, start=False):
         print(f"Could not read cell dimension {idim}")
         raise e
     if start:
-        print(f"Read starting cell as:\n{cell}")    
+        print(f"Read starting cell as:\n{cell}")
         assert lines[8].startswith("ITEM: ATOMS"), "Not a supported format, expected ITEM: ATOMS"
         header_list = lines[8].lstrip("ITEM: ATOMS").split()
 
@@ -102,19 +101,22 @@ def read_step_info(lines, lidx=0, start=False):
         return nat, atomid_idx, element_idx, type_idx, postype, posids, has_vel, velids, has_frc, frcids
     else:
         return nat, timestep, cell
+
+
 def pos_2_absolute(cell, pos, postype):
     """
     Transforming positions to absolute positions
     """
-    if postype in ("u", "w"):
+    if postype in ("u", "w", ""):
         return pos
     elif postype == 's':
         return pos.dot(cell)
     else:
-        raise RuntimeError(f"Unknown postype {postype}")
+        raise RuntimeError(f"Unknown postype '{postype}'")
 
 
-def read_lammps_dump(filename, elements=None, types=None, save=None, timestep=None):
+def read_lammps_dump(filename, elements=None,
+            elements_file=None, types=None, save=None, timestep=None):
     """
     Read a filedump from lammps. It expects atomid to be printed, and positions to be given in scaled or unwrapped coordinates
     """
@@ -125,7 +127,7 @@ def read_lammps_dump(filename, elements=None, types=None, save=None, timestep=No
         (nat_must,atomid_idx, element_idx, type_idx,
          postype, posids, has_vel, velids, has_frc, frcids) = read_step_info(lines, lidx=0, start=True)
 
-        body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings        
+        body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings
         atomids = np.array(body[:, atomid_idx], dtype=int)
         sorting_key = atomids.argsort()
         if type_idx is not None and types is not None:
@@ -137,12 +139,26 @@ def read_lammps_dump(filename, elements=None, types=None, save=None, timestep=No
             symbols = np.array(body[:,element_idx])[sorting_key]
             # print(elements)
             # print(len(elements))
-        elif elements is None:
-            raise ValueError("elements have to be given in LAMMPS or provided to function")
-        else:
+        elif elements is not None:
             assert len(elements) == nat_must
             symbols = elements[:]
-            
+            # raise ValueError("elements have to be given in LAMMPS or provided to function")
+        elif elements_file is not None:
+            with open(elements_file) as f:
+                for line in f:
+                    if line:
+                        break
+                elements = line.strip().split()
+                if len(elements) != nat_must:
+                    raise ValueError("length of list of elements ({}) is not equal number of atoms ({})".format(
+                                len(elements), nat_must)
+                    )
+                symbols = elements[:]
+        else:
+            symbols = ['H']*nat_must
+
+
+
 
     positions = []
     timesteps = []
@@ -166,7 +182,7 @@ def read_lammps_dump(filename, elements=None, types=None, save=None, timestep=No
             cells.append(cell)
             timesteps.append(timestep)
 
-            body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings        
+            body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings
             lidx += nat_must
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()
@@ -180,7 +196,8 @@ def read_lammps_dump(filename, elements=None, types=None, save=None, timestep=No
             # print(f"read step {iframe}, timestep {timestep}, from lines {lidx-nat_must-9} to {lidx}")
     print(f"Read trajectory of length {iframe}\nCreating Trajectory")
     atoms = Atoms(symbols, positions[0], cell=cells[0])
-    traj = Trajectory(atoms=atoms, positions=positions, )
+    traj = Trajectory(atoms=atoms,
+            positions=positions, cells=cells )
     if has_vel:
         traj.set_velocities(velocities)
     if has_frc:
@@ -198,6 +215,8 @@ if __name__== '__main__':
     parser.add_argument('-s', '--save', help='The filename/path to save trajectory at')
     parser.add_argument('-t', '--types', nargs='+', help='list of types, will be matched with types given in lammps')
     parser.add_argument('-e', '--elements', nargs='+', help='list of elements')
+    parser.add_argument('--elements-file',
+            help='A file containing the elements as space-separated strings')
     parser.add_argument('--timestep', type=float, help='The timestep of the trajectory printed')
     args = parser.parse_args()
     read_lammps_dump(**vars(args))
