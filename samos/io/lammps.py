@@ -114,9 +114,24 @@ def pos_2_absolute(cell, pos, postype):
     else:
         raise RuntimeError(f"Unknown postype '{postype}'")
 
+def get_thermo_props(fname):
+    with open(fname) as f:
+        f.readline() # first line
+        header = f.readline().lstrip('#').strip().split()
+    # header = [h.lstrip('v_').lstrip('c_') for h in header]
+    arr = np.loadtxt(fname, skiprows=2)
+    ts_index = header.index('TimeStep')
+    return header, arr, ts_index
+
 
 def read_lammps_dump(filename, elements=None,
-            elements_file=None, types=None, save=None, timestep=None):
+            elements_file=None, types=None,  timestep=None,
+            thermo_file=None, thermo_pe=None,
+            #thermo_ke=None #thermo_te=None,
+            save_extxyz=False, outfile=None,
+            ignore_forces=False, ignore_velocities=False,
+            skip=0, f_conv=1.0, e_conv=1.0,
+        ):
     """
     Read a filedump from lammps. It expects atomid to be printed, and positions to be given in scaled or unwrapped coordinates
     """
@@ -127,6 +142,10 @@ def read_lammps_dump(filename, elements=None,
         (nat_must,atomid_idx, element_idx, type_idx,
          postype, posids, has_vel, velids, has_frc, frcids) = read_step_info(lines, lidx=0, start=True)
 
+        if ignore_forces:
+            has_frc = False
+        if ignore_velocities:
+            has_vel = False
         body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings
         atomids = np.array(body[:, atomid_idx], dtype=int)
         sorting_key = atomids.argsort()
@@ -179,23 +198,27 @@ def read_lammps_dump(filename, elements=None,
             nat, timestep, cell = read_step_info(step_info, lidx=lidx, start=False)
             lidx += 9
             assert nat == nat_must, "Changing number of atoms is not supported"
-            cells.append(cell)
-            timesteps.append(timestep)
+
 
             body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings
             lidx += nat_must
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()
             pos = np.array(body[:, posids], dtype=float)[sorting_key]
-            positions.append(pos_2_absolute(cell, pos, postype))
-            if has_vel:
-                velocities.append(np.array(body[:, velids], dtype=float)[sorting_key])
-            if has_frc:
-                forces.append(np.array(body[:, frcids], dtype=float)[sorting_key])
+            if iframe >= skip:
+                positions.append(pos_2_absolute(cell, pos, postype))
+                timesteps.append(timestep)
+                cells.append(cell)
+                if has_vel:
+                    velocities.append(np.array(body[:, velids], dtype=float)[sorting_key])
+                if has_frc:
+                    forces.append(f_conv*np.array(body[:, frcids], dtype=float)[sorting_key])
             iframe += 1
-            # print(f"read step {iframe}, timestep {timestep}, from lines {lidx-nat_must-9} to {lidx}")
-    print(f"Read trajectory of length {iframe}\nCreating Trajectory")
-    atoms = Atoms(symbols, positions[0], cell=cells[0])
+
+    print(f"Read trajectory of length {iframe}\nCreating Trajectory of length {len(timesteps)}")
+
+
+    atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
     traj = Trajectory(atoms=atoms,
             positions=positions, cells=cells )
     if has_vel:
@@ -204,19 +227,60 @@ def read_lammps_dump(filename, elements=None,
         traj.set_forces(forces)
     if timestep:
         traj.set_timestep(timestep)
-    path_to_save = save or filename +'.traj'
-    traj.save(path_to_save)
+
+    if thermo_file:
+        header, arr, ts_index = get_thermo_props(thermo_file)
+        timesteps_thermo = np.array(arr[:, ts_index], dtype=int).tolist()
+        indices = []
+        for ts in timesteps:
+            try:
+                indices.append(timesteps_thermo.index(ts))
+            except ValueError:
+                raise ValueError(f"Index {ts} is not in thermo file")
+        indices = np.array(indices, dtype=int)
+        # if thermo_te:
+        #     colidx = header.index(thermo_te)
+        #     traj.set_total_energies(arr[indices, colidx])
+        if thermo_pe:
+            colidx = header.index(thermo_pe)
+            traj.set_pot_energies(e_conv*arr[indices, colidx])
+        # if thermo_ke:
+        #     colidx = header.index(thermo_ke)
+        #     traj.set_kinetic_energies(arr[indices, colidx])
+    if save_extxyz:
+        path_to_save = outfile or filename + '.extxyz'
+        from ase.io import write
+        asetraj = traj.get_ase_trajectory()
+        write(path_to_save, asetraj, format='extxyz')
+    elif outfile:
+        path_to_save = outfile or filename +'.traj'
+        traj.save(path_to_save)
+    return traj
 
 
 if __name__== '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser("""Reads lammps input and returns/saves a Trajectory instance""")
     parser.add_argument('filename', help='The filename/path of the lammps trajectory')
-    parser.add_argument('-s', '--save', help='The filename/path to save trajectory at')
+    parser.add_argument('-o', '--outfile', help='The filename/path to save trajectory at')
     parser.add_argument('-t', '--types', nargs='+', help='list of types, will be matched with types given in lammps')
     parser.add_argument('-e', '--elements', nargs='+', help='list of elements')
     parser.add_argument('--elements-file',
             help='A file containing the elements as space-separated strings')
     parser.add_argument('--timestep', type=float, help='The timestep of the trajectory printed')
+    parser.add_argument('--f-conv', type=float, help='The conversion factor for forces', default=1.0)
+    parser.add_argument('--e-conv', type=float, help='The conversion factor for energies', default=1.0)
+
+    parser.add_argument('--thermo-file', help='File path to equivalent thermo-file')
+    parser.add_argument('--thermo-pe', help='Thermo keyword for potential energy',)
+    # parser.add_argument('--thermo-te', help='Thermo keyword for total energy',)
+    # parser.add_argument('--thermo-ke', help='Thermo keyword for kinetic energy',)
+    parser.add_argument('--save-extxyz', action='store_true', help='save extxyz instead of traj')
+    parser.add_argument('--ignore-velocities', action='store_true',
+                help='Ignore velocities in dump file')
+    parser.add_argument('--ignore-forces', action='store_true',
+                help='Ignore forces in dump file')
+    parser.add_argument('--skip', type=int, default=0,
+                help='Skip this many first steps')
     args = parser.parse_args()
     read_lammps_dump(**vars(args))
