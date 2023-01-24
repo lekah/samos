@@ -50,10 +50,12 @@ class Trajectory(AttributedArray):
     _TIMESTEP_KEY = 'timestep_fs'
     _POSITIONS_KEY = 'positions'
     _VELOCITIES_KEY = 'velocities'
+    _STRESS_KEY = 'stress'
     _CELL_KEY = 'cells'
     _FORCES_KEY = 'forces'
     _POT_ENER_KEY = 'potential_energy'
     _ATOMS_FILENAME = 'atoms.traj'
+
     def __init__(self, **kwargs):
         """
         Instantiating a trajectory class.
@@ -81,13 +83,16 @@ class Trajectory(AttributedArray):
 
         positions = np.array([atoms.get_positions() for atoms in atoms_list])
         velocities =  np.array([atoms.get_velocities() for atoms in atoms_list])
-        forces =  np.array([atoms.get_forces() for atoms in atoms_list])
+        try:
+            forces =  np.array([atoms.get_forces() for atoms in atoms_list])
+        except Exception as e:
+            forces = None
         cells = np.array([atoms.cell for atoms in atoms_list])
         new = cls(atoms=atoms_list[0])
         new.set_positions(positions)
         if (velocities**2).sum() > 1e-12:
             new.set_velocities(velocities)
-        if (forces**2).sum() > 1e-12:
+        if forces is not None and (forces**2).sum() > 1e-12:
             new.set_forces(forces)
         if (cells.std(axis=0).sum()) > 1e-12:
             new.set_cells(cells)
@@ -203,6 +208,18 @@ class Trajectory(AttributedArray):
         self.set_array(self._FORCES_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True,
                     wanted_shape_len=3, wanted_shape_2=3)
 
+    def set_stress(self, array, order='voigt', check_existing=False ):
+        """
+        order voigt expects keys ('xx', 'yy', 'zz', 'yz', 'xz', 'xy')
+        """
+        if order == 'voigt':
+            self.set_array(self._STRESS_KEY, array, check_existing=check_existing, check_nstep=True,
+                    wanted_shape_1=6, wanted_shape_len=2)
+        else:
+            raise ValueError("Not implemented order {}".format(order))
+    def get_stress(self):
+        return self.get_array(self._STRESS_KEY)
+
     def get_forces(self):
         return self.get_array(self._FORCES_KEY)
 
@@ -237,6 +254,8 @@ class Trajectory(AttributedArray):
                 calc_kwargs['forces'] = v[index]
             elif k == self._POT_ENER_KEY:
                 calc_kwargs['energy'] = v[index]
+            elif k == self._STRESS_KEY:
+                calc_kwargs['stress'] = v[index]
             else:
                 try:
                     getattr(atoms, 'set_{}'.format(k))(v[index])

@@ -126,11 +126,11 @@ def get_thermo_props(fname):
 
 def read_lammps_dump(filename, elements=None,
             elements_file=None, types=None,  timestep=None,
-            thermo_file=None, thermo_pe=None,
+            thermo_file=None, thermo_pe=None, thermo_stress=None,
             #thermo_ke=None #thermo_te=None,
             save_extxyz=False, outfile=None,
             ignore_forces=False, ignore_velocities=False,
-            skip=0, f_conv=1.0, e_conv=1.0,
+            skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0
         ):
     """
     Read a filedump from lammps. It expects atomid to be printed, and positions to be given in scaled or unwrapped coordinates
@@ -197,7 +197,9 @@ def read_lammps_dump(filename, elements=None,
                 break
             nat, timestep, cell = read_step_info(step_info, lidx=lidx, start=False)
             lidx += 9
-            assert nat == nat_must, "Changing number of atoms is not supported"
+            if nat != nat_must:
+                print("Changing number of atoms is not supported, breaking")
+                break
 
 
             body = np.array([f.readline().split() for _ in range(nat_must)]) # these are read as strings
@@ -244,6 +246,15 @@ def read_lammps_dump(filename, elements=None,
         if thermo_pe:
             colidx = header.index(thermo_pe)
             traj.set_pot_energies(e_conv*arr[indices, colidx])
+        if thermo_stress:
+            stressall = []
+            keys = ('xx', 'yy', 'zz', 'yz', 'xz', 'xy') # voigt notation for stress
+            # first diagonal terms:
+            for key in keys:
+                fullkey = thermo_stress + key
+                colidx = header.index(fullkey)
+                stressall.append(s_conv*arr[indices, colidx])
+            traj.set_stress(np.array(stressall).T)
         # if thermo_ke:
         #     colidx = header.index(thermo_ke)
         #     traj.set_kinetic_energies(arr[indices, colidx])
@@ -270,9 +281,11 @@ if __name__== '__main__':
     parser.add_argument('--timestep', type=float, help='The timestep of the trajectory printed')
     parser.add_argument('--f-conv', type=float, help='The conversion factor for forces', default=1.0)
     parser.add_argument('--e-conv', type=float, help='The conversion factor for energies', default=1.0)
+    parser.add_argument('--s-conv', type=float, help='The conversion factor for stresses', default=1.0)
 
     parser.add_argument('--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument('--thermo-pe', help='Thermo keyword for potential energy',)
+    parser.add_argument('--thermo-stress', help='Thermo keyword for stress without the xx/yy/xz..',)
     # parser.add_argument('--thermo-te', help='Thermo keyword for total energy',)
     # parser.add_argument('--thermo-ke', help='Thermo keyword for kinetic energy',)
     parser.add_argument('--save-extxyz', action='store_true', help='save extxyz instead of traj')
