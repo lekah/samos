@@ -54,6 +54,11 @@ class RDF(BaseAnalyzer):
         return rdf_res
 
     def run(self, radius=None, species_pairs=None, istart=0, istop=None, stepsize=1, nbins=100):
+        """
+        Calculate a RDF also search periodic images.
+        TODO: Improve algorithm because it can actually fail in very acute cell systems
+        TODO: Implement orthorhombic case to gain efficiency
+        """
         def get_indices(spec, chem_sym):
             """
             get the indices for specification spec
@@ -80,18 +85,27 @@ class RDF(BaseAnalyzer):
                 return 'spec_{}'.format(ispec)
             else:
                 print( type(spec))
+
         atoms = self._trajectory.atoms
         volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
         chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
-        cell = np.array(atoms.cell)
-        a, b, c = cell
+        cells = self._trajectory.get_cells()
         range_ = list(range(0,2))
-        corners = [i*a+j*b + k*c for i in range_ for j in range_ for k in range_]
-        cellI = np.linalg.inv(cell)
+        if cells is None:
+            fixed_cell = True
+            cell = atoms.cell.array
+            cellI = np.linalg.inv(cell)
+            a, b, c = cell
+            corners = [i*a+j*b + k*c for i in range_ for j in range_ for k in range_]
+        else:
+            fixed_cell = False
 
         if istop is None:
             istop = len(positions)
+        elif istop >= len(positions):
+            raise ValueError("Istop ({}) is higher (or equal) than number of positions ({})".format(
+                istop, len(positions)))
         if species_pairs is None:
             species_pairs = list(itertools.combinations_with_replacement(set(atoms.get_chemical_symbols()), 2))
         indices_pairs = []
@@ -110,6 +124,8 @@ class RDF(BaseAnalyzer):
         rdf_res = AttributedArray()
         rdf_res.set_attr('species_pairs', species_pairs_pruned)
         binsize=float(radius)/nbins
+
+        # wrapping the positions:
         for label, (ind1, ind2) in zip(labels, indices_pairs):
             if ind1==ind2:
                 # lists are equal, I will therefore not double calculate
@@ -120,18 +136,30 @@ class RDF(BaseAnalyzer):
                 pair_factor = 1.0
             # It can happen that pairs_of_atoms
             ind_pair1, ind_pair2 = list(zip(*pairs_of_atoms))
-            diff_real_unwrapped = (positions[istart:istop:stepsize, ind_pair2, :] -  positions[istart:istop:stepsize, ind_pair1, :]).reshape(-1, 3)
-            density = float(len(ind2)) / volume
-            diff_crystal_wrapped = np.dot(diff_real_unwrapped, cellI) % 1.0
-            diff_real_wrapped = np.dot(diff_crystal_wrapped, cell)
 
-            shortest_distances = cdist(diff_real_wrapped, corners).min(axis=1)
+            # doinng a loop in time to avoid memory explosion
+            # this also makes it easier to deal with cell changes
+            hist, bin_edges = np.histogram([], bins=nbins, range=(0, radius))
+            hist = hist.astype(float)
+            # normalize the histogram, by the number of steps taken, and the number of species1
+            prefactor = pair_factor /  float(len(np.arange(istart, istop, stepsize))) / float(len(ind1))
+            for index in np.arange(istart, istop, stepsize):
+                if not fixed_cell:
+                    cell = cells[index]
+                    cellI = np.linalg.inv(cell)
+                    a, b, c = cell
+                    corners = np.array([i*a+j*b + k*c 
+                                for i in range_
+                                for j in range_
+                                for k in range_])
+                diff_real_unwrapped = positions[index, ind_pair2, :] - positions[index, ind_pair1, :]
+                diff_crystal_wrapped = (diff_real_unwrapped@cellI) % 1.0
+                diff_real_wrapped = np.dot(diff_crystal_wrapped, cell)
+                # in diff_real_wrapped I have all positions wrapped into periodic cell
+                shortest_distances = cdist(diff_real_wrapped, corners).min(axis=1)
+                hist +=  prefactor * (np.histogram(shortest_distances, bins=nbins, range=(0,radius))[0]).astype(float)
 
-            hist, bin_edges = np.histogram(shortest_distances, bins=nbins, range=(0,radius))
             radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
-
-            # now I need to normalize the histogram, by the number of steps taken, and the number of species1
-            hist = hist *pair_factor /  float(len(np.arange(istart, istop, stepsize))) / float(len(ind1))
 
             rdf = hist / (4.0 * np.pi * radii**2 * binsize )  / (len(ind2)/volume)
             integral = np.empty(len(rdf))

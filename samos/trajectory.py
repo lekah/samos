@@ -136,8 +136,17 @@ class Trajectory(AttributedArray):
     def set_cells(self, array,check_existing=False):
         self.set_array(self._CELL_KEY, array, check_existing=check_existing, check_nat=False, check_nstep=True,
                 wanted_shape_len=3, wanted_shape_1=3, wanted_shape_2=3)
-    def get_cell(self):
-        return self.get_array(self._CELL_KEY)
+    def get_cells(self):
+        if self._CELL_KEY in self.get_arraynames():
+            return self.get_array(self._CELL_KEY)
+        return None
+    def get_volumes(self):
+        cells = self.get_cells()
+        if cells is None:
+            volume = self.atoms.get_volume()
+            return np.array([volume]*self.nstep)
+        volumes =  [np.linalg.det(cell) for cell in cells]
+        return np.array(volumes)
 
     def get_indices_of_species(self, species, start=0):
         """

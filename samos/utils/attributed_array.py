@@ -2,7 +2,7 @@
 
 from json import dumps
 import numpy as np
-
+from copy import deepcopy
 import shutil
 
 class AttributedArray(object):
@@ -70,7 +70,6 @@ class AttributedArray(object):
     def get_arraynames(self):
         return sorted(self._arrays.keys())
 
-
     def get_attrs(self):
         return self._attrs
 
@@ -109,7 +108,10 @@ class AttributedArray(object):
         for arrayname, array in list(self._arrays.items()):
             np.save(join(folder_name, '{}.npy'.format(arrayname)), array)
 
-
+    def remove_array(self, arrayname):
+        if arrayname not in self._arrays:
+            raise KeyError(f"{arrayname} is not one of arrays")
+        del self._arrays[arrayname]
 
 
     def _save_attributes(self, folder_name):
