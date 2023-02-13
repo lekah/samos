@@ -94,7 +94,10 @@ class RDF(BaseAnalyzer):
         range_ = list(range(0,2))
         if cells is None:
             fixed_cell = True
-            cell = atoms.cell.array
+            try:
+                cell = atoms.cell.array
+            except AttributeError:
+                cell = atoms.cell.copy()
             cellI = np.linalg.inv(cell)
             a, b, c = cell
             corners = [i*a+j*b + k*c for i in range_ for j in range_ for k in range_]

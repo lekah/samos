@@ -90,8 +90,11 @@ class Trajectory(AttributedArray):
         cells = np.array([atoms.cell for atoms in atoms_list])
         new = cls(atoms=atoms_list[0])
         new.set_positions(positions)
-        if (velocities**2).sum() > 1e-12:
-            new.set_velocities(velocities)
+        try:
+            if (velocities**2).sum() > 1e-12:
+                new.set_velocities(velocities)
+        except TypeError:
+            pass # velocities are returned as none if not existen
         if forces is not None and (forces**2).sum() > 1e-12:
             new.set_forces(forces)
         if (cells.std(axis=0).sum()) > 1e-12:
