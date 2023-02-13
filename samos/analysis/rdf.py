@@ -201,3 +201,44 @@ class AngularSpectrum(BaseAnalyzer):
             rdf_res.set_array('aspec_{}_{}_{}'.format(spec1, spec2, spec3), angular_spec)
             rdf_res.set_array('angles_{}_{}_{}'.format(spec1, spec2, spec3), angles)
         return rdf_res
+
+def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
+        species_pairs=None, savefig=None):
+    from samos.plotting.plot_rdf import plot_rdf
+    from matplotlib import pyplot as plt
+    from matplotlib.gridspec import GridSpec
+
+    traj = Trajectory.load_file(trajectory_path)
+    print("Read trajectory of shape {}".format(traj.get_positions().shape))
+    if species_pairs:
+        species_pairs_ = []
+        for spec in species_pairs:
+            species_pairs_.append(spec.split('-'))
+    else:
+        species_pairs_=None
+    rdf = RDF(trajectory=traj)
+    res = rdf.run(radius=radius, stepsize=stepsize, nbins=bins,species_pairs=species_pairs_)
+    fig = plt.figure(figsize=(4,3))
+    gs = GridSpec(1,1, top=0.99, right=0.86, left=0.14, bottom=0.16)
+    ax = fig.add_subplot(gs[0])
+    plot_rdf(res, ax=ax)
+    if savefig:
+        plt.savefig(savefig, dpi=250)
+    else:
+        plt.show()
+
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser("analysis/plot of a RDF, given a trajectory")
+    parser.add_argument('trajectory_path')
+    parser.add_argument('-r', '--radius', required=False, type=float, default=5.0,
+                help='The radius (max) of the RDF, defaults to 5.0')
+    parser.add_argument('-b', '--bins', type=int, help='Number of bins, defaults to 100', default=100)
+    parser.add_argument('-s', '--stepsize', type=int,
+            help='Stepsize over the trajectory, defaults to 1', default=1)
+    parser.add_argument('--species-pairs', nargs='+',
+            help='species pairs separated by a dash, e.g., --species-pairs C-O O-O')
+    parser.add_argument('--savefig', help='Where to save figure (will otherwise show on screen)')
+    args = parser.parse_args()
+    kwargs = vars(args)
+    util_rdf_and_plot(**kwargs)
