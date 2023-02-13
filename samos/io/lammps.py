@@ -55,15 +55,33 @@ def read_step_info(lines, lidx=0, start=False):
     except Exception as e:
         print("Could not read number of atoms")
         raise e
-    assert lines[4].startswith("ITEM: BOX BOUNDS pp pp pp"), "unsupported lammps dump file, expected  BOX BOUNDS pp pp pp"
     cell = np.zeros((3,3))
-    try:
-        for idim in range(3):
-            d1, d2 = [float(m.group('float')) for m in float_regex.finditer(lines[5+idim])]
-            cell[idim, idim] = d2 - d1
-    except Exception as e:
-        print(f"Could not read cell dimension {idim}")
-        raise e
+    if lines[4].startswith("ITEM: BOX BOUNDS pp pp pp")
+        try:
+            for idim in range(3):
+                d1, d2 = [float(m.group('float')) for m in float_regex.finditer(lines[5+idim])]
+                cell[idim, idim] = d2 - d1
+        except Exception as e:
+            print(f"Could not read cell dimension {idim}")
+            raise e
+    elif lines[4].startswith("BOX BOUNDS xy xz yz pp pp pp"):
+        try:
+            # see https://docs.lammps.org/dump.html
+            # and https://docs.lammps.org/Howto_triclinic.html
+            xlo, xhi, xy = [float(m.group('float')) for m in float_regex.finditer(lines[5])]
+            ylo, yhi, xz = [float(m.group('float')) for m in float_regex.finditer(lines[6])]
+            zlo, zhi, yz = [float(m.group('float')) for m in float_regex.finditer(lines[7])]
+            cell[0, 0] = xhi - xlo
+            cell[1, 1] = yhi - ylo
+            cell[2, 2] = zhi - zlo
+            cell[1, 0] = xy
+            cell[2, 0] = xz
+            cell[2, 1] = yz
+        except Exception as e:
+            print(f"Could not read cell dimension {idim}")
+            raise e
+    else:
+        raise ValueError("unsupported lammps dump file, expected  BOX BOUNDS pp pp pp or BOX BOUNDS xy xz yz pp pp pp")
     if start:
         print(f"Read starting cell as:\n{cell}")
         assert lines[8].startswith("ITEM: ATOMS"), "Not a supported format, expected ITEM: ATOMS"
