@@ -81,7 +81,6 @@ def read_xsf(filename, fold_positions=False):
         raise Exception('No cell was read in XSF file, stopping')
     volume_au = volume_ang / bohr_to_ang**3
 
-    N_el = np.sum(rho_of_r) * volume_au / np.prod(rho_of_r.shape)
 
     if fold_positions:
         invcell = np.matrix(cell).T.I
@@ -102,8 +101,7 @@ def read_xsf(filename, fold_positions=False):
 def write_xsf(
         atoms, positions, cell, data,
         vals_per_line=6, outfilename=None,
-        is_flattened=False, shape=None,
-        **kwargs):
+        is_flattened=False, shape=None,):
     if isinstance(outfilename, str):
         f = open(outfilename, 'w')
     elif outfilename is None:
@@ -116,7 +114,8 @@ def write_xsf(
             xdim, ydim, zdim = shape
         except (TypeError, ValueError):
             raise Exception(
-                'if you pass a flattend array you need to give the original shape')
+                'if you pass a flattend array you '
+                'need to give the original shape')
     else:
         xdim, ydim, zdim = data.shape
         shape = data.shape
@@ -164,7 +163,7 @@ DATAGRID_3D_UNKNOWN
     f.close()
 
 
-def write_grid(data, outfilename=None, vals_per_line=5, **kwargs):
+def write_grid(data, outfilename=None, vals_per_line=5,):
     xdim, ydim, zdim = data.shape
     if isinstance(outfilename, str):
         f = open(outfilename, 'w')
@@ -193,12 +192,12 @@ def write_grid(data, outfilename=None, vals_per_line=5, **kwargs):
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
-    p = ArgumentParser("""
-Reads and writes an XSF file or a data file.
-python temp.xsf -o grid.xyz
-""")
+    p = ArgumentParser(
+        "Reads and writes an XSF file or a data file.\n"
+        "python temp.xsf -o grid.xyz")
     p.add_argument('file', type=str)
-    p.add_argument('--format', choices=['xsf', 'grid', 'none'], default='grid',
+    p.add_argument('--format', choices=['xsf', 'grid', 'none'], 
+                   default='grid',
                    help='whether to print the output in xsf or grid format')
     p.add_argument('-o', '--output',
                    help='The name of the output file, default to sys.out')
