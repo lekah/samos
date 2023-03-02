@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import sys, numpy as np, re, os
-from samos.lib.gaussian_density import make_gaussian_density
+import sys
+import numpy as np
 from samos.utils.terminal import get_terminal_width
 
 bohr_to_ang = 0.52917720859
@@ -72,6 +72,7 @@ def get_gaussian_density(trajectory, element=None, outputfile ='out.xsf',
     :param int istop: Index to stop reading positions
     :param bool recenter: Whether to recenter
     """
+    from samos.lib.gaussian_density import make_gaussian_density
 
     cell = trajectory.cell
     positions = trajectory.get_positions()

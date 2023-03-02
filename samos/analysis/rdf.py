@@ -2,10 +2,10 @@
 
 import numpy as  np
 from scipy.spatial.distance import cdist
-from ase import Atoms
+
 from samos.trajectory import Trajectory
 from samos.utils.attributed_array import AttributedArray
-from samos.lib.rdf import calculate_rdf, calculate_angular_spec
+
 import itertools
 from abc import ABCMeta, abstractmethod
 
@@ -29,6 +29,7 @@ class RDF(BaseAnalyzer):
         :param float density: The grid density. The number of bins is given by radius/density
         """
         raise NotImplemented('This is not fully implemented')
+        from samos.lib.rdf import calculate_rdf, calculate_angular_spec
         atoms = self._trajectory.atoms
         volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
