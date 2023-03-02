@@ -26,6 +26,10 @@ class TestTrajectory(unittest.TestCase):
         atoms_step_3 = t.get_step_atoms(3)
 
         self.assertTrue(np.array_equal(atoms_step_3.get_positions(), pos[3]))
+        print(atoms_step_3.get_velocities())
+        if not np.array_equal(atoms_step_3.get_velocities(), vel[3]):
+            print(atoms_step_3.get_velocities())
+            print(vel[3])
         self.assertTrue(np.array_equal(atoms_step_3.get_velocities(), vel[3]))
 
 
