@@ -11,6 +11,7 @@ Currently implemented are:
 This code is written mostly in Python 3, the computationally intensive functions are in fortran90 and wrapped with f2py.
 To install, clone or download this repository, move into the directory of this file, and type:
 
+    pip install numpy # or conda install numpy
     pip install .
 
-It will install the package and dependencies.
+It will install the package and dependencies. Other dependendies are ase, scipy, matplotlib
