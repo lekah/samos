@@ -65,7 +65,7 @@ class Trajectory(AttributedArray):
         super(Trajectory, self).__init__(**kwargs)
 
     @classmethod
-    def from_atoms(cls, atoms_list, timestep_fs=1.0):
+    def from_atoms(cls, atoms_list, timestep_fs=None):
         """
         Instantiate a new class instance given a set of atoms
         """
@@ -99,6 +99,8 @@ class Trajectory(AttributedArray):
             new.set_forces(forces)
         if (cells.std(axis=0).sum()) > 1e-12:
             new.set_cells(cells)
+        if timestep_fs is not None:
+            new.set_timestep(timestep_fs)
         return new
 
     def _save_atoms(self, folder_name):
@@ -207,6 +209,23 @@ class Trajectory(AttributedArray):
         """
         self.set_array(self._VELOCITIES_KEY, array, check_existing=check_existing, check_nat=True, check_nstep=True,
                     wanted_shape_len=3, wanted_shape_2=3)
+
+    def calculate_velocities_from_positions(self, overwrite=False):
+        """
+        Using positions-verlet update formula to infer velocities from positions
+        """
+        if self._VELOCITIES_KEY in self.get_arraynames():
+            if not overwrite:
+                raise Exception("I am overwriting an existing velocity array"
+                                "Pass overwrite=True to allow")
+        pos = self.get_positions()
+        timestep_fs = self.get_timestep()
+        vel_first = (pos[1] - pos[0]) / timestep_fs
+        vel_last = (pos[-1] - pos[-2]) / timestep_fs
+        vel_intermediate = (pos[2:] - pos[:-2]) / (2*timestep_fs)
+        vel = np.vstack(([vel_first], vel_intermediate, [vel_last]))
+        self.set_velocities(vel)
+        return vel.copy()
 
     def get_velocities(self):
         return self.get_array(self._VELOCITIES_KEY)

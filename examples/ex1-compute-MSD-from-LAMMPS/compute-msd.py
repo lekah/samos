@@ -50,7 +50,6 @@ def main():
     plt.savefig('msd-plot2.png')
 
 
-    
 
 if __name__ == '__main__':
     main()
