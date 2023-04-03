@@ -262,8 +262,12 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
     from samos.plotting.plot_rdf import plot_rdf
     from matplotlib import pyplot as plt
     from matplotlib.gridspec import GridSpec
-
-    traj = Trajectory.load_file(trajectory_path)
+    if trajectory_path.endswith('.extxyz'):
+        from ase.io import read
+        aselist = read(trajectory_path, format='extxyz', index=':')
+        traj = Trajectory.from_atoms(aselist)
+    else:
+        traj = Trajectory.load_file(trajectory_path)
     print("Read trajectory of shape {}".format(traj.get_positions().shape))
     if species_pairs:
         species_pairs_ = []
