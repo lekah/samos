@@ -153,13 +153,13 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     # ~ ymin = (R[1,3] + np.sqrt(R[1,3]**2 - R[1,1]*R[3,3])) / R[3,3]
     # ~ zmax = (R[2,3] - np.sqrt(R[2,3]**2 - R[2,2]*R[3,3])) / R[3,3]
     # ~ zmin = (R[2,3] + np.sqrt(R[2,3]**2 - R[2,2]*R[3,3])) / R[3,3]
-    # The size of the bounding box is given by (max - min) 
+    # The size of the bounding box is given by (max - min)
     # for each dimension.
     # I want this to be expressed as integer values in the grid,
     # though, for convenience.
-    # In  plain terms, bx,by,bz tell me how many grid point 
+    # In  plain terms, bx,by,bz tell me how many grid point
     # I have to walk up/down in x/y/z
-    # maximally to be sure that I contain all the points that lie 
+    # maximally to be sure that I contain all the points that lie
     # with n_sigma*sigma from the origin!
     # Of course, of main importance is the density!
     # I add to be sure, since int cuts of floating points!
@@ -172,7 +172,7 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         abs((R[1, 3] - np.sqrt(R[1, 3]**2 - R[1, 1]*R[3, 3]))
             / R[3, 3]) / density)+1
     b3 = int(
-        abs((R[2, 3] - np.sqrt(R[2, 3]**2 - R[2, 2]*R[3, 3])) 
+        abs((R[2, 3] - np.sqrt(R[2, 3]**2 - R[2, 2]*R[3, 3]))
             / R[3, 3]) / density)+1
 
     make_gaussian_density(

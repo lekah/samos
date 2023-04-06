@@ -71,7 +71,8 @@ class DynamicsAnalyzer(object):
         self._verbosity = verbosity
 
     def get_species_of_interest(self):
-        atoms = self.atoms  # Also a good way to check if atoms have been set
+        # Also a good way to check if atoms have been set
+        atoms = self.atoms
         if self._species_of_interest is None:
             return sorted(set(atoms.get_chemical_symbols()))
         else:
