@@ -259,19 +259,21 @@ class Trajectory(AttributedArray):
         self.set_array(self._POT_ENER_KEY, array, check_existing=check_existing, check_nat=False, check_nstep=True,
                     wanted_shape_len=1)
 
-    def get_step_atoms(self, index):
+    def get_step_atoms(self, index, ignore_calculated=False):
         """
         For a set stepindex, returns an atoms instance with all the settings from that step.
         :param int index: The index of the step
+        :param bool ignore_calculated: ignore the calculated values (forces, energies, stress)
         :returns: an ase.Atoms instance from the trajectory at step
         """
         assert isinstance(index, (int, np.int64)), "step index has to be an integer"
 
         need_calculator = False
-        for key in (self._FORCES_KEY, self._POT_ENER_KEY):
-            if key in self.get_arraynames():
-                need_calculator = True
-                break
+        if not ignore_calculated:
+            for key in (self._FORCES_KEY, self._POT_ENER_KEY):
+                if key in self.get_arraynames():
+                    need_calculator = True
+                    break
         atoms = self.atoms.copy()
 
         if need_calculator:
@@ -281,7 +283,9 @@ class Trajectory(AttributedArray):
         for k,v in list(self._arrays.items()):
             if k == self._CELL_KEY:
                 atoms.set_cell(v[index])
-            elif k == self._FORCES_KEY:
+            if not(need_calculator):
+                continue
+            if k == self._FORCES_KEY:
                 calc_kwargs['forces'] = v[index]
             elif k == self._POT_ENER_KEY:
                 calc_kwargs['energy'] = v[index]
