@@ -227,7 +227,8 @@ class DynamicsAnalyzer(object):
             raise InputError('Provide a time to end fitting the time series')
 
         if not np.all(t_end_fit_dt > t_start_fit_dt):
-            raise InputError('t_end_fit_dt must be larger than t_start_fit_dt')
+            raise InputError('t_end_fit_dt must be larger than '
+                             't_start_fit_dt')
 
         if not isinstance(t_start_fit_dt, int):
             if isinstance(t_end_fit_dt, int):
