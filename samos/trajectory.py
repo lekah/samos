@@ -323,6 +323,7 @@ class Trajectory(AttributedArray):
         for k, v in list(self._arrays.items()):
             if k == self._CELL_KEY:
                 atoms.set_cell(v[index])
+                continue
             if not (need_calculator):
                 continue
             if k == self._FORCES_KEY:

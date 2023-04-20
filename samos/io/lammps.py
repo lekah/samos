@@ -249,10 +249,8 @@ def read_lammps_dump(filename, elements=None,
                     forces.append(f_conv*np.array(body[:, frcids],
                                                   dtype=float)[sorting_key])
             iframe += 1
-
     print(f"Read trajectory of length {iframe}\n"
           f"Creating Trajectory of length {len(timesteps)}")
-
     atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
     traj = Trajectory(atoms=atoms,
                       positions=positions, cells=cells)
