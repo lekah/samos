@@ -323,15 +323,15 @@ class Trajectory(AttributedArray):
         for k, v in list(self._arrays.items()):
             if k == self._CELL_KEY:
                 atoms.set_cell(v[index])
-                continue
-            if not (need_calculator):
-                continue
-            if k == self._FORCES_KEY:
-                calc_kwargs['forces'] = v[index]
+            elif k == self._FORCES_KEY:
+                if need_calculator:
+                    calc_kwargs['forces'] = v[index]
             elif k == self._POT_ENER_KEY:
-                calc_kwargs['energy'] = v[index]
+                if need_calculator:
+                    calc_kwargs['energy'] = v[index]
             elif k == self._STRESS_KEY:
-                calc_kwargs['stress'] = v[index]
+                if need_calculator:
+                    calc_kwargs['stress'] = v[index]
             else:
                 try:
                     getattr(atoms, 'set_{}'.format(k))(v[index])
