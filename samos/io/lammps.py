@@ -290,7 +290,7 @@ def read_lammps_dump(filename, elements=None,
         # if thermo_ke:
         #     colidx = header.index(thermo_ke)
         #     traj.set_kinetic_energies(arr[indices, colidx])
-    if save_extxyz:
+    if save_extxyz or (outfile is not None and outfile.endswith('extxyz')):
         from ase.io import write
         path_to_save = outfile or filename + '.extxyz'
         asetraj = traj.get_ase_trajectory()
