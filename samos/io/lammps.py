@@ -5,8 +5,9 @@ import re
 from ase import Atoms
 from samos.trajectory import Trajectory
 
-integer_regex = re.compile('(?P<int>\d+)')  # only positvie integers
-float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')
+#  only matches positive integers
+integer_regex = re.compile('(?P<int>\d+)')  # noqa: W605
+float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
 
 
 def get_indices(header_list, prefix="", postfix=""):
@@ -36,7 +37,7 @@ def get_position_indices(header_list):
     raise TypeError("No position indices found")
 
 
-def read_step_info(lines, lidx=0, start=False):
+def read_step_info(lines, lidx=0, start=False, additional_kw=[]):
     assert len(lines) == 9
     if not lines[0].startswith("ITEM: TIMESTEP"):
         raise Exception("Did not start with 'ITEM: TIMESTEP'\n"
@@ -125,8 +126,13 @@ def read_step_info(lines, lidx=0, start=False):
             print("Forces found at indices: {}".format(frcids))
         else:
             print("Forces were not found")
+        additional_ids = []
+        if additional_kw:
+            for kw in additional_kw:
+                additional_ids.append(header_list.index(kw))
+
         return (nat, atomid_idx, element_idx, type_idx, postype,
-                posids, has_vel, velids, has_frc, frcids)
+                posids, has_vel, velids, has_frc, frcids, additional_ids)
     else:
         return nat, timestep, cell
 
@@ -159,12 +165,41 @@ def read_lammps_dump(filename, elements=None,
                      # thermo_ke=None #thermo_te=None,
                      save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
-                     skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0
-                     ):
+                     skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
+                     additional_keywords_dump=[],):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
     to be given in scaled or unwrapped coordinates
+    :param filename: lammps dump file to read
+    :param elements: list of elements to use
+    :param elements_file:
+        file containing elements (separated by space),
+        instead of elements
+    :param types:
+        list of types if elements are not specified
+        and type is a column
+    :param timestep: timestep of dump (in fs)
+    :param thermo_file: file containing thermo output in case required
+    :param thermo_pe:
+        potential energy column in thermo file (as given in header)
+    :param thermo_stress:
+        stress column in thermo file (as given in header,
+        will do the _xx/_yy etc)
+    :param save_extxyz:
+        save to extxyz file
+        (or if outfile is given with .extxyz)
+    :param outfile: output file name, will write trajectory by default
+    :param ignore_forces: ignore forces even if written in dump
+    :param ignore_velocities: ignore velocities even if written in dump
+    :param skip: skip first n steps
+    :param f_conv: force conversion factor
+    :param e_conv: energy conversion factor
+    :param s_conv: stress conversion factor
+    :param additional_keywords_dump:
+        additional keywords to be added read form dump and
+        to be added as array. The column name is used both
+        as key but also as arrayname
     """
     # opening a first time to check file and get
     # indices of positions, velocities etc...
@@ -173,7 +208,9 @@ def read_lammps_dump(filename, elements=None,
         lines = [next(f) for _ in range(9)]
         (nat_must, atomid_idx, element_idx, type_idx,
          postype, posids, has_vel, velids,
-         has_frc, frcids) = read_step_info(lines, lidx=0, start=True)
+         has_frc, frcids, additional_ids_dump) = read_step_info(
+            lines, lidx=0, start=True,
+            additional_kw=additional_keywords_dump)
 
         if ignore_forces:
             has_frc = False
@@ -183,7 +220,10 @@ def read_lammps_dump(filename, elements=None,
         body = np.array([f.readline().split() for _ in range(nat_must)])
         atomids = np.array(body[:, atomid_idx], dtype=int)
         sorting_key = atomids.argsort()
-        if type_idx is not None and types is not None:
+        # figuring out elements of structure
+        if types is not None:
+            if type_idx is None:
+                raise ValueError("types specified but not found in file")
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
@@ -207,6 +247,7 @@ def read_lammps_dump(filename, elements=None,
                         f"is not equal number of atoms ({nat_must})")
                 symbols = elements[:]
         else:
+            # last resort, setting everything to Hydrogen
             symbols = ['H']*nat_must
 
     positions = []
@@ -219,6 +260,9 @@ def read_lammps_dump(filename, elements=None,
 
     lidx = 0
     iframe = 0
+    # dealing with additional kwywods
+    additional_arrays = {kw: [] for kw in additional_keywords_dump}
+
     with open(filename) as f:
         while True:
             step_info = [f.readline() for _ in range(9)]
@@ -248,6 +292,11 @@ def read_lammps_dump(filename, elements=None,
                 if has_frc:
                     forces.append(f_conv*np.array(body[:, frcids],
                                                   dtype=float)[sorting_key])
+                for kw, idx_add in zip(additional_keywords_dump,
+                                       additional_ids_dump):
+                    additional_arrays[kw].append(
+                        np.array(body[:, idx_add],
+                                 dtype=float)[sorting_key])
             iframe += 1
     print(f"Read trajectory of length {iframe}\n"
           f"Creating Trajectory of length {len(timesteps)}")
@@ -260,7 +309,8 @@ def read_lammps_dump(filename, elements=None,
         traj.set_forces(forces)
     if timestep:
         traj.set_timestep(timestep)
-
+    for key, arr in additional_arrays.items():
+        traj.set_array(key, np.array(arr))
     if thermo_file:
         header, arr, ts_index = get_thermo_props(thermo_file)
         timesteps_thermo = np.array(arr[:, ts_index], dtype=int).tolist()
@@ -328,11 +378,11 @@ if __name__ == '__main__':
     parser.add_argument('--s-conv', type=float,
                         help='The conversion factor for stresses',
                         default=1.0)
-
     parser.add_argument(
         '--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument(
-        '--thermo-pe', help='Thermo keyword for potential energy',)
+        '--thermo-pe',
+        help='Thermo keyword for potential energy',)
     parser.add_argument('--thermo-stress',
                         help=('Thermo keyword for stress '
                               'without the xx/yy/xz..'))
@@ -346,5 +396,8 @@ if __name__ == '__main__':
                         help='Ignore forces in dump file')
     parser.add_argument('--skip', type=int, default=0,
                         help='Skip this many first steps')
+    parser.add_argument('-a', '--additional-keywords-dump', nargs='+',
+                        help=('Additional keywords to be read from dump file'),
+                        default=[])
     args = parser.parse_args()
     read_lammps_dump(**vars(args))

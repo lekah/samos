@@ -14,6 +14,8 @@ def read_xsf(filename, fold_positions=False):
     reading_structure = False
     reading_nat = False
     reading_cell = False
+    x, y, z, xdim, ydim, zdim = 0, 0, 0, 0, 0, 0
+    rho_of_r, atoms, positions, cell = [], [], [], []
     with open(filename) as f:
         finished = False
         for line in f.readlines():
@@ -80,7 +82,6 @@ def read_xsf(filename, fold_positions=False):
     except UnboundLocalError:
         raise Exception('No cell was read in XSF file, stopping')
     volume_au = volume_ang / bohr_to_ang**3
-
 
     if fold_positions:
         invcell = np.matrix(cell).T.I
@@ -196,7 +197,7 @@ if __name__ == '__main__':
         "Reads and writes an XSF file or a data file.\n"
         "python temp.xsf -o grid.xyz")
     p.add_argument('file', type=str)
-    p.add_argument('--format', choices=['xsf', 'grid', 'none'], 
+    p.add_argument('--format', choices=['xsf', 'grid', 'none'],
                    default='grid',
                    help='whether to print the output in xsf or grid format')
     p.add_argument('-o', '--output',

@@ -296,7 +296,8 @@ class Trajectory(AttributedArray):
                        check_nat=False, check_nstep=True,
                        wanted_shape_len=1)
 
-    def get_step_atoms(self, index, ignore_calculated=False):
+    def get_step_atoms(self, index, ignore_calculated=False,
+                       warnings=True):
         """
         For a set stepindex, returns an atoms instance with all
         the settings from that step.
@@ -336,7 +337,8 @@ class Trajectory(AttributedArray):
                 try:
                     getattr(atoms, 'set_{}'.format(k))(v[index])
                 except AttributeError as e:
-                    print(e)
+                    if warnings:
+                        print(e)
         if need_calculator:
             calc = SinglePointCalculator(atoms, **calc_kwargs)
             atoms.set_calculator(calc)  # this seems to be deprecated,
