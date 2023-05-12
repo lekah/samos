@@ -37,7 +37,7 @@ def get_position_indices(header_list):
     raise TypeError("No position indices found")
 
 
-def read_step_info(lines, lidx=0, start=False, additional_kw=[]):
+def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     assert len(lines) == 9
     if not lines[0].startswith("ITEM: TIMESTEP"):
         raise Exception("Did not start with 'ITEM: TIMESTEP'\n"
@@ -90,21 +90,24 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[]):
                          "expected  BOX BOUNDS pp pp pp or "
                          "BOX BOUNDS xy xz yz pp pp pp")
     if start:
-        print(f"Read starting cell as:\n{cell}")
+        if not quiet:
+            print(f"Read starting cell as:\n{cell}")
         if not lines[8].startswith("ITEM: ATOMS"):
             raise Exception("Not a supported format, expected ITEM: ATOMS")
         header_list = lines[8].lstrip("ITEM: ATOMS").split()
 
         atomid_idx = header_list.index('id')
-        print(f'Atom ID index: {atomid_idx}')
+        if not quiet:
+            print(f'Atom ID index: {atomid_idx}')
         try:
             element_idx = header_list.index('element')
-            print("Element found at index {element_idx}")
+            if not quiet:
+                print("Element found at index {element_idx}")
         except ValueError:
             element_idx = None
         try:
             type_idx = header_list.index('type')
-            print("type found at index {type_idx}")
+            if not quiet: print("type found at index {type_idx}")
         except ValueError:
             type_idx = None
         try:
@@ -112,20 +115,21 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[]):
         except Exception:
             print("Abandoning because positions are not given")
             sys.exit(1)
-        print("Positions are given as: {}".format(
-            {'u': "unwrapped", 's': "Scaled (wrapped)",
-             "": "Wrapped"}[postype]))
-        print("Position indices are: {}".format(posids))
+        if not quiet:
+            print("Positions are given as: {}".format(
+                {'u': "unwrapped", 's': "Scaled (wrapped)",
+                "": "Wrapped"}[postype]))
+        if not quiet: print("Position indices are: {}".format(posids))
         has_vel, velids = get_indices(header_list, 'v')
         if has_vel:
-            print("Velocities found at indices: {}".format(velids))
+            if not quiet: print("Velocities found at indices: {}".format(velids))
         else:
-            print("Velocities were not found")
+            if not quiet: print("Velocities were not found")
         has_frc, frcids = get_indices(header_list, 'f')
         if has_frc:
-            print("Forces found at indices: {}".format(frcids))
+            if not quiet: print("Forces found at indices: {}".format(frcids))
         else:
-            print("Forces were not found")
+            if not quiet: print("Forces were not found")
         additional_ids = []
         if additional_kw:
             for kw in additional_kw:
@@ -166,7 +170,7 @@ def read_lammps_dump(filename, elements=None,
                      save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
                      skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
-                     additional_keywords_dump=[],):
+                     additional_keywords_dump=[], quiet=False):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
@@ -210,7 +214,7 @@ def read_lammps_dump(filename, elements=None,
          postype, posids, has_vel, velids,
          has_frc, frcids, additional_ids_dump) = read_step_info(
             lines, lidx=0, start=True,
-            additional_kw=additional_keywords_dump)
+            additional_kw=additional_keywords_dump, quiet=quiet)
 
         if ignore_forces:
             has_frc = False
@@ -270,7 +274,7 @@ def read_lammps_dump(filename, elements=None,
                 print(f"End reached at line {lidx}, stopping")
                 break
             nat, timestep, cell = read_step_info(
-                step_info, lidx=lidx, start=False)
+                step_info, lidx=lidx, start=False, quiet=quiet)
             lidx += 9
             if nat != nat_must:
                 print("Changing number of atoms is not supported, breaking")
@@ -298,8 +302,9 @@ def read_lammps_dump(filename, elements=None,
                         np.array(body[:, idx_add],
                                  dtype=float)[sorting_key])
             iframe += 1
-    print(f"Read trajectory of length {iframe}\n"
-          f"Creating Trajectory of length {len(timesteps)}")
+    if not quiet:
+        print(f"Read trajectory of length {iframe}\n"
+            f"Creating Trajectory of length {len(timesteps)}")
     atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
     traj = Trajectory(atoms=atoms,
                       positions=positions, cells=cells)
@@ -399,5 +404,7 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--additional-keywords-dump', nargs='+',
                         help=('Additional keywords to be read from dump file'),
                         default=[])
+    parser.add_argument('-q', '--quiet', action='store_true',
+                        help='Do not print anything')
     args = parser.parse_args()
     read_lammps_dump(**vars(args))
