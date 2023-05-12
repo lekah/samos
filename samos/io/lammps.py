@@ -271,7 +271,8 @@ def read_lammps_dump(filename, elements=None,
         while True:
             step_info = [f.readline() for _ in range(9)]
             if ''.join(step_info) == '':
-                print(f"End reached at line {lidx}, stopping")
+                if not quiet:
+                    print(f"End reached at line {lidx}, stopping")
                 break
             nat, timestep, cell = read_step_info(
                 step_info, lidx=lidx, start=False, quiet=quiet)
