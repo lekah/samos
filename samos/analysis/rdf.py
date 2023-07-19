@@ -261,13 +261,11 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
                       species_pairs=None, savefig=None, plot=False,
                       printrdf=False):
     if trajectory_path.endswith('.extxyz'):
-        print(1)
         from ase.io import read
         aselist = read(trajectory_path, format='extxyz', index=':')
         traj = Trajectory.from_atoms(aselist)
     else:
         traj = Trajectory.load_file(trajectory_path)
-    print(2)
     print("Read trajectory of shape {}".format(traj.get_positions().shape))
     if species_pairs:
         species_pairs_ = []
