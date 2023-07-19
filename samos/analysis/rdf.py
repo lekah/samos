@@ -260,9 +260,6 @@ class AngularSpectrum(BaseAnalyzer):
 def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
                       species_pairs=None, savefig=None, plot=False,
                       printrdf=False):
-    from samos.plotting.plot_rdf import plot_rdf
-    from matplotlib import pyplot as plt
-    from matplotlib.gridspec import GridSpec
     if trajectory_path.endswith('.extxyz'):
         from ase.io import read
         aselist = read(trajectory_path, format='extxyz', index=':')
@@ -280,6 +277,9 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
     res = rdf.run(radius=radius, stepsize=stepsize,
                   nbins=bins, species_pairs=species_pairs_)
     if plot or savefig:
+        from samos.plotting.plot_rdf import plot_rdf
+        from matplotlib import pyplot as plt
+        from matplotlib.gridspec import GridSpec
         fig = plt.figure(figsize=(4, 3))
         gs = GridSpec(1, 1, top=0.99, right=0.86, left=0.14, bottom=0.16)
         ax = fig.add_subplot(gs[0])
