@@ -258,7 +258,8 @@ class AngularSpectrum(BaseAnalyzer):
 
 
 def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
-                      species_pairs=None, savefig=None):
+                      species_pairs=None, savefig=None, plot=False,
+                      printrdf=False):
     from samos.plotting.plot_rdf import plot_rdf
     from matplotlib import pyplot as plt
     from matplotlib.gridspec import GridSpec
@@ -278,15 +279,30 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
     rdf = RDF(trajectory=traj)
     res = rdf.run(radius=radius, stepsize=stepsize,
                   nbins=bins, species_pairs=species_pairs_)
-    fig = plt.figure(figsize=(4, 3))
-    gs = GridSpec(1, 1, top=0.99, right=0.86, left=0.14, bottom=0.16)
-    ax = fig.add_subplot(gs[0])
-    plot_rdf(res, ax=ax)
-    if savefig:
-        plt.savefig(savefig, dpi=250)
-    else:
-        plt.show()
+    if plot or savefig:
+        fig = plt.figure(figsize=(4, 3))
+        gs = GridSpec(1, 1, top=0.99, right=0.86, left=0.14, bottom=0.16)
+        ax = fig.add_subplot(gs[0])
+        plot_rdf(res, ax=ax)
+        if savefig:
+            plt.savefig(savefig, dpi=250)
+        if plot:
+            plt.show()
 
+    if printrdf:
+        species_pairs = res.get_attr('species_pairs')
+        for spec1, spec2 in species_pairs:
+            try:
+                rdf = res.get_array('rdf_{}_{}'.format(spec1, spec2))
+            except KeyError:
+                print(
+                    'Warning: RDF for {}-{} was not calculated, skipping'.format(spec1, spec2))
+                continue
+            integral = res.get_array('int_{}_{}'.format(spec1, spec2))
+            radii = res.get_array('radii_{}_{}'.format(spec1, spec2))
+            name = '{}-{}-{}.dat'.format(printrdf, spec1, spec2)
+            np.savetxt(name, np.array([radii, rdf, integral]).T,
+                          header='radius    rdf     integral')
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
@@ -303,6 +319,10 @@ if __name__ == '__main__':
     parser.add_argument('--species-pairs', nargs='+',
                         help=('species pairs separated by a dash, e.g., '
                               '--species-pairs C-O O-O'))
+    parser.add_argument('--printrdf',
+                        help='Print the RDF to a file as a csv',)
+    parser.add_argument('--plot', action='store_true',
+                        help='Plot the RDF to screen')
     parser.add_argument(
         '--savefig',
         help='Where to save figure (will otherwise show on screen)')
