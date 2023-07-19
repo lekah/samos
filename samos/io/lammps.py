@@ -232,6 +232,7 @@ def read_lammps_dump(filename, elements=None,
             if type_idx is None:
                 raise ValueError("types specified but not found in file")
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
+            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
         elif element_idx is not None:

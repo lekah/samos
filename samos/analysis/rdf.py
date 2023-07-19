@@ -138,8 +138,8 @@ class RDF(BaseAnalyzer):
                              "number of positions ({})".format(
                                  istop, len(positions)))
         if species_pairs is None:
-            species_pairs = list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 2))
+            species_pairs = sorted(list(itertools.combinations_with_replacement(
+                set(atoms.get_chemical_symbols()), 2)))
         indices_pairs = []
         labels = []
         species_pairs_pruned = []
