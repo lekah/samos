@@ -159,6 +159,9 @@ def get_thermo_props(fname):
         header = f.readline().lstrip('#').strip().split()
     # header = [h.lstrip('v_').lstrip('c_') for h in header]
     arr = np.loadtxt(fname, skiprows=2)
+    if len(arr.shape) == 1:
+        # special case if only one line is present
+        arr = np.array([arr])
     ts_index = header.index('TimeStep')
     return header, arr, ts_index
 
