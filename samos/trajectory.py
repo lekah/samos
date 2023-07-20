@@ -322,7 +322,7 @@ class Trajectory(AttributedArray):
 
         return atomslist
 
-    def recenter(self, sublattice=None):
+    def recenter(self, sublattice=None, mode=None):
         """
         Recenter positions and velocities in-place
         :param tuple sublattice: A tuple or list of element names or indices that define a sublattice of the structure.
@@ -347,7 +347,8 @@ class Trajectory(AttributedArray):
                     raise TypeError('You passed {} {} as a sublattice specifier, this is not recognized'.format(type(item), item))
         else:
             factors = [1]*len(masses)
-
+        if mode=='geometric':
+            masses = [1.0] * len(masses)
         self.set_positions(recenter_positions(self.get_positions(), masses, factors))
         if 'velocities' in self:
             self.set_velocities(recenter_velocities(self.get_velocities(), masses, factors))
