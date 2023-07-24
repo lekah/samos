@@ -63,8 +63,8 @@ DATAGRID_3D_UNKNOWN
 
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
                          sigma=0.3, n_sigma=3.0, density=0.1,
-                         istart=1, istop=None, stepsize=1, 
-                         indices_i_care=None, indices_exclude_from_plot=None): 
+                         istart=1, istop=None, stepsize=1,
+                         indices_i_care=None, indices_exclude_from_plot=None):
     """
     :param str positionsf: Where to read the positions from.
     :param str pos_units:
@@ -104,11 +104,12 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     # indices_i_care are used to calculate the density
     if indices_i_care is None:
         if element:
-            indices_i_care = trajectory.get_indices_of_species(element, start=1)
+            indices_i_care = trajectory.get_indices_of_species(
+                element, start=1)
         else:
             indices_i_care = np.array(list(range(1, nat+1)))
 
-    print('(get_gaussian_density) indices_i_care:',indices_i_care )
+    print('(get_gaussian_density) indices_i_care:', indices_i_care)
     if not len(indices_i_care):
         raise Exception(
             'Element {} not found in symbols {}'.format(element, symbols))
@@ -133,14 +134,17 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     print('Box is  {} x {} x {}'.format(a, b, c))
     print('Writing xsf file to', format(outputfile))
     if indices_exclude_from_plot is None:
-       indices_exclude_from_plot = indices_i_care 
-    print(f'(get_gaussian_density) We do not show these atoms in the xsf file: {indices_exclude_from_plot}')
+        indices_exclude_from_plot = indices_i_care
+    print(
+        '(get_gaussian_density) We do not show these atoms in the xsf file: '
+        f'{indices_exclude_from_plot}')
     write_xsf_header(
-        [s for i, s in enumerate(symbols, start=1) if i not in indices_exclude_from_plot],
+        [s for i, s in enumerate(symbols, start=1)
+         if i not in indices_exclude_from_plot],
         [p for i, p in enumerate(starting_pos, start=1)
-        if i not in indices_exclude_from_plot],
+         if i not in indices_exclude_from_plot],
         cell, None, outfilename=outputfile, xdim=n1, ydim=n2, zdim=n3)
-    
+
     S = np.matrix(np.diag([1, 1, 1, -(sigma*n_sigma/density)**2]))
     cellT = cell.T
     cellTI = np.matrix(cellT).I

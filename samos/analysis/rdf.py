@@ -138,8 +138,9 @@ class RDF(BaseAnalyzer):
                              "number of positions ({})".format(
                                  istop, len(positions)))
         if species_pairs is None:
-            species_pairs = sorted(list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 2)))
+            species_pairs = sorted(list(
+                itertools.combinations_with_replacement(
+                    set(atoms.get_chemical_symbols()), 2)))
         indices_pairs = []
         labels = []
         species_pairs_pruned = []
@@ -296,13 +297,15 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
                 rdf = res.get_array('rdf_{}_{}'.format(spec1, spec2))
             except KeyError:
                 print(
-                    'Warning: RDF for {}-{} was not calculated, skipping'.format(spec1, spec2))
+                    'Warning: RDF for {}-{} was not calculated, skipping'
+                    ''.format(spec1, spec2))
                 continue
             integral = res.get_array('int_{}_{}'.format(spec1, spec2))
             radii = res.get_array('radii_{}_{}'.format(spec1, spec2))
             name = '{}-{}-{}.dat'.format(printrdf, spec1, spec2)
             np.savetxt(name, np.array([radii, rdf, integral]).T,
-                          header='radius    rdf     integral')
+                       header='radius    rdf     integral')
+
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
