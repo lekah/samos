@@ -329,7 +329,10 @@ class Trajectory(AttributedArray):
             If given, the trajectory will be centered on the center of mass of that sublattice.
         """
         from samos.lib.mdutils import recenter_positions, recenter_velocities
-        masses = self.atoms.get_masses()
+        if mode == 'geometric':
+            masses = [1.0] * len(masses)
+        else:
+            masses = self.atoms.get_masses()
         if sublattice is not None:
             if not isinstance(sublattice, (tuple, list, set)):
                 raise TypeError('You have to pass a tuple/list/set as sublattice')
@@ -346,9 +349,7 @@ class Trajectory(AttributedArray):
                 else:
                     raise TypeError('You passed {} {} as a sublattice specifier, this is not recognized'.format(type(item), item))
         else:
-            factors = [1]*len(masses)
-        if mode=='geometric':
-            masses = [1.0] * len(masses)
+            factors = [1] * len(masses)
         self.set_positions(recenter_positions(self.get_positions(), masses, factors))
         if 'velocities' in self:
             self.set_velocities(recenter_velocities(self.get_velocities(), masses, factors))
