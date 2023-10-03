@@ -1117,3 +1117,65 @@ class DynamicsAnalyzer(object):
                      ('nr_of_trajectories', len(trajectories)),):
             power_spectrum.set_attr(k, v)
         return power_spectrum
+
+def util_msd(trajectory_path, stepsize=1, species=None,
+             plot=True, savefig=None, t_start_fit_ps=5,
+             t_end_fit_ps=10, timestep=None, nblocks=None):
+    if trajectory_path.endswith('.extxyz'):
+        from ase.io import read
+        aselist = read(trajectory_path, format='extxyz', index=':')
+        traj = Trajectory.from_atoms(aselist)
+        
+    else:
+        traj = Trajectory.load_file(trajectory_path)
+    if timestep:
+        traj.set_timestep(timestep)
+    dyn = DynamicsAnalyzer(trajectories=[traj])
+    if species is None:
+        species = sorted(set(traj.atoms.get_chemical_symbols()))
+    print(traj.get_timestep(), species)
+    print(t_start_fit_ps, t_end_fit_ps, timestep)
+    msd = dyn.get_msd(stepsize_t=stepsize,
+                      species_of_interest=species,
+                      t_end_fit_ps=t_end_fit_ps,
+                      t_start_fit_ps=t_start_fit_ps,
+                      nr_of_blocks=nblocks)
+    if plot or savefig:
+        from samos.plotting.plot_dynamics import plot_msd_isotropic
+        from matplotlib import pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        gs = GridSpec(1,1, left=0.18, right=0.95, bottom=0.18, top=0.95)
+        fig = plt.figure(figsize=(4,3) )
+        ax = fig.add_subplot(gs[0   ])                 
+        plot_msd_isotropic(msd, ax=ax)
+        if plot:
+            plt.show()
+        elif savefig:
+            plt.savefig(savefig, dpi=240)
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser("analysis/plot of a MSD, given a trajectory")
+    parser.add_argument('trajectory_path')
+    parser.add_argument('-s', '--stepsize', type=int,
+                        help='Stepsize over the trajectory, defaults to 1',
+                        default=1)
+    parser.add_argument('--species', nargs='+',)
+    parser.add_argument('--plot', action='store_true',
+                        help='Plot the MSD to screen')
+    parser.add_argument('-te', '--t-end-fit-ps',
+                        help='End of the fit in ps, defaults to 100',
+                        type=float, default=10)
+    parser.add_argument('-ts', '--t-start-fit-ps',
+                        help='End of the fit in ps, defaults to 50',
+                        type=float, default=5)
+    parser.add_argument('--timestep', type=float,
+                        help='Timestep in fs, defaults to 1',
+                        default=1)
+    parser.add_argument('-n', '--nblocks', type=int, 
+                        default=1, help='Number of blocks to use')
+    parser.add_argument(
+        '--savefig',
+        help='Where to save figure (will otherwise show on screen)')
+    args = parser.parse_args()
+    kwargs = vars(args)
+    util_msd(**kwargs)

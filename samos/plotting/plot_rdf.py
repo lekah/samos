@@ -8,17 +8,20 @@ from samos.utils.colors import get_color
 from copy import deepcopy
 
 
-def plot_rdf(rdf_res,
-             ax=None, ax2=None, no_legend=False, species_of_interest=None, show=False,
-             label=None, no_label=False, alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4,
-             color_scheme='jmol', exclude_from_label=None, plot_params={}, plot_params2={},
-             **kwargs):
+def plot_rdf(
+        rdf_res,
+        ax=None, ax2=None, no_legend=False, species_of_interest=None,
+        show=False, label=None, no_label=False,
+        alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4,
+        color_scheme='jmol', exclude_from_label=None,
+        plot_params={}, plot_params2={}, no_int=False,
+        **kwargs):
 
     if ax is None:
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(1, 1, 1)
 
-    if ax2 is None:
+    if not(no_int) and ax2 is None:
         ax2 = ax.twinx()
 
     attrs = rdf_res.get_attrs()
@@ -59,13 +62,15 @@ def plot_rdf(rdf_res,
                 'colordict')['{}_{}'.format(spec1, spec2)]
         else:
             plot_params2_['color'] = l.get_color()
-        l2, = ax2.plot(radii, integral, '--', **plot_params2_)
-        handles.append(l2)
+        if not(no_int):
+            l2, = ax2.plot(radii, integral, '--', **plot_params2_)
+            handles.append(l2)
 
     ax.set_xlabel(r'$r$ $\left(\mathrm{\AA}\right)$')
     ax.set_ylabel(r'$g(r)$')
-    ax.legend(loc=2)
-    ax2.set_ylabel(r'$\int \rho(r) \mathrm{d}r$')
+    ax.legend(loc=2, handlelength=1.0)
+    if not(no_int):
+        ax2.set_ylabel(r'$\int \rho(r) \mathrm{d}r$')
     if show:
         plt.show()
     return handles

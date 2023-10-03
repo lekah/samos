@@ -140,7 +140,7 @@ class RDF(BaseAnalyzer):
         if species_pairs is None:
             species_pairs = sorted(list(
                 itertools.combinations_with_replacement(
-                    set(atoms.get_chemical_symbols()), 2)))
+                    sorted(set(atoms.get_chemical_symbols())), 2)))
         indices_pairs = []
         labels = []
         species_pairs_pruned = []
@@ -220,6 +220,9 @@ class RDF(BaseAnalyzer):
             rdf_res.set_array('rdf_{}'.format(label), rdf)
             rdf_res.set_array('int_{}'.format(label), integral)
             rdf_res.set_array('radii_{}'.format(label), radii)
+            rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
+            rdf_res.set_attr('n_data_{}'.format(label),
+                             len(pairs_of_atoms) * ((istop-istart)//stepsize))
 
         return rdf_res
 
@@ -260,7 +263,7 @@ class AngularSpectrum(BaseAnalyzer):
 
 def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
                       species_pairs=None, savefig=None, plot=False,
-                      printrdf=False):
+                      printrdf=False, no_int=False):
     if trajectory_path.endswith('.extxyz'):
         from ase.io import read
         aselist = read(trajectory_path, format='extxyz', index=':')
@@ -282,9 +285,10 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
         from matplotlib import pyplot as plt
         from matplotlib.gridspec import GridSpec
         fig = plt.figure(figsize=(4, 3))
-        gs = GridSpec(1, 1, top=0.99, right=0.86, left=0.14, bottom=0.16)
+        gs = GridSpec(1, 1, top=0.99, right=0.83, left=0.14, bottom=0.16)
         ax = fig.add_subplot(gs[0])
-        plot_rdf(res, ax=ax)
+        plot_rdf(res, ax=ax, no_int=no_int)
+        ax.set_xlim(-0.2, radius)
         if savefig:
             plt.savefig(savefig, dpi=250)
         if plot:
@@ -326,6 +330,8 @@ if __name__ == '__main__':
                         help='Print the RDF to a file as a csv',)
     parser.add_argument('--plot', action='store_true',
                         help='Plot the RDF to screen')
+    parser.add_argument('--no-int', action='store_true',
+                        help='dont plot integral')
     parser.add_argument(
         '--savefig',
         help='Where to save figure (will otherwise show on screen)')
