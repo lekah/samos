@@ -3,6 +3,7 @@ import sys
 
 import re
 from ase import Atoms
+from ase.data import atomic_masses, chemical_symbols
 from samos.trajectory import Trajectory
 
 #  only matches positive integers
@@ -167,9 +168,9 @@ def get_thermo_props(fname):
 
 
 def read_lammps_dump(filename, elements=None,
-                     elements_file=None, types=None,  timestep=None,
+                     elements_file=None, types=None, timestep=None,
+                     mass_types=None,
                      thermo_file=None, thermo_pe=None, thermo_stress=None,
-                     # thermo_ke=None #thermo_te=None,
                      save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
                      skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
@@ -254,6 +255,46 @@ def read_lammps_dump(filename, elements=None,
                         f"length of list of elements ({len(elements)}) "
                         f"is not equal number of atoms ({nat_must})")
                 symbols = elements[:]
+        elif mass_types is not None:
+            # reading in masses from lammps input file stored in mass_types
+            # and using these to infer elements
+            with open(mass_types) as fmass:
+                masses = []
+                reading_masses = False
+                for line in fmass:
+                    line = line.strip()
+                    if not line: continue
+                    if reading_masses:
+                        try:
+                            typ, mass = line.split()[:2]
+                            masses.append((int(typ), float(mass)))
+                        except ValueError:
+                            break
+                    elif line.startswith('Masses'):
+                        reading_masses = True
+                    else:
+                        pass
+            type_indices, masses = zip(*masses)
+            masses = np.array(masses, dtype=float)
+            type_indices = np.array(type_indices, dtype=int)
+            # small check whether all types are present
+            if not np.all(np.arange(1, type_indices.max()+1) == type_indices):
+                raise ValueError("Types are not consecutive")
+            # trying to figure out elements
+            if type_idx is None:
+                raise ValueError("types specified but not found in file")
+            types = []
+            for mass in masses:
+                # finding the closest element based on its mass
+                idx = np.argmin(np.abs(atomic_masses - mass))
+                types.append(chemical_symbols[idx])
+            types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
+            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
+            print("symbols: {}".format(', '.join(types)))
+            types_in_body -= 1  # 1-based to 0-based indexing
+            symbols = np.array(types, dtype=str)[types_in_body]
+
+
         else:
             # last resort, setting everything to Hydrogen
             symbols = ['H']*nat_must
@@ -377,6 +418,9 @@ if __name__ == '__main__':
     parser.add_argument('--elements-file',
                         help=('A file containing the elements '
                               'as space-separated strings'))
+    parser.add_argument('--mass-types',
+                        help=('The input file of lammps containing '
+                                'the masses of the types'))
     parser.add_argument('--timestep', type=float,
                         help='The timestep of the trajectory printed')
     parser.add_argument('--f-conv', type=float,
