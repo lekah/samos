@@ -26,7 +26,7 @@ def format_mean_err(mean, err, decimals=2):
         exp_err = int(np.floor(np.log10(np.abs(err_rounded_to_prec))))
         pref_err = err_rounded_to_prec / 10.0**exp_err
         if exp_mean == exp_err:
-            return r'\left({:.{prec}f} \pm {:.{prec}f} \\right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
+            return r'\left({:.{prec}f} \pm {:.{prec}f} \right)\cdot 10^{{{}}}'.format(pref_mean, pref_err, exp_mean, prec=decimals)
         else:
             return r'{:.{prec}f} \cdot 10^{{{}}} \pm {:.{prec}f} \cdot 10^{{{}}}'.format(
                 pref_mean, exp_mean, pref_err, exp_err, prec=decimals)
