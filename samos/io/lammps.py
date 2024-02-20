@@ -174,7 +174,8 @@ def read_lammps_dump(filename, elements=None,
                      save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
                      skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
-                     additional_keywords_dump=[], quiet=False):
+                     additional_keywords_dump=[], quiet=False,
+                     istep=1):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
@@ -332,7 +333,7 @@ def read_lammps_dump(filename, elements=None,
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()
             pos = np.array(body[:, posids], dtype=float)[sorting_key]
-            if iframe >= skip:
+            if iframe >= skip and iframe % istep == 0:
                 positions.append(pos_2_absolute(cell, pos, postype))
                 timesteps.append(timestep)
                 cells.append(cell)
@@ -432,6 +433,8 @@ if __name__ == '__main__':
     parser.add_argument('--s-conv', type=float,
                         help='The conversion factor for stresses',
                         default=1.0)
+    parser.add_argument('-i', '--istep', type=int, default=1,
+                        help='Just take this frequency of steps from the trajectory')
     parser.add_argument(
         '--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument(
