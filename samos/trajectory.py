@@ -246,7 +246,7 @@ class Trajectory(AttributedArray):
             raise in such case. Defaults to False.
         """
         self.set_array(self._VELOCITIES_KEY, array,
-                       check_existing=check_existing, check_nat=True,
+                       check_existing=check_existing, check_nat=self.nat,
                        check_nstep=True, wanted_shape_len=3, wanted_shape_2=3)
 
     def calculate_velocities_from_positions(self, overwrite=False):
