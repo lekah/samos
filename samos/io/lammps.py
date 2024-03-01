@@ -320,7 +320,7 @@ def read_lammps_dump(filename, elements=None,
                 if not quiet:
                     print(f"End reached at line {lidx}, stopping")
                 break
-            nat, timestep, cell = read_step_info(
+            nat, timestep_, cell = read_step_info(
                 step_info, lidx=lidx, start=False, quiet=quiet)
             lidx += 9
             if nat != nat_must:
@@ -335,7 +335,7 @@ def read_lammps_dump(filename, elements=None,
             pos = np.array(body[:, posids], dtype=float)[sorting_key]
             if iframe >= skip and iframe % istep == 0:
                 positions.append(pos_2_absolute(cell, pos, postype))
-                timesteps.append(timestep)
+                timesteps.append(timestep_)
                 cells.append(cell)
                 if has_vel:
                     velocities.append(np.array(body[:, velids],
@@ -352,9 +352,13 @@ def read_lammps_dump(filename, elements=None,
     if not quiet:
         print(f"Read trajectory of length {iframe}\n"
             f"Creating Trajectory of length {len(timesteps)}")
-    atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
-    traj = Trajectory(atoms=atoms,
-                      positions=positions, cells=cells)
+    try:
+        atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
+        traj = Trajectory(atoms=atoms,
+                          positions=positions, cells=cells)
+    except KeyError:
+        traj = Trajectory(types=symbols, cells=cells)
+        traj.set_positions(positions)
     if has_vel:
         traj.set_velocities(velocities)
     if has_frc:

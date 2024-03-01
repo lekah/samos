@@ -11,9 +11,12 @@ CUSTOM_COLORS = {
 def get_color(chemical_symbol, scheme='jmol'):
     if chemical_symbol in CUSTOM_COLORS:
         return CUSTOM_COLORS[chemical_symbol]
-    elif scheme == 'jmol':
-        return jmol_colors[atomic_numbers[chemical_symbol]]
-    elif scheme == 'cpk':
-        return cpk_colors[atomic_numbers[chemical_symbol]]
+    if chemical_symbol in atomic_numbers:
+        if scheme == 'jmol':
+            return jmol_colors[atomic_numbers[chemical_symbol]]
+        elif scheme == 'cpk':
+            return cpk_colors[atomic_numbers[chemical_symbol]]
+        else:
+            raise ValueError('Unknown scheme {}'.format(scheme))
     else:
-        raise ValueError('Unknown scheme {}'.format(scheme))
+        return None

@@ -20,25 +20,23 @@ def check_trajectory_compatibility(trajectories):
         if not isinstance(t, Trajectory):
             raise TypeError('{} is not an instance of Trajectory'.format(t))
     array_names_set = set()
-    chemical_symbols_set = set()
+    types_set = set()
     timestep_set = set()
     for t in trajectories:
         array_names_set.add(frozenset(t.get_arraynames()))
-        atoms = t.atoms
-        chemical_symbols_set.add(tuple(atoms.get_chemical_symbols()))
-        timestep = t.get_timestep()
-        timestep_set.add(timestep)
+        types_set.add(tuple(t.types))
+        timestep_set.add(t.get_timestep())
 
     if len(array_names_set) > 1:
         raise IncompatibleTrajectoriesException(
             'Different arrays are set')
-    if len(chemical_symbols_set) > 1:
+    if len(types_set) > 1:
         raise IncompatibleTrajectoriesException(
             'Different chemical symbols in trajectories')
     if len(timestep_set) > 1:
         raise IncompatibleTrajectoriesException(
             'Different timesteps in trajectories')
-    return atoms, timestep
+    return np.array(types_set.pop()), timestep_set.pop()
 
 
 class Trajectory(AttributedArray):
@@ -60,6 +58,7 @@ class Trajectory(AttributedArray):
     _FORCES_KEY = 'forces'
     _POT_ENER_KEY = 'potential_energy'
     _ATOMS_FILENAME = 'atoms.traj'
+    _TYPES_KEY = 'types'
 
     def __init__(self, **kwargs):
         """
@@ -125,10 +124,29 @@ class Trajectory(AttributedArray):
         self.set_attr(self._TIMESTEP_KEY, float(timestep_fs))
 
     def get_atoms(self):
-        if self._atoms:
-            return self._atoms
+        if self._atoms is not None:
+            return self._atoms.copy()
         else:
-            raise ValueError('Atoms have not been set')
+            return None
+            # raise ValueError('Atoms have not been set')
+
+    def set_types(self, types):
+        types = np.array(types, dtype=str)
+        self.set_array(self._TYPES_KEY, types,
+                       check_existing=False,
+                       check_nat=False, check_nstep=False,)
+
+    def get_types(self):
+        if self._TYPES_KEY in self.get_arraynames():
+            return self.get_array(self._TYPES_KEY)
+        elif self._atoms is not None:
+            return np.array(self._atoms.get_chemical_symbols())
+        else:
+            return None
+
+    @property
+    def types(self):
+        return self.get_types()
 
     @property
     def atoms(self):
@@ -139,6 +157,15 @@ class Trajectory(AttributedArray):
         if not isinstance(atoms, Atoms):
             raise ValueError('You have to pass an instance of ase.Atoms')
         self._atoms = atoms
+
+
+    @property
+    def nat(self):
+        types = self.get_types()
+        if types is None:
+            raise ValueError('Types have not been set')
+        else:
+            return len(types)
 
     @property
     def cell(self):
@@ -171,39 +198,24 @@ class Trajectory(AttributedArray):
             The identifier of a species. If this is a string,
             I assume the chemical symbol (abbreviation).
             I.e. Li for lithium, H for hydrogen.
-            If it's an integer, I assume the atomic number.
+            If it's an integer, I that only this integer is wanted.
         :param int start:
             The start of indexing, defaults to 0.
             For fortran indexing, set to 1.
         :return: A numpy array of indices
         """
         assert isinstance(start, int), 'Start is not an integer'
+        types = self.get_types()
         if isinstance(species, str):
-            array_to_index = self.atoms.get_chemical_symbols()
+            msk = types == species
         elif isinstance(species, int):
-            array_to_index = self.atoms.get_atomic_numbers()
+            msk = np.zeros(len(types), dtype=bool)
+            msk[species] = True
         else:
             raise TypeError('species  has  to be an integer or a string, '
                             'I got {}'.format(type(species)))
-
-        return np.array([i for i, s
-                         in enumerate(array_to_index, start=start)
-                         if s == species])
-
-    @property
-    def nstep(self):
-        """
-        :returns: The number of trajectory steps
-        :raises: ValueError if no unique number of steps can be determined.
-        """
-        nstep_set = set([array.shape[0]
-                        for array in list(self._arrays.values())])
-        if len(nstep_set) == 0:
-            raise ValueError('No arrays have been set, yet')
-        elif len(nstep_set) > 1:
-            raise ValueError('Incommensurate arrays')
-        else:
-            return nstep_set.pop()
+        return np.where(msk)[0] + start
+    
 
     def set_positions(self, array, check_existing=False):
         """
@@ -217,7 +229,7 @@ class Trajectory(AttributedArray):
         """
         self.set_array(self._POSITIONS_KEY, array,
                        check_existing=check_existing,
-                       check_nat=True, check_nstep=True,
+                       check_nat=self.nat, check_nstep=True,
                        wanted_shape_len=3, wanted_shape_2=3)
 
     def get_positions(self):
@@ -269,7 +281,7 @@ class Trajectory(AttributedArray):
             such case. Defaults to False.
         """
         self.set_array(self._FORCES_KEY, array, check_existing=check_existing,
-                       check_nat=True, check_nstep=True,
+                       check_nat=self.nat, check_nstep=True,
                        wanted_shape_len=3, wanted_shape_2=3)
 
     def set_stress(self, array, order='voigt', check_existing=False):

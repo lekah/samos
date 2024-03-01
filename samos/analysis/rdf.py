@@ -112,14 +112,14 @@ class RDF(BaseAnalyzer):
             else:
                 print(type(spec))
 
-        atoms = self._trajectory.atoms
-        volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
-        chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
+        types = self._trajectory.get_types()
         cells = self._trajectory.get_cells()
         range_ = list(range(0, 2))
         if cells is None:
             fixed_cell = True
+            atoms = self._trajectory.atoms
+            volume = atoms.get_volume()
             try:
                 cell = atoms.cell.array
             except AttributeError:
@@ -140,13 +140,13 @@ class RDF(BaseAnalyzer):
         if species_pairs is None:
             species_pairs = sorted(list(
                 itertools.combinations_with_replacement(
-                    sorted(set(atoms.get_chemical_symbols())), 2)))
+                    sorted(set(types)), 2)))
         indices_pairs = []
         labels = []
         species_pairs_pruned = []
         for ispec, (spec1, spec2) in enumerate(species_pairs):
-            ind_spec1, ind_spec2 = get_indices(
-                spec1, chem_sym), get_indices(spec2, chem_sym)
+            ind_spec1, ind_spec2 = (get_indices(spec1, types),
+                                    get_indices(spec2, types))
             # special situation if there's only one atom of a species
             # and we're making the RDF of that species with itself.
             # there will be empty pairs_of_atoms and the
@@ -188,6 +188,7 @@ class RDF(BaseAnalyzer):
             for index in np.arange(istart, istop, stepsize):
                 if not fixed_cell:
                     cell = cells[index]
+                    volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
                     cellI = np.linalg.inv(cell)
                     a, b, c = cell
                     corners = np.array([i*a+j*b + k*c

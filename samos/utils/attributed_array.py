@@ -12,6 +12,7 @@ class AttributedArray(object):
         self._arrays = {}
         self._attrs = {}
 
+        self._nstep = None
         for key, val in list(kwargs.items()):
             getattr(self, 'set_{}'.format(key))(val)
 
@@ -64,14 +65,19 @@ class AttributedArray(object):
                     f"2nd dimension of array {name} has "
                     f"to be {wanted_shape_2}")
         if check_nstep:
-            for other_name, other_array in list(self._arrays.items()):
-                assert array.shape[0] == other_array.shape[0], (
+            if self._nstep is None:
+                self._nstep = array.shape[0]
+            elif self._nstep != array.shape[0]:
+                raise ValueError(
                     'Number of steps in array {} ({}) is not '
-                    'compliant with array {} ({})'.format(
-                        name, array.shape[0], other_name,
-                        other_array.shape[0]))
+                    'compliant with number of steps in previous '
+                    'arrays ({})'.format(name, array.shape[0],
+                                         self._nstep))
         if check_nat and len(array.shape) > 2:
-            if array.shape[1] != len(self.atoms):
+            if not isinstance(check_nat, int):
+                raise TypeError(
+                    'If check_nat is not False, it has to be an integer')
+            if array.shape[1] != check_nat:
                 raise ValueError(
                     'Second dimension of array does not '
                     'match the number of atoms')
@@ -79,6 +85,16 @@ class AttributedArray(object):
 
     def __contains__(self, arrayname):
         return arrayname in self._arrays
+
+    @property
+    def nstep(self):
+        """
+        :returns: The number of trajectory steps
+        :raises: ValueError if no unique number of steps can be determined.
+        """
+        if self._nstep is None:
+            raise ValueError('Number of steps has not been set')
+        return self._nstep
 
     def get_array(self, name):
         try:

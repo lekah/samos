@@ -32,8 +32,9 @@ class DynamicsAnalyzer(object):
             trajectories = [trajectories]
         # I check the compatibility. Implicitly,
         # also checks if trajectories are valid instances.
-        (self._atoms,
-         self._timestep_fs) = check_trajectory_compatibility(trajectories)
+        types, self._timestep_fs = check_trajectory_compatibility(
+            trajectories)
+        self._types = np.array(types)
         # Setting as attribute of self for analysis
         self._trajectories = trajectories
 
@@ -53,18 +54,6 @@ class DynamicsAnalyzer(object):
                 'Species of interest has to be a list of'
                 ' strings with the atomic symbol')
 
-    @property
-    def atoms(self):
-        try:
-            return self._atoms
-        except AttributeError as e:
-            raise Exception(
-                '\n\n\n'
-                'Please use the set_trajectories method'
-                ' to set trajectories, and I will get the atoms from there.'
-                '\n{}\n'.format(e)
-            )
-
     def set_verbosity(self, verbosity):
         if not isinstance(verbosity, int):
             raise TypeError('Verbosity is an integer')
@@ -72,9 +61,9 @@ class DynamicsAnalyzer(object):
 
     def get_species_of_interest(self):
         # Also a good way to check if atoms have been set
-        atoms = self.atoms
+        types = self._types
         if self._species_of_interest is None:
-            return sorted(set(atoms.get_chemical_symbols()))
+            return sorted(set(types))
         else:
             return self._species_of_interest
 
