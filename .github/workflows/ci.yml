@@ -32,12 +32,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install numpy; pip install -e .[pre-commit,tests]
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi; pip install .[pre-commit,tests]
     - name: Run own tests
       run: |
         python -m pip install --upgrade pip
         pip install numpy; pip install -e .[pre-commit,tests]
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         cd tests; python test_dynamics.py; python test_trajectory.py
     - name: Run pre-commit & linter
       run: |
