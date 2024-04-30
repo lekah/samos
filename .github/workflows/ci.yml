@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.7", "3.8", "3.9","3.10", "3.11"]
+        python-version: ["3.11"]
 
     steps:
     - name: Checkout
@@ -17,12 +17,6 @@ jobs:
 
     - name: Cache python dependencies
       id: cache-pip
-      uses: actions/cache@v1
-      with:
-        path: ~/.cache/pip
-        key: pip-${{ matrix.python-version }}-build-${{ hashFiles('**/setup.json') }}
-        restore-keys:
-          pip-${{ matrix.python-version }}-build
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v2
