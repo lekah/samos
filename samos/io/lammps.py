@@ -3,10 +3,12 @@ import sys
 
 import re
 from ase import Atoms
+from ase.data import atomic_masses, chemical_symbols
 from samos.trajectory import Trajectory
 
-integer_regex = re.compile('(?P<int>\d+)')  # only positvie integers
-float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')
+#  only matches positive integers
+integer_regex = re.compile('(?P<int>\d+)')  # noqa: W605
+float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
 
 
 def get_indices(header_list, prefix="", postfix=""):
@@ -36,7 +38,7 @@ def get_position_indices(header_list):
     raise TypeError("No position indices found")
 
 
-def read_step_info(lines, lidx=0, start=False):
+def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     assert len(lines) == 9
     if not lines[0].startswith("ITEM: TIMESTEP"):
         raise Exception("Did not start with 'ITEM: TIMESTEP'\n"
@@ -89,21 +91,24 @@ def read_step_info(lines, lidx=0, start=False):
                          "expected  BOX BOUNDS pp pp pp or "
                          "BOX BOUNDS xy xz yz pp pp pp")
     if start:
-        print(f"Read starting cell as:\n{cell}")
+        if not quiet:
+            print(f"Read starting cell as:\n{cell}")
         if not lines[8].startswith("ITEM: ATOMS"):
             raise Exception("Not a supported format, expected ITEM: ATOMS")
         header_list = lines[8].lstrip("ITEM: ATOMS").split()
 
         atomid_idx = header_list.index('id')
-        print(f'Atom ID index: {atomid_idx}')
+        if not quiet:
+            print(f'Atom ID index: {atomid_idx}')
         try:
             element_idx = header_list.index('element')
-            print("Element found at index {element_idx}")
+            if not quiet:
+                print("Element found at index {element_idx}")
         except ValueError:
             element_idx = None
         try:
             type_idx = header_list.index('type')
-            print("type found at index {type_idx}")
+            if not quiet: print("type found at index {type_idx}")
         except ValueError:
             type_idx = None
         try:
@@ -111,22 +116,28 @@ def read_step_info(lines, lidx=0, start=False):
         except Exception:
             print("Abandoning because positions are not given")
             sys.exit(1)
-        print("Positions are given as: {}".format(
-            {'u': "unwrapped", 's': "Scaled (wrapped)",
-             "": "Wrapped"}[postype]))
-        print("Position indices are: {}".format(posids))
+        if not quiet:
+            print("Positions are given as: {}".format(
+                {'u': "unwrapped", 's': "Scaled (wrapped)",
+                "": "Wrapped"}[postype]))
+        if not quiet: print("Position indices are: {}".format(posids))
         has_vel, velids = get_indices(header_list, 'v')
         if has_vel:
-            print("Velocities found at indices: {}".format(velids))
+            if not quiet: print("Velocities found at indices: {}".format(velids))
         else:
-            print("Velocities were not found")
+            if not quiet: print("Velocities were not found")
         has_frc, frcids = get_indices(header_list, 'f')
         if has_frc:
-            print("Forces found at indices: {}".format(frcids))
+            if not quiet: print("Forces found at indices: {}".format(frcids))
         else:
-            print("Forces were not found")
+            if not quiet: print("Forces were not found")
+        additional_ids = []
+        if additional_kw:
+            for kw in additional_kw:
+                additional_ids.append(header_list.index(kw))
+
         return (nat, atomid_idx, element_idx, type_idx, postype,
-                posids, has_vel, velids, has_frc, frcids)
+                posids, has_vel, velids, has_frc, frcids, additional_ids)
     else:
         return nat, timestep, cell
 
@@ -149,22 +160,55 @@ def get_thermo_props(fname):
         header = f.readline().lstrip('#').strip().split()
     # header = [h.lstrip('v_').lstrip('c_') for h in header]
     arr = np.loadtxt(fname, skiprows=2)
+    if len(arr.shape) == 1:
+        # special case if only one line is present
+        arr = np.array([arr])
     ts_index = header.index('TimeStep')
     return header, arr, ts_index
 
 
 def read_lammps_dump(filename, elements=None,
-                     elements_file=None, types=None,  timestep=None,
+                     elements_file=None, types=None, timestep=None,
+                     mass_types=None,
                      thermo_file=None, thermo_pe=None, thermo_stress=None,
-                     # thermo_ke=None #thermo_te=None,
                      save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
-                     skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0
-                     ):
+                     skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
+                     additional_keywords_dump=[], quiet=False,
+                     istep=1):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
     to be given in scaled or unwrapped coordinates
+    :param filename: lammps dump file to read
+    :param elements: list of elements to use
+    :param elements_file:
+        file containing elements (separated by space),
+        instead of elements
+    :param types:
+        list of types if elements are not specified
+        and type is a column
+    :param timestep: timestep of dump (in fs)
+    :param thermo_file: file containing thermo output in case required
+    :param thermo_pe:
+        potential energy column in thermo file (as given in header)
+    :param thermo_stress:
+        stress column in thermo file (as given in header,
+        will do the _xx/_yy etc)
+    :param save_extxyz:
+        save to extxyz file
+        (or if outfile is given with .extxyz)
+    :param outfile: output file name, will write trajectory by default
+    :param ignore_forces: ignore forces even if written in dump
+    :param ignore_velocities: ignore velocities even if written in dump
+    :param skip: skip first n steps
+    :param f_conv: force conversion factor
+    :param e_conv: energy conversion factor
+    :param s_conv: stress conversion factor
+    :param additional_keywords_dump:
+        additional keywords to be added read form dump and
+        to be added as array. The column name is used both
+        as key but also as arrayname
     """
     # opening a first time to check file and get
     # indices of positions, velocities etc...
@@ -173,7 +217,9 @@ def read_lammps_dump(filename, elements=None,
         lines = [next(f) for _ in range(9)]
         (nat_must, atomid_idx, element_idx, type_idx,
          postype, posids, has_vel, velids,
-         has_frc, frcids) = read_step_info(lines, lidx=0, start=True)
+         has_frc, frcids, additional_ids_dump) = read_step_info(
+            lines, lidx=0, start=True,
+            additional_kw=additional_keywords_dump, quiet=quiet)
 
         if ignore_forces:
             has_frc = False
@@ -183,8 +229,12 @@ def read_lammps_dump(filename, elements=None,
         body = np.array([f.readline().split() for _ in range(nat_must)])
         atomids = np.array(body[:, atomid_idx], dtype=int)
         sorting_key = atomids.argsort()
-        if type_idx is not None and types is not None:
+        # figuring out elements of structure
+        if types is not None:
+            if type_idx is None:
+                raise ValueError("types specified but not found in file")
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
+            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
         elif element_idx is not None:
@@ -206,7 +256,48 @@ def read_lammps_dump(filename, elements=None,
                         f"length of list of elements ({len(elements)}) "
                         f"is not equal number of atoms ({nat_must})")
                 symbols = elements[:]
+        elif mass_types is not None:
+            # reading in masses from lammps input file stored in mass_types
+            # and using these to infer elements
+            with open(mass_types) as fmass:
+                masses = []
+                reading_masses = False
+                for line in fmass:
+                    line = line.strip()
+                    if not line: continue
+                    if reading_masses:
+                        try:
+                            typ, mass = line.split()[:2]
+                            masses.append((int(typ), float(mass)))
+                        except ValueError:
+                            break
+                    elif line.startswith('Masses'):
+                        reading_masses = True
+                    else:
+                        pass
+            type_indices, masses = zip(*masses)
+            masses = np.array(masses, dtype=float)
+            type_indices = np.array(type_indices, dtype=int)
+            # small check whether all types are present
+            if not np.all(np.arange(1, type_indices.max()+1) == type_indices):
+                raise ValueError("Types are not consecutive")
+            # trying to figure out elements
+            if type_idx is None:
+                raise ValueError("types specified but not found in file")
+            types = []
+            for mass in masses:
+                # finding the closest element based on its mass
+                idx = np.argmin(np.abs(atomic_masses - mass))
+                types.append(chemical_symbols[idx])
+            types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
+            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
+            print("symbols: {}".format(', '.join(types)))
+            types_in_body -= 1  # 1-based to 0-based indexing
+            symbols = np.array(types, dtype=str)[types_in_body]
+
+
         else:
+            # last resort, setting everything to Hydrogen
             symbols = ['H']*nat_must
 
     positions = []
@@ -219,14 +310,18 @@ def read_lammps_dump(filename, elements=None,
 
     lidx = 0
     iframe = 0
+    # dealing with additional kwywods
+    additional_arrays = {kw: [] for kw in additional_keywords_dump}
+
     with open(filename) as f:
         while True:
             step_info = [f.readline() for _ in range(9)]
             if ''.join(step_info) == '':
-                print(f"End reached at line {lidx}, stopping")
+                if not quiet:
+                    print(f"End reached at line {lidx}, stopping")
                 break
-            nat, timestep, cell = read_step_info(
-                step_info, lidx=lidx, start=False)
+            nat, timestep_, cell = read_step_info(
+                step_info, lidx=lidx, start=False, quiet=quiet)
             lidx += 9
             if nat != nat_must:
                 print("Changing number of atoms is not supported, breaking")
@@ -238,9 +333,9 @@ def read_lammps_dump(filename, elements=None,
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()
             pos = np.array(body[:, posids], dtype=float)[sorting_key]
-            if iframe >= skip:
+            if iframe >= skip and iframe % istep == 0:
                 positions.append(pos_2_absolute(cell, pos, postype))
-                timesteps.append(timestep)
+                timesteps.append(timestep_)
                 cells.append(cell)
                 if has_vel:
                     velocities.append(np.array(body[:, velids],
@@ -248,21 +343,30 @@ def read_lammps_dump(filename, elements=None,
                 if has_frc:
                     forces.append(f_conv*np.array(body[:, frcids],
                                                   dtype=float)[sorting_key])
+                for kw, idx_add in zip(additional_keywords_dump,
+                                       additional_ids_dump):
+                    additional_arrays[kw].append(
+                        np.array(body[:, idx_add],
+                                 dtype=float)[sorting_key])
             iframe += 1
-
-    print(f"Read trajectory of length {iframe}\n"
-          f"Creating Trajectory of length {len(timesteps)}")
-
-    atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
-    traj = Trajectory(atoms=atoms,
-                      positions=positions, cells=cells)
+    if not quiet:
+        print(f"Read trajectory of length {iframe}\n"
+            f"Creating Trajectory of length {len(timesteps)}")
+    try:
+        atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
+        traj = Trajectory(atoms=atoms,
+                          positions=positions, cells=cells)
+    except KeyError:
+        traj = Trajectory(types=symbols, cells=cells)
+        traj.set_positions(positions)
     if has_vel:
         traj.set_velocities(velocities)
     if has_frc:
         traj.set_forces(forces)
     if timestep:
         traj.set_timestep(timestep)
-
+    for key, arr in additional_arrays.items():
+        traj.set_array(key, np.array(arr))
     if thermo_file:
         header, arr, ts_index = get_thermo_props(thermo_file)
         timesteps_thermo = np.array(arr[:, ts_index], dtype=int).tolist()
@@ -292,7 +396,7 @@ def read_lammps_dump(filename, elements=None,
         # if thermo_ke:
         #     colidx = header.index(thermo_ke)
         #     traj.set_kinetic_energies(arr[indices, colidx])
-    if save_extxyz:
+    if save_extxyz or (outfile is not None and outfile.endswith('extxyz')):
         from ase.io import write
         path_to_save = outfile or filename + '.extxyz'
         asetraj = traj.get_ase_trajectory()
@@ -319,6 +423,9 @@ if __name__ == '__main__':
     parser.add_argument('--elements-file',
                         help=('A file containing the elements '
                               'as space-separated strings'))
+    parser.add_argument('--mass-types',
+                        help=('The input file of lammps containing '
+                                'the masses of the types'))
     parser.add_argument('--timestep', type=float,
                         help='The timestep of the trajectory printed')
     parser.add_argument('--f-conv', type=float,
@@ -330,11 +437,13 @@ if __name__ == '__main__':
     parser.add_argument('--s-conv', type=float,
                         help='The conversion factor for stresses',
                         default=1.0)
-
+    parser.add_argument('-i', '--istep', type=int, default=1,
+                        help='Just take this frequency of steps from the trajectory')
     parser.add_argument(
         '--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument(
-        '--thermo-pe', help='Thermo keyword for potential energy',)
+        '--thermo-pe',
+        help='Thermo keyword for potential energy',)
     parser.add_argument('--thermo-stress',
                         help=('Thermo keyword for stress '
                               'without the xx/yy/xz..'))
@@ -348,5 +457,10 @@ if __name__ == '__main__':
                         help='Ignore forces in dump file')
     parser.add_argument('--skip', type=int, default=0,
                         help='Skip this many first steps')
+    parser.add_argument('-a', '--additional-keywords-dump', nargs='+',
+                        help=('Additional keywords to be read from dump file'),
+                        default=[])
+    parser.add_argument('-q', '--quiet', action='store_true',
+                        help='Do not print anything')
     args = parser.parse_args()
     read_lammps_dump(**vars(args))

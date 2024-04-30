@@ -2,8 +2,8 @@
 
 from json import dumps
 import numpy as np
-from copy import deepcopy
 import shutil
+
 
 class AttributedArray(object):
     _ATTRIBUTE_FILENAME = 'attributes.json'
@@ -12,24 +12,34 @@ class AttributedArray(object):
         self._arrays = {}
         self._attrs = {}
 
+        self._nstep = None
         for key, val in list(kwargs.items()):
             getattr(self, 'set_{}'.format(key))(val)
 
-    def set_array(self, name, array, check_existing=False, check_nstep=False, check_nat=False,
-                wanted_shape_len=None, wanted_shape_1=None, wanted_shape_2=None):
+    def set_array(
+        self, name, array, check_existing=False,
+        check_nstep=False, check_nat=False,
+            wanted_shape_len=None, wanted_shape_1=None,
+            wanted_shape_2=None):
         """
         Method to set an array with a name to reference it.
         :param str name: A name to reference that array
-        :param array: A valid numpy array or an object that can be converted with a call to numpy.array
+        :param array:
+            A valid numpy array or an object that can
+            be converted with a call to numpy.array
         :param bool check_existing:
-            Check for an array of that name existing, and raise if it exists.
+            Check for an array of that name existing,
+            and raise if it exists.
             Defaults to False.
         :param book check_nstep:
-            Check if the number of steps, which is the first dimension of the array, is commensurate
+            Check if the number of steps, which is the first
+            dimension of the array, is commensurate
             with other arrays stored. Defaults to False
         :param bool check_nat:
-            If the array is of rank 3 or higher, the second dimension is interpreted as the number of atoms.
-            If this flag is True, I will check for arrays with rank 3 or higher. Defaults  to True.
+            If the array is of rank 3 or higher, the second
+            dimension is interpreted as the number of atoms.
+            If this flag is True, I will check for arrays
+            with rank 3 or higher. Defaults  to True.
             Requires that the atoms have been set
         """
         # First, I call np.array to ensure it's a valid array
@@ -41,31 +51,58 @@ class AttributedArray(object):
                 raise ValueError('Name {} already exists'.formamt(name))
         if wanted_shape_len:
             if len(array.shape) != wanted_shape_len:
-                raise TypeError(f"array {name} is of wrong type, has to be of dimension {wanted_shape_len}")
+                raise TypeError(
+                    f"array {name} is of wrong type, has to be of "
+                    f"dimension {wanted_shape_len}")
         if wanted_shape_1:
             if array.shape[1] != wanted_shape_1:
-                raise IndexError(f"1st dimension of array {name} has to be {wanted_shape_1}")
+                raise IndexError(
+                    f"1st dimension of array {name} has to "
+                    f"be {wanted_shape_1}")
         if wanted_shape_2:
             if array.shape[2] != wanted_shape_2:
-                raise IndexError(f"2nd dimension of array {name} has to be {wanted_shape_2}")
+                raise IndexError(
+                    f"2nd dimension of array {name} has "
+                    f"to be {wanted_shape_2}")
         if check_nstep:
-            for other_name, other_array in list(self._arrays.items()):
-                assert array.shape[0] == other_array.shape[0], (
-                    'Number of steps in array {} ({}) is not compliant with array {} ({})'.format(
-                            name, array.shape[0],other_name,  other_array.shape[0]))
+            if self._nstep is None:
+                self._nstep = array.shape[0]
+            elif self._nstep != array.shape[0]:
+                raise ValueError(
+                    'Number of steps in array {} ({}) is not '
+                    'compliant with number of steps in previous '
+                    'arrays ({})'.format(name, array.shape[0],
+                                         self._nstep))
         if check_nat and len(array.shape) > 2:
-            if array.shape[1] != len(self.atoms):
-                raise ValueError('Second dimension of array does not match the number of atoms')
+            if not isinstance(check_nat, int):
+                raise TypeError(
+                    'If check_nat is not False, it has to be an integer')
+            if array.shape[1] != check_nat:
+                raise ValueError(
+                    'Second dimension of array does not '
+                    'match the number of atoms')
         self._arrays[name] = array
 
     def __contains__(self, arrayname):
         return arrayname in self._arrays
 
+    @property
+    def nstep(self):
+        """
+        :returns: The number of trajectory steps
+        :raises: ValueError if no unique number of steps can be determined.
+        """
+        if self._nstep is None:
+            raise ValueError('Number of steps has not been set')
+        return self._nstep
+
     def get_array(self, name):
         try:
             return self._arrays[name]
         except KeyError:
-            raise KeyError('An array with that name ( {} ) has not been set.'.format(name))
+            raise KeyError(
+                'An array with that name ( {} ) has not '
+                'been set.'.format(name))
 
     def get_arraynames(self):
         return sorted(self._arrays.keys())
@@ -77,7 +114,7 @@ class AttributedArray(object):
         return self._attrs[key]
 
     def set_attr(self, key, value):
-        #Testing whether this is valid:
+        # Testing whether this is valid:
         dumps(value)
         self._attrs[key] = value
 
@@ -90,9 +127,11 @@ class AttributedArray(object):
     def save(self, filename):
         """
         Saves the trajectory instance to tarfile.
-        :param str filename: The filename. Won't be checked or modified with extension!
+        :param str filename:
+            The filename. Won't be checked or modified with extension!
         """
-        import tarfile, tempfile
+        import tarfile
+        import tempfile
         from inspect import getmembers, ismethod
 
         temp_folder = tempfile.mkdtemp()
@@ -100,7 +139,8 @@ class AttributedArray(object):
             if funcname.startswith('_save_'):
                 func(temp_folder)
 
-        with tarfile.open(filename, 'w:gz', format=tarfile.PAX_FORMAT) as tar:
+        with tarfile.open(filename, 'w:gz',
+                          format=tarfile.PAX_FORMAT) as tar:
             tar.add(temp_folder, arcname='')
 
     def _save_arrays(self, folder_name):
@@ -113,7 +153,6 @@ class AttributedArray(object):
             raise KeyError(f"{arrayname} is not one of arrays")
         del self._arrays[arrayname]
 
-
     def _save_attributes(self, folder_name):
         from os.path import join
         import json
@@ -124,16 +163,23 @@ class AttributedArray(object):
     @classmethod
     def load_file(cls, filename):
         """
-        Given a filename, try to load the trajectories and return a new instance of the class.
-        The filename should ideally be created with the Trajectore.store method.
-        If created by hand, it has to be a valid tar.gz compressed tar.
+        Given a filename, try to load the trajectories and
+        return a new instance of the class.
+        The filename should ideally be created with the
+        Trajectore.store method.
+        If created by hand, it has to be a valid tar.gz
+        compressed tar.
         """
-        import tarfile, tempfile, json, os
+        import tarfile
+        import tempfile
+        import json
+        import os
         from os.path import join
         temp_folder = tempfile.mkdtemp()
 
         try:
-            with tarfile.open(filename, 'r:gz', format=tarfile.PAX_FORMAT) as tar:
+            with tarfile.open(filename, 'r:gz',
+                              format=tarfile.PAX_FORMAT) as tar:
                 tar.extractall(temp_folder)
 
             files_in_tar = set(os.listdir(temp_folder))
@@ -142,7 +188,7 @@ class AttributedArray(object):
                 attributes = json.load(f)
             files_in_tar.remove(cls._ATTRIBUTE_FILENAME)
             new = cls()
-            for k,v in list(attributes.items()):
+            for k, v in list(attributes.items()):
                 new.set_attr(k, v)
 
             if cls._ATOMS_FILENAME in files_in_tar:
@@ -152,8 +198,11 @@ class AttributedArray(object):
 
             for array_file in files_in_tar:
                 if not array_file.endswith('.npy'):
-                    raise Exception('Unrecognized file in trajectory export: {}'.format(array_file))
-                new.set_array(array_file.rstrip('.npy'), np.load(join(temp_folder, array_file), mmap_mode='r'))
+                    raise Exception(
+                        'Unrecognized file in trajectory export: {}'
+                        ''.format(array_file))
+                new.set_array(array_file.rstrip('.npy'), np.load(
+                    join(temp_folder, array_file), mmap_mode='r'))
         except Exception as e:
             shutil.rmtree(temp_folder)
             raise e

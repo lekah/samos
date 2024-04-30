@@ -112,14 +112,14 @@ class RDF(BaseAnalyzer):
             else:
                 print(type(spec))
 
-        atoms = self._trajectory.atoms
-        volume = atoms.get_volume()
         positions = self._trajectory.get_positions()
-        chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
+        types = self._trajectory.get_types()
         cells = self._trajectory.get_cells()
         range_ = list(range(0, 2))
         if cells is None:
             fixed_cell = True
+            atoms = self._trajectory.atoms
+            volume = atoms.get_volume()
             try:
                 cell = atoms.cell.array
             except AttributeError:
@@ -138,14 +138,15 @@ class RDF(BaseAnalyzer):
                              "number of positions ({})".format(
                                  istop, len(positions)))
         if species_pairs is None:
-            species_pairs = list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 2))
+            species_pairs = sorted(list(
+                itertools.combinations_with_replacement(
+                    sorted(set(types)), 2)))
         indices_pairs = []
         labels = []
         species_pairs_pruned = []
         for ispec, (spec1, spec2) in enumerate(species_pairs):
-            ind_spec1, ind_spec2 = get_indices(
-                spec1, chem_sym), get_indices(spec2, chem_sym)
+            ind_spec1, ind_spec2 = (get_indices(spec1, types),
+                                    get_indices(spec2, types))
             # special situation if there's only one atom of a species
             # and we're making the RDF of that species with itself.
             # there will be empty pairs_of_atoms and the
@@ -187,6 +188,7 @@ class RDF(BaseAnalyzer):
             for index in np.arange(istart, istop, stepsize):
                 if not fixed_cell:
                     cell = cells[index]
+                    volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
                     cellI = np.linalg.inv(cell)
                     a, b, c = cell
                     corners = np.array([i*a+j*b + k*c
@@ -219,6 +221,9 @@ class RDF(BaseAnalyzer):
             rdf_res.set_array('rdf_{}'.format(label), rdf)
             rdf_res.set_array('int_{}'.format(label), integral)
             rdf_res.set_array('radii_{}'.format(label), radii)
+            rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
+            rdf_res.set_attr('n_data_{}'.format(label),
+                             len(pairs_of_atoms) * ((istop-istart)//stepsize))
 
         return rdf_res
 
@@ -258,12 +263,14 @@ class AngularSpectrum(BaseAnalyzer):
 
 
 def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
-                      species_pairs=None, savefig=None):
-    from samos.plotting.plot_rdf import plot_rdf
-    from matplotlib import pyplot as plt
-    from matplotlib.gridspec import GridSpec
-
-    traj = Trajectory.load_file(trajectory_path)
+                      species_pairs=None, savefig=None, plot=False,
+                      printrdf=False, no_int=False):
+    if trajectory_path.endswith('.extxyz'):
+        from ase.io import read
+        aselist = read(trajectory_path, format='extxyz', index=':')
+        traj = Trajectory.from_atoms(aselist)
+    else:
+        traj = Trajectory.load_file(trajectory_path)
     print("Read trajectory of shape {}".format(traj.get_positions().shape))
     if species_pairs:
         species_pairs_ = []
@@ -274,14 +281,35 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
     rdf = RDF(trajectory=traj)
     res = rdf.run(radius=radius, stepsize=stepsize,
                   nbins=bins, species_pairs=species_pairs_)
-    fig = plt.figure(figsize=(4, 3))
-    gs = GridSpec(1, 1, top=0.99, right=0.86, left=0.14, bottom=0.16)
-    ax = fig.add_subplot(gs[0])
-    plot_rdf(res, ax=ax)
-    if savefig:
-        plt.savefig(savefig, dpi=250)
-    else:
-        plt.show()
+    if plot or savefig:
+        from samos.plotting.plot_rdf import plot_rdf
+        from matplotlib import pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        fig = plt.figure(figsize=(4, 3))
+        gs = GridSpec(1, 1, top=0.99, right=0.83, left=0.14, bottom=0.16)
+        ax = fig.add_subplot(gs[0])
+        plot_rdf(res, ax=ax, no_int=no_int)
+        ax.set_xlim(-0.2, radius)
+        if savefig:
+            plt.savefig(savefig, dpi=250)
+        if plot:
+            plt.show()
+
+    if printrdf:
+        species_pairs = res.get_attr('species_pairs')
+        for spec1, spec2 in species_pairs:
+            try:
+                rdf = res.get_array('rdf_{}_{}'.format(spec1, spec2))
+            except KeyError:
+                print(
+                    'Warning: RDF for {}-{} was not calculated, skipping'
+                    ''.format(spec1, spec2))
+                continue
+            integral = res.get_array('int_{}_{}'.format(spec1, spec2))
+            radii = res.get_array('radii_{}_{}'.format(spec1, spec2))
+            name = '{}-{}-{}.dat'.format(printrdf, spec1, spec2)
+            np.savetxt(name, np.array([radii, rdf, integral]).T,
+                       header='radius    rdf     integral')
 
 
 if __name__ == '__main__':
@@ -299,6 +327,12 @@ if __name__ == '__main__':
     parser.add_argument('--species-pairs', nargs='+',
                         help=('species pairs separated by a dash, e.g., '
                               '--species-pairs C-O O-O'))
+    parser.add_argument('--printrdf',
+                        help='Print the RDF to a file as a csv',)
+    parser.add_argument('--plot', action='store_true',
+                        help='Plot the RDF to screen')
+    parser.add_argument('--no-int', action='store_true',
+                        help='dont plot integral')
     parser.add_argument(
         '--savefig',
         help='Where to save figure (will otherwise show on screen)')

@@ -63,7 +63,8 @@ DATAGRID_3D_UNKNOWN
 
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
                          sigma=0.3, n_sigma=3.0, density=0.1,
-                         istart=1, istop=None, stepsize=1):
+                         istart=1, istop=None, stepsize=1,
+                         indices_i_care=None, indices_exclude_from_plot=None):
     """
     :param str positionsf: Where to read the positions from.
     :param str pos_units:
@@ -100,11 +101,15 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     if not outputfile.endswith('.xsf'):
         outputfile += '.xsf'
 
-    if element:
-        indices_i_care = trajectory.get_indices_of_species(element, start=1)
-    else:
-        indices_i_care = np.array(list(range(1, nat+1)))
+    # indices_i_care are used to calculate the density
+    if indices_i_care is None:
+        if element:
+            indices_i_care = trajectory.get_indices_of_species(
+                element, start=1)
+        else:
+            indices_i_care = np.array(list(range(1, nat+1)))
 
+    print('(get_gaussian_density) indices_i_care:', indices_i_care)
     if not len(indices_i_care):
         raise Exception(
             'Element {} not found in symbols {}'.format(element, symbols))
@@ -128,11 +133,16 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     print('Grid is {} x {} x {}'.format(n1, n2, n3))
     print('Box is  {} x {} x {}'.format(a, b, c))
     print('Writing xsf file to', format(outputfile))
-
+    if indices_exclude_from_plot is None:
+        indices_exclude_from_plot = indices_i_care
+    print(
+        '(get_gaussian_density) We do not show these atoms in the xsf file: '
+        f'{indices_exclude_from_plot}')
     write_xsf_header(
-        [s for i, s in enumerate(symbols, start=1) if i not in indices_i_care],
+        [s for i, s in enumerate(symbols, start=1)
+         if i not in indices_exclude_from_plot],
         [p for i, p in enumerate(starting_pos, start=1)
-         if i not in indices_i_care],
+         if i not in indices_exclude_from_plot],
         cell, None, outfilename=outputfile, xdim=n1, ydim=n2, zdim=n3)
 
     S = np.matrix(np.diag([1, 1, 1, -(sigma*n_sigma/density)**2]))
@@ -153,13 +163,13 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     # ~ ymin = (R[1,3] + np.sqrt(R[1,3]**2 - R[1,1]*R[3,3])) / R[3,3]
     # ~ zmax = (R[2,3] - np.sqrt(R[2,3]**2 - R[2,2]*R[3,3])) / R[3,3]
     # ~ zmin = (R[2,3] + np.sqrt(R[2,3]**2 - R[2,2]*R[3,3])) / R[3,3]
-    # The size of the bounding box is given by (max - min) 
+    # The size of the bounding box is given by (max - min)
     # for each dimension.
     # I want this to be expressed as integer values in the grid,
     # though, for convenience.
-    # In  plain terms, bx,by,bz tell me how many grid point 
+    # In  plain terms, bx,by,bz tell me how many grid point
     # I have to walk up/down in x/y/z
-    # maximally to be sure that I contain all the points that lie 
+    # maximally to be sure that I contain all the points that lie
     # with n_sigma*sigma from the origin!
     # Of course, of main importance is the density!
     # I add to be sure, since int cuts of floating points!
@@ -172,7 +182,7 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         abs((R[1, 3] - np.sqrt(R[1, 3]**2 - R[1, 1]*R[3, 3]))
             / R[3, 3]) / density)+1
     b3 = int(
-        abs((R[2, 3] - np.sqrt(R[2, 3]**2 - R[2, 2]*R[3, 3])) 
+        abs((R[2, 3] - np.sqrt(R[2, 3]**2 - R[2, 2]*R[3, 3]))
             / R[3, 3]) / density)+1
 
     make_gaussian_density(

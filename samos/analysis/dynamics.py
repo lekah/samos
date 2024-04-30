@@ -32,8 +32,9 @@ class DynamicsAnalyzer(object):
             trajectories = [trajectories]
         # I check the compatibility. Implicitly,
         # also checks if trajectories are valid instances.
-        (self._atoms,
-         self._timestep_fs) = check_trajectory_compatibility(trajectories)
+        types, self._timestep_fs = check_trajectory_compatibility(
+            trajectories)
+        self._types = np.array(types)
         # Setting as attribute of self for analysis
         self._trajectories = trajectories
 
@@ -53,27 +54,16 @@ class DynamicsAnalyzer(object):
                 'Species of interest has to be a list of'
                 ' strings with the atomic symbol')
 
-    @property
-    def atoms(self):
-        try:
-            return self._atoms
-        except AttributeError as e:
-            raise Exception(
-                '\n\n\n'
-                'Please use the set_trajectories method'
-                ' to set trajectories, and I will get the atoms from there.'
-                '\n{}\n'.format(e)
-            )
-
     def set_verbosity(self, verbosity):
         if not isinstance(verbosity, int):
             raise TypeError('Verbosity is an integer')
         self._verbosity = verbosity
 
     def get_species_of_interest(self):
-        atoms = self.atoms  # Also a good way to check if atoms have been set
+        # Also a good way to check if atoms have been set
+        types = self._types
         if self._species_of_interest is None:
-            return sorted(set(atoms.get_chemical_symbols()))
+            return sorted(set(types))
         else:
             return self._species_of_interest
 
@@ -226,7 +216,8 @@ class DynamicsAnalyzer(object):
             raise InputError('Provide a time to end fitting the time series')
 
         if not np.all(t_end_fit_dt > t_start_fit_dt):
-            raise InputError('t_end_fit_dt must be larger than t_start_fit_dt')
+            raise InputError('t_end_fit_dt must be larger than '
+                             't_start_fit_dt')
 
         if not isinstance(t_start_fit_dt, int):
             if isinstance(t_end_fit_dt, int):
@@ -509,22 +500,24 @@ class DynamicsAnalyzer(object):
                             if decomposed:
                                 for ipol in range(3):
                                     for jpol in range(3):
+                                        data = block[
+                                            current_t_start_fit_dt//stepsize_t:
+                                            current_t_end_fit_dt//stepsize_t,
+                                            ipol, jpol]
                                         slope, intercept, _, _, _ = linregress(
-                                            current_t_list_fit_fs,
-                                            block[
-                                                current_t_start_fit_dt//stepsize_t:
-                                                current_t_end_fit_dt//stepsize_t,
-                                                ipol, jpol])
-                                        slopes_intercepts[istart,
-                                                          iblock, ipol, jpol, 0] = slope
-                                        slopes_intercepts[istart, iblock,
-                                                          ipol, jpol, 1] = intercept
-                                # slopes.append(slopes_intercepts[istart, iblock, :, :, 0])
+                                            current_t_list_fit_fs, data)
+                                        slopes_intercepts[istart, iblock, ipol,
+                                                          jpol, 0] = slope
+                                        slopes_intercepts[istart, iblock, ipol,
+                                                          jpol, 1] = intercept
+                                # slopes.append(slopes_intercepts[istart,
+                                # iblock, :, :, 0])
                             else:
+                                data = block[
+                                    (current_t_start_fit_dt-t_start_dt)//stepsize_t:  # noqa: E501
+                                    current_t_end_fit_dt//stepsize_t]
                                 slope, intercept, _, _, _ = linregress(
-                                    current_t_list_fit_fs,
-                                    block[(current_t_start_fit_dt-t_start_dt)//stepsize_t:
-                                          current_t_end_fit_dt//stepsize_t])
+                                    current_t_list_fit_fs, data)
                                 slopes_intercepts[istart, iblock, 0] = slope
                                 slopes_intercepts[istart,
                                                   iblock, 1] = intercept
@@ -560,8 +553,8 @@ class DynamicsAnalyzer(object):
                                               ipol, jpol])
                                     slopes_intercepts[iblock,
                                                       ipol, jpol, 0] = slope
-                                    slopes_intercepts[iblock,
-                                                      ipol, jpol, 1] = intercept
+                                    slopes_intercepts[iblock, ipol,
+                                                      jpol, 1] = intercept
                             slopes.append(slopes_intercepts[iblock, :, :, 0])
                         else:
                             slope, intercept, _, _, _ = linregress(
@@ -578,18 +571,22 @@ class DynamicsAnalyzer(object):
                     slopes_intercepts)
 
                 #
-                # compute MSD with maximal statistics (whole trajectory, no blocks)
+                # compute MSD with maximal statistics (whole trajectory,
+                # no blocks)
                 if do_long:
-                    # nr_of_t_long may change with the length of the traj (if not set by user)
+                    # nr_of_t_long may change with the length of the traj
+                    # (if not set by user)
                     if t_long_end_dt is not None:
                         nr_of_t_long = t_long_end_dt // stepsize_t
                     elif t_long_factor is not None:
-                        nr_of_t_long = int(t_long_factor * nstep / stepsize_t)
+                        nr_of_t_long = int(t_long_factor *
+                                           nstep / stepsize_t)
                     else:
                         nr_of_t_long = (nstep - 1) // stepsize_t
                     if nr_of_t_long > nstep:
                         raise RuntimeError(
-                            't_long_end_dt is bigger than the trajectory length')
+                            't_long_end_dt is bigger than the '
+                            'trajectory length')
                     nr_of_t_long_list.append(nr_of_t_long)
                     t_list_long_fs.append(
                         timestep_fs * stepsize_t * np.arange(nr_of_t_long))
@@ -598,12 +595,14 @@ class DynamicsAnalyzer(object):
                             positions, indices_of_interest, stepsize_t,
                             stepsize_tau, nr_of_t_long, nstep, nat,
                             nat_of_interest))
-                    msd.set_array('msd_long_{}_{}'.format(atomic_species, itraj),
+                    msd.set_array('msd_long_{}_{}'.format(atomic_species,
+                                                          itraj),
                                   msd_this_species_this_traj_max_stats)
             #
             # end of trajectories loop
 
-            # Calculating the mean, std, sem for each point in time (averaging over trajectories)
+            # Calculating the mean, std, sem for each point in time
+            # (averaging over trajectories)
             msd_mean = np.mean(msd_this_species, axis=0)
             if (len(msd_this_species) > 1):
                 msd_std = np.std(msd_this_species, axis=0)
@@ -635,9 +634,11 @@ class DynamicsAnalyzer(object):
                     / np.sqrt(len(slopes)-1))
             else:
                 results_dict[atomic_species]['slope_msd_std'] = np.full(
-                    results_dict[atomic_species]['slope_msd_mean'].shape, np.NaN)
+                    results_dict[atomic_species]['slope_msd_mean'].shape,
+                    np.NaN)
                 results_dict[atomic_species]['slope_msd_sem'] = np.full(
-                    results_dict[atomic_species]['slope_msd_mean'].shape, np.NaN)
+                    results_dict[atomic_species]['slope_msd_mean'].shape,
+                    np.NaN)
 
             if decomposed:
                 dimensionality_factor = 2.
@@ -655,16 +656,20 @@ class DynamicsAnalyzer(object):
                     results_dict[atomic_species]['slope_msd_sem']
             else:
                 results_dict[atomic_species]['diffusion_std_cm2_s'] = np.full(
-                    results_dict[atomic_species]['diffusion_mean_cm2_s'].shape, np.NaN)
+                    results_dict[atomic_species]['diffusion_mean_cm2_s'].shape,
+                    np.NaN)
                 results_dict[atomic_species]['diffusion_sem_cm2_s'] = np.full(
-                    results_dict[atomic_species]['diffusion_mean_cm2_s'].shape, np.NaN)
+                    results_dict[atomic_species]['diffusion_mean_cm2_s'].shape,
+                    np.NaN)
 
             # I need to transform to lists, numpy are not json serializable:
             for k in ('slope_msd_mean', 'slope_msd_std', 'slope_msd_sem',
-                      'diffusion_mean_cm2_s', 'diffusion_std_cm2_s', 'diffusion_sem_cm2_s'):
-                if isinstance(results_dict[atomic_species][k], np.ndarray):
-                    results_dict[atomic_species][k] = results_dict[atomic_species][k].tolist(
-                    )
+                      'diffusion_mean_cm2_s', 'diffusion_std_cm2_s',
+                      'diffusion_sem_cm2_s'):
+                if isinstance(results_dict[atomic_species][k],
+                              np.ndarray):
+                    results_dict[atomic_species][k] = results_dict[
+                        atomic_species][k].tolist()
             if self._verbosity > 1:
                 print('      Done, these are the results for {}:'.format(
                     atomic_species))
@@ -675,8 +680,12 @@ class DynamicsAnalyzer(object):
         #
 
         results_dict.update({
-            't_start_fit_dt':   t_start_fit_dt.tolist() if multiple_params_fit else t_start_fit_dt,
-            't_end_fit_dt':   t_end_fit_dt.tolist() if multiple_params_fit else t_end_fit_dt,
+            't_start_fit_dt': (t_start_fit_dt.tolist()
+                               if multiple_params_fit
+                               else t_start_fit_dt),
+            't_end_fit_dt': (t_end_fit_dt.tolist()
+                             if multiple_params_fit
+                             else t_end_fit_dt),
             't_start_dt':   t_start_dt,
             't_end_dt':   t_end_dt,
             'nr_of_trajectories':   len(trajectories),
@@ -697,14 +706,17 @@ class DynamicsAnalyzer(object):
 
     def get_vaf(self, arrayname=None, integration='trapezoid', **kwargs):
 
-        from samos.lib.mdutils import calculate_vaf_specific_atoms, get_com_velocities
+        from samos.lib.mdutils import (
+            calculate_vaf_specific_atoms,
+            get_com_velocities)
         try:
             timestep_fs = self._timestep_fs
             trajectories = self._trajectories
         except AttributeError as e:
             raise Exception(
                 '\n\n\n'
-                'Please use the set_trajectories method to set trajectories'
+                'Please use the set_trajectories '
+                'method to set trajectories'
                 '\n{}\n'.format(e)
             )
 
@@ -757,7 +769,8 @@ class DynamicsAnalyzer(object):
                         nstep - t_end_dt) // block_length_dt
                 else:
                     raise RuntimeError(
-                        'Neither nr_of_blocks nor block_length_ft is specified')
+                        'Neither nr_of_blocks nor block_length_ft is '
+                        'specified')
 
                 # slopes_intercepts = np.empty((nr_of_blocks_this_traj, 2))
 
@@ -788,10 +801,10 @@ class DynamicsAnalyzer(object):
                     vaf_this_species.append(vaf[iblock])
                     # ~ print vaf[iblock,0]
                     vaf_integral_this_species.append(vaf_integral[iblock])
-                    fitted_means_of_integral.append(
-                        vaf_integral[iblock,
-                                     t_start_fit_dt//stepsize_t:t_end_fit_dt//stepsize_t
-                                     ].mean())
+                    data_ = vaf_integral[
+                        iblock,
+                        t_start_fit_dt//stepsize_t:t_end_fit_dt//stepsize_t]
+                    fitted_means_of_integral.append(data_.mean())
 
                 vaf_time_series.set_array(
                     'vaf_isotropic_{}_{}'.format(atomic_species, itraj),
@@ -802,19 +815,23 @@ class DynamicsAnalyzer(object):
                     vaf_integral)
 
             for arr, name in ((vaf_this_species, 'vaf_isotropic'),
-                              (vaf_integral_this_species, 'vaf_integral_isotropic')):
+                              (vaf_integral_this_species,
+                               'vaf_integral_isotropic')):
                 arr = np.array(arr)
 
                 arr_mean = np.mean(arr, axis=0)
                 arr_std = np.std(arr, axis=0)
                 arr_sem = arr_std / np.sqrt(arr.shape[0] - 1)
                 # ~ print name, arr_mean.shape
-                vaf_time_series.set_array('{}_{}_mean'.format(name, atomic_species),
-                                          arr_mean)
-                vaf_time_series.set_array('{}_{}_std'.format(name, atomic_species),
-                                          arr_std)
-                vaf_time_series.set_array('{}_{}_sem'.format(name, atomic_species),
-                                          arr_sem)
+                vaf_time_series.set_array(
+                    '{}_{}_mean'.format(name, atomic_species),
+                    arr_mean)
+                vaf_time_series.set_array(
+                    '{}_{}_std'.format(name, atomic_species),
+                    arr_std)
+                vaf_time_series.set_array(
+                    '{}_{}_sem'.format(name, atomic_species),
+                    arr_sem)
 
             fitted_means_of_integral = np.array(fitted_means_of_integral)
             results_dict[atomic_species] = dict(
@@ -963,12 +980,15 @@ class DynamicsAnalyzer(object):
 
         keywords_provided = list(kwargs.keys())
         for mutually_exclusive_keys in (
-                ('block_length_fs', 'block_length_ps', 'block_length_dt', 'nr_of_blocks'),):
-            keys_provided_this_group = [
-                k for k in mutually_exclusive_keys if k in keywords_provided]
+                ('block_length_fs', 'block_length_ps',
+                 'block_length_dt', 'nr_of_blocks'),):
+            keys_provided_this_group = [k for k
+                                        in mutually_exclusive_keys
+                                        if k in keywords_provided]
             if len(keys_provided_this_group) > 1:
-                raise InputError('This keywords are mutually exclusive: {}'.format(
-                    ', '.join(keys_provided_this_group)))
+                raise InputError(
+                    'This keywords are mutually exclusive: '
+                    '{}'.format(', '.join(keys_provided_this_group)))
         if 'block_length_fs' in keywords_provided:
             block_length_dt = int(
                 float(kwargs.pop('block_length_fs')) / timestep_fs)
@@ -1004,8 +1024,9 @@ class DynamicsAnalyzer(object):
                         arrayname)[:, trajectory.get_indices_of_species(
                             atomic_species, start=0), :]
                 else:
-                    vel_array = trajectory.get_velocities(
-                    )[:, trajectory.get_indices_of_species(atomic_species, start=0), :]
+                    vel_array = trajectory.get_velocities()[
+                        :, trajectory.get_indices_of_species(atomic_species,
+                                                             start=0), :]
                 nstep, _, _ = vel_array.shape
 
                 if nr_of_blocks > 0:
@@ -1018,10 +1039,12 @@ class DynamicsAnalyzer(object):
                     split_number = block_length_dt
                 else:
                     raise RuntimeError(
-                        'Neither nr_of_blocks nor block_length_ft is specified')
+                        'Neither nr_of_blocks nor block_length_ft '
+                        'is specified')
 
-                # I need to have blocks of equal length, and use the split method
-                # I need the length of the array to be a multiple of nr_of_blocks_this_traj
+                # I need to have blocks of equal length, and use the
+                # split method I need the length of the array to be
+                # a multiple of nr_of_blocks_this_traj
                 blocks = np.array(np.split(
                     vel_array[:nr_of_blocks_this_traj*split_number],
                     nr_of_blocks_this_traj, axis=0))
@@ -1052,7 +1075,8 @@ class DynamicsAnalyzer(object):
                 if not index_of_species:
                     # I need to save the frequencies only once,
                     # so I save them only for the first species.
-                    # I do not see any problem here, but maybe I missed something.
+                    # I do not see any problem here, but maybe I
+                    # missed something.
                     power_spectrum.set_array(
                         'frequency_{}'.format(itraj), freq)
                 for block in pd_this_species_this_traj:
@@ -1082,3 +1106,65 @@ class DynamicsAnalyzer(object):
                      ('nr_of_trajectories', len(trajectories)),):
             power_spectrum.set_attr(k, v)
         return power_spectrum
+
+def util_msd(trajectory_path, stepsize=1, species=None,
+             plot=True, savefig=None, t_start_fit_ps=5,
+             t_end_fit_ps=10, timestep=None, nblocks=None):
+    if trajectory_path.endswith('.extxyz'):
+        from ase.io import read
+        aselist = read(trajectory_path, format='extxyz', index=':')
+        traj = Trajectory.from_atoms(aselist)
+        
+    else:
+        traj = Trajectory.load_file(trajectory_path)
+    if timestep:
+        traj.set_timestep(timestep)
+    dyn = DynamicsAnalyzer(trajectories=[traj])
+    if species is None:
+        species = sorted(set(traj.atoms.get_chemical_symbols()))
+    print(traj.get_timestep(), species)
+    print(t_start_fit_ps, t_end_fit_ps, timestep)
+    msd = dyn.get_msd(stepsize_t=stepsize,
+                      species_of_interest=species,
+                      t_end_fit_ps=t_end_fit_ps,
+                      t_start_fit_ps=t_start_fit_ps,
+                      nr_of_blocks=nblocks)
+    if plot or savefig:
+        from samos.plotting.plot_dynamics import plot_msd_isotropic
+        from matplotlib import pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        gs = GridSpec(1,1, left=0.18, right=0.95, bottom=0.18, top=0.95)
+        fig = plt.figure(figsize=(4,3) )
+        ax = fig.add_subplot(gs[0   ])                 
+        plot_msd_isotropic(msd, ax=ax)
+        if plot:
+            plt.show()
+        elif savefig:
+            plt.savefig(savefig, dpi=240)
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser("analysis/plot of a MSD, given a trajectory")
+    parser.add_argument('trajectory_path')
+    parser.add_argument('-s', '--stepsize', type=int,
+                        help='Stepsize over the trajectory, defaults to 1',
+                        default=1)
+    parser.add_argument('--species', nargs='+',)
+    parser.add_argument('--plot', action='store_true',
+                        help='Plot the MSD to screen')
+    parser.add_argument('-te', '--t-end-fit-ps',
+                        help='End of the fit in ps, defaults to 100',
+                        type=float, default=10)
+    parser.add_argument('-ts', '--t-start-fit-ps',
+                        help='End of the fit in ps, defaults to 50',
+                        type=float, default=5)
+    parser.add_argument('--timestep', type=float,
+                        help='Timestep in fs, defaults to 1',
+                        default=1)
+    parser.add_argument('-n', '--nblocks', type=int, 
+                        default=1, help='Number of blocks to use')
+    parser.add_argument(
+        '--savefig',
+        help='Where to save figure (will otherwise show on screen)')
+    args = parser.parse_args()
+    kwargs = vars(args)
+    util_msd(**kwargs)

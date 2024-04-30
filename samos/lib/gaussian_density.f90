@@ -53,7 +53,7 @@ SUBROUTINE make_gaussian_density(&
     ! dV is that devided by number of gridpoints
     dV = abs((cell(1,1) * cell(2,2) * cell(3,3) &
          + cell(2,1) * cell(3,2) * cell(1,3) &
-         + cell(3,1) * cell(1,3) * cell(2,3) &
+         + cell(3,1) * cell(1,2) * cell(2,3) &
          - cell(3,1) * cell(2,2) * cell(1,3) &
          - cell(2,1) * cell(1,2) * cell(3,3) &
          - cell(1,1) * cell(3,2) * cell(2,3)) / DBLE(n1*n2*n3))

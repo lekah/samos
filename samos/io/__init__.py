@@ -1,5 +1,1 @@
 # -*- coding: utf-8 -*-
-
-__all__ = ['xsf']
-
-from . import *
