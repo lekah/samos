@@ -12,7 +12,7 @@ from tvtk.api import tvtk
 
 from ase.visualize.mlab import plot
 
-from aiida_scripts.charges.io_xsf import read_xsf
+from samos.io.xsf import read_xsf
 
 covalent_radii[3] *= 0.66
 
