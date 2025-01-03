@@ -162,6 +162,7 @@ class RDF(BaseAnalyzer):
         binsize = float(radius)/nbins
 
         # wrapping the positions:
+        shortest_distance_all = np.inf
         for label, (ind1, ind2) in zip(labels, indices_pairs):
             if ind1 == ind2:
                 # lists are equal, I will therefore not double calculate
@@ -204,6 +205,8 @@ class RDF(BaseAnalyzer):
                 #  into periodic cell
                 shortest_distances = cdist(
                     diff_real_wrapped, corners).min(axis=1)
+                shortest_distance_all = min([shortest_distance_all,
+                                             shortest_distances.min()])
                 hist += prefactor * \
                     (np.histogram(shortest_distances, bins=nbins,
                      range=(0, radius))[0]).astype(float)
@@ -224,7 +227,8 @@ class RDF(BaseAnalyzer):
             rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
             rdf_res.set_attr('n_data_{}'.format(label),
                              len(pairs_of_atoms) * ((istop-istart)//stepsize))
-
+            rdf_res.set_attr('shortest_distance',
+                             shortest_distance_all)
         return rdf_res
 
 
