@@ -108,7 +108,8 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             element_idx = None
         try:
             type_idx = header_list.index('type')
-            if not quiet: print("type found at index {type_idx}")
+            if not quiet:
+                print("type found at index {type_idx}")
         except ValueError:
             type_idx = None
         try:
@@ -119,21 +120,29 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
         if not quiet:
             print("Positions are given as: {}".format(
                 {'u': "unwrapped", 's': "Scaled (wrapped)",
-                "": "Wrapped"}[postype]))
-        if not quiet: print("Position indices are: {}".format(posids))
+                 "": "Wrapped"}[postype]))
+        if not quiet:
+            print("Position indices are: {}".format(posids))
         has_vel, velids = get_indices(header_list, 'v')
         if has_vel:
-            if not quiet: print("Velocities found at indices: {}".format(velids))
+            if not quiet:
+                print("Velocities found at indices: {}".format(velids))
         else:
-            if not quiet: print("Velocities were not found")
+            if not quiet:
+                print("Velocities were not found")
         has_frc, frcids = get_indices(header_list, 'f')
         if has_frc:
-            if not quiet: print("Forces found at indices: {}".format(frcids))
+            if not quiet:
+                print("Forces found at indices: {}".format(frcids))
         else:
-            if not quiet: print("Forces were not found")
+            if not quiet:
+                print("Forces were not found")
         additional_ids = []
         if additional_kw:
             for kw in additional_kw:
+                if kw not in header_list:
+                    raise ValueError(f"Keyword {kw} not found in "
+                                     f"header ({header_list})")
                 additional_ids.append(header_list.index(kw))
 
         return (nat, atomid_idx, element_idx, type_idx, postype,
@@ -234,7 +243,9 @@ def read_lammps_dump(filename, elements=None,
             if type_idx is None:
                 raise ValueError("types specified but not found in file")
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
-            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
+            if not quiet:
+                print("types in body: {}".format(', '.join(
+                    sorted(map(str, set(types_in_body))))))
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
         elif element_idx is not None:
@@ -264,7 +275,8 @@ def read_lammps_dump(filename, elements=None,
                 reading_masses = False
                 for line in fmass:
                     line = line.strip()
-                    if not line: continue
+                    if not line:
+                        continue
                     if reading_masses:
                         try:
                             typ, mass = line.split()[:2]
@@ -290,11 +302,12 @@ def read_lammps_dump(filename, elements=None,
                 idx = np.argmin(np.abs(atomic_masses - mass))
                 types.append(chemical_symbols[idx])
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
-            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
-            print("symbols: {}".format(', '.join(types)))
+            if not quiet:
+                print("types in body: {}".format(', '.join(
+                    sorted(map(str, set(types_in_body))))))
+                print("symbols: {}".format(', '.join(types)))
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
-
 
         else:
             # last resort, setting everything to Hydrogen
@@ -351,7 +364,7 @@ def read_lammps_dump(filename, elements=None,
             iframe += 1
     if not quiet:
         print(f"Read trajectory of length {iframe}\n"
-            f"Creating Trajectory of length {len(timesteps)}")
+              f"Creating Trajectory of length {len(timesteps)}")
     try:
         atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
         traj = Trajectory(atoms=atoms,
@@ -380,9 +393,11 @@ def read_lammps_dump(filename, elements=None,
         # if thermo_te:
         #     colidx = header.index(thermo_te)
         #     traj.set_total_energies(arr[indices, colidx])
+        headers_to_do = set(header)
         if thermo_pe:
             colidx = header.index(thermo_pe)
             traj.set_pot_energies(e_conv*arr[indices, colidx])
+            headers_to_do.remove(thermo_pe)
         if thermo_stress:
             stressall = []
             # voigt notation for stress:
@@ -390,9 +405,12 @@ def read_lammps_dump(filename, elements=None,
             # first diagonal terms:
             for key in keys:
                 fullkey = thermo_stress + key
+                headers_to_do.remove(fullkey)
                 colidx = header.index(fullkey)
                 stressall.append(s_conv*arr[indices, colidx])
             traj.set_stress(np.array(stressall).T)
+        for head in headers_to_do:
+            traj.set_array(head, arr[indices, header.index(head)])
         # if thermo_ke:
         #     colidx = header.index(thermo_ke)
         #     traj.set_kinetic_energies(arr[indices, colidx])
@@ -425,7 +443,7 @@ if __name__ == '__main__':
                               'as space-separated strings'))
     parser.add_argument('--mass-types',
                         help=('The input file of lammps containing '
-                                'the masses of the types'))
+                              'the masses of the types'))
     parser.add_argument('--timestep', type=float,
                         help='The timestep of the trajectory printed')
     parser.add_argument('--f-conv', type=float,
@@ -437,8 +455,9 @@ if __name__ == '__main__':
     parser.add_argument('--s-conv', type=float,
                         help='The conversion factor for stresses',
                         default=1.0)
-    parser.add_argument('-i', '--istep', type=int, default=1,
-                        help='Just take this frequency of steps from the trajectory')
+    parser.add_argument(
+        '-i', '--istep', type=int, default=1,
+        help='Just take this frequency of steps from the trajectory')
     parser.add_argument(
         '--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument(
