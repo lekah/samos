@@ -92,8 +92,8 @@ class AttributedArray(object):
         :returns: The number of trajectory steps
         :raises: ValueError if no unique number of steps can be determined.
         """
-        if self._nstep is None:
-            raise ValueError('Number of steps has not been set')
+        # if self._nstep is None:
+        #     raise ValueError('Number of steps has not been set')
         return self._nstep
 
     def get_array(self, name):

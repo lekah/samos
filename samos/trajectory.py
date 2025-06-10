@@ -83,8 +83,22 @@ class Trajectory(AttributedArray):
         if len(chem_sym_set) < 1:
             raise ValueError("Empty list provided")
         elif len(chem_sym_set) > 1:
-            raise ValueError("The chemical_symbols list of provided atoms "
-                             "are not the same for all, cannot proceed")
+            # let's try to fix that by reordering the atoms:
+            chem_sym_set = set()
+            for atoms in atoms_list:
+                order = np.argsort(atoms.get_atomic_numbers())
+                atoms.set_atomic_numbers(atoms.get_atomic_numbers()[order])
+                atoms.set_positions(atoms.get_positions()[order])
+                if atoms.get_velocities() is not None:
+                    atoms.set_velocities(atoms.get_velocities()[order])
+                try:
+                    atoms.set_forces(atoms.get_forces()[order])
+                except Exception:
+                    pass
+                chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
+            if len(chem_sym_set) > 1:
+                raise ValueError("The chemical_symbols list of provided atoms "
+                                 "are not the same for all, cannot proceed")
 
         positions = np.array([atoms.get_positions() for atoms in atoms_list])
         velocities = np.array([atoms.get_velocities() for atoms in atoms_list])
@@ -158,7 +172,6 @@ class Trajectory(AttributedArray):
             raise ValueError('You have to pass an instance of ase.Atoms')
         self._atoms = atoms
 
-
     @property
     def nat(self):
         types = self.get_types()
@@ -215,7 +228,6 @@ class Trajectory(AttributedArray):
             raise TypeError('species  has  to be an integer or a string, '
                             'I got {}'.format(type(species)))
         return np.where(msk)[0] + start
-    
 
     def set_positions(self, array, check_existing=False):
         """
@@ -346,11 +358,22 @@ class Trajectory(AttributedArray):
                 if need_calculator:
                     calc_kwargs['stress'] = v[index]
             else:
-                try:
-                    getattr(atoms, 'set_{}'.format(k))(v[index])
-                except AttributeError as e:
-                    if warnings:
-                        print(e)
+                shape = v[index].shape
+                if len(shape) > 0:
+                    if shape[0] == len(atoms):
+                        try:
+                            if hasattr(atoms, 'set_{}'.format(k)):
+                                getattr(atoms, 'set_{}'.format(k))(v[index])
+                            else:
+                                atoms.set_array(k, v[index])
+                        except Exception:
+                            pass
+                    else:
+                        print(f"Warning. Can't pass array {k} to atoms")
+                else:
+                    # this must be a single number
+                    atoms.info[k] = v[index]
+
         if need_calculator:
             calc = SinglePointCalculator(atoms, **calc_kwargs)
             atoms.set_calculator(calc)  # this seems to be deprecated,
@@ -430,7 +453,8 @@ class Trajectory(AttributedArray):
                         'this is not recognized'.format(type(item), item))
         else:
             factors = [1] * len(self.atoms)
-        self.set_positions(recenter_positions(self.get_positions(), masses, factors))
+        self.set_positions(recenter_positions(
+            self.get_positions(), masses, factors))
         if 'velocities' in self.get_arraynames():
             self.set_velocities(recenter_velocities(
                 self.get_velocities(), masses, factors))

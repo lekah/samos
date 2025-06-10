@@ -7,8 +7,8 @@ from ase.data import atomic_masses, chemical_symbols
 from samos.trajectory import Trajectory
 
 #  only matches positive integers
-integer_regex = re.compile('(?P<int>\d+)')  # noqa: W605
-float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
+integer_regex = re.compile(r'(?P<int>\d+)')  # noqa: W605
+float_regex = re.compile(r'(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
 
 
 def get_indices(header_list, prefix="", postfix=""):
@@ -180,7 +180,7 @@ def read_lammps_dump(filename, elements=None,
                      elements_file=None, types=None, timestep=None,
                      mass_types=None,
                      thermo_file=None, thermo_pe=None, thermo_stress=None,
-                     save_extxyz=False, outfile=None,
+                     thermo_keywords=[], save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
                      skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
                      additional_keywords_dump=[], quiet=False,
@@ -204,6 +204,8 @@ def read_lammps_dump(filename, elements=None,
     :param thermo_stress:
         stress column in thermo file (as given in header,
         will do the _xx/_yy etc)
+    :param thermo_keywords:
+        The columns to read that are not pe or stress from the thermo dump
     :param save_extxyz:
         save to extxyz file
         (or if outfile is given with .extxyz)
@@ -409,8 +411,11 @@ def read_lammps_dump(filename, elements=None,
                 colidx = header.index(fullkey)
                 stressall.append(s_conv*arr[indices, colidx])
             traj.set_stress(np.array(stressall).T)
-        for head in headers_to_do:
-            traj.set_array(head, arr[indices, header.index(head)])
+        for kw in thermo_keywords:
+            try:
+                traj.set_array(kw, arr[indices, header.index(kw)])
+            except Exception as e:
+                print(e)
         # if thermo_ke:
         #     colidx = header.index(thermo_ke)
         #     traj.set_kinetic_energies(arr[indices, colidx])
@@ -466,6 +471,9 @@ if __name__ == '__main__':
     parser.add_argument('--thermo-stress',
                         help=('Thermo keyword for stress '
                               'without the xx/yy/xz..'))
+    parser.add_argument('-tk', '--thermo-keywords',
+                        nargs='*', default=[],
+                        help="The keywrods to read from the thermo file")
     parser.add_argument('--save-extxyz',
                         action='store_true',
                         help='save extxyz instead of traj')
