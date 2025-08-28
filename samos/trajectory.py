@@ -69,7 +69,7 @@ class Trajectory(AttributedArray):
         super(Trajectory, self).__init__(**kwargs)
 
     @classmethod
-    def from_atoms(cls, atoms_list, timestep_fs=None):
+    def from_atoms(cls, atoms_list, timestep_fs=None, add_arrays=None):
         """
         Instantiate a new class instance given a set of atoms
         """
@@ -120,6 +120,13 @@ class Trajectory(AttributedArray):
             new.set_cells(cells)
         if timestep_fs is not None:
             new.set_timestep(timestep_fs)
+        if add_arrays is not None:
+            for key in add_arrays:
+                array = np.array([atoms.get_array(key) for atoms
+                                  in atoms_list])
+                new.set_array(key, array,
+                              check_existing=False,
+                              check_nstep=True)
         return new
 
     def _save_atoms(self, folder_name):
