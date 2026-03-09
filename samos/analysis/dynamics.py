@@ -349,10 +349,11 @@ class DynamicsAnalyzer(object):
         be lists/arrays. The slope and conductivities
         will be computed for each (t_start_fit, t_end_fit) pair.
         """
-        from samos.lib.mdutils import (
+        from samos.lib.mdutils_cpp_omp import (
             calculate_msd_specific_atoms,
             calculate_msd_specific_atoms_decompose_d,
-            calculate_msd_specific_atoms_max_stats, get_com_positions)
+            calculate_msd_specific_atoms_max_stats)
+        from samos.lib.mdutils import get_com_positions
         try:
             timestep_fs = self._timestep_fs
             trajectories = self._trajectories
