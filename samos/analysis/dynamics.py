@@ -1146,7 +1146,7 @@ def util_msd(trajectory_path, stepsize=1, species=None,
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
-    parser = ArgumentParser("analysis/plot of a MSD, given a trajectory")
+    parser = ArgumentParser('analysis/plot of a MSD, given a trajectory')
     parser.add_argument('trajectory_path')
     parser.add_argument('-s', '--stepsize', type=int,
                         help='Stepsize over the trajectory, defaults to 1',

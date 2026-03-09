@@ -134,8 +134,8 @@ class RDF(BaseAnalyzer):
         if istop is None:
             istop = len(positions)
         elif istop >= len(positions):
-            raise ValueError("Istop ({}) is higher than (or equal to) "
-                             "number of positions ({})".format(
+            raise ValueError('Istop ({}) is higher than (or equal to) '
+                             'number of positions ({})'.format(
                                  istop, len(positions)))
         if species_pairs is None:
             species_pairs = sorted(list(
@@ -275,7 +275,7 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
         traj = Trajectory.from_atoms(aselist)
     else:
         traj = Trajectory.load_file(trajectory_path)
-    print("Read trajectory of shape {}".format(traj.get_positions().shape))
+    print('Read trajectory of shape {}'.format(traj.get_positions().shape))
     if species_pairs:
         species_pairs_ = []
         for spec in species_pairs:
@@ -292,7 +292,7 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
     rdf = RDF(trajectory=traj)
     res = rdf.run(radius=radius, stepsize=stepsize,
                   nbins=bins, species_pairs=species_pairs_)
-    print("Shortest distance: {}".format(
+    print('Shortest distance: {}'.format(
         res.get_attr('shortest_distance')))
     if plot or savefig:
         from samos.plotting.plot_rdf import plot_rdf
@@ -327,7 +327,7 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
-    parser = ArgumentParser("analysis/plot of a RDF, given a trajectory")
+    parser = ArgumentParser('analysis/plot of a RDF, given a trajectory')
     parser.add_argument('trajectory_path')
     parser.add_argument('-r', '--radius', required=False, type=float,
                         default=5.0,

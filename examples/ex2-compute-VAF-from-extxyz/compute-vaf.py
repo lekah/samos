@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 
@@ -51,7 +52,7 @@ def main():
     # sampling was done at every step
     traj = Trajectory.from_atoms(ase_traj, timestep_fs=2.0)
 
-    print("Running Dynamics Analyzer")
+    print('Running Dynamics Analyzer')
 
     try:
         # this will fail beccause velocities were not set:

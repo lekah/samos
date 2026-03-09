@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 from samos.io.lammps import read_lammps_dump
@@ -7,11 +8,11 @@ from samos.plotting.plot_dynamics import plot_msd_isotropic
 
 def main():
     filename = '../data/Al31-1200K-1ps.lammpstrj'
-    print(f"Set filename to {filename}")
+    print(f'Set filename to {filename}')
     traj = read_lammps_dump(filename, elements=['Al']*31)
     traj.set_timestep(1e3)  # sampling was done every 1000fs = 1ps
 
-    print("Running Dynamics Analyzer")
+    print('Running Dynamics Analyzer')
     da = DynamicsAnalyzer(trajectories=[traj])
     res = da.get_msd(t_end_fit_ps=100,  # where to end fit of MSD
                      t_start_fit_ps=50,  # where to start fitting MSD
@@ -22,17 +23,17 @@ def main():
                      stepsize_t=1,  # stepsize of times in MSD analysis,
                      stepsize_tau=10  # stepsize for time averaging,
                      )
-    print("Making figure 1")
+    print('Making figure 1')
     fig = plt.figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
     plot_msd_isotropic(res, ax=ax)
     plt.savefig('msd-plot1.png', dpi=150)
 
     # creating my own plot
-    print("Making figure 2")
-    print("Arraynames are: " + ', '.join(res.get_arraynames()))
-    print("attributes calculated for Al are:")
-    for key, val in res.get_attrs()["Al"].items():
+    print('Making figure 2')
+    print('Arraynames are: ' + ', '.join(res.get_arraynames()))
+    print('attributes calculated for Al are:')
+    for key, val in res.get_attrs()['Al'].items():
         print('   {:<21}: {}'.format(key, val))
     fig = plt.figure(figsize=(8, 3))
     gs = GridSpec(1, 2, left=0.08, bottom=0.15, right=0.98)

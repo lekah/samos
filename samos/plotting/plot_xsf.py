@@ -173,7 +173,7 @@ def plot_charge(
         elif base_unit in ('bohr', 'atomic'):
             total_charge *= bohr_to_ang**(-3)
         else:
-            raise NotImplementedError(f"Unit {base_unit} not implemented")
+            raise NotImplementedError(f'Unit {base_unit} not implemented')
         print('The total charge sums to {:6.3f} electrons'.format(
             total_charge))
         mean_charge_value = rho.sum() / rho.size

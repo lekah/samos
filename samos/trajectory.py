@@ -77,11 +77,11 @@ class Trajectory(AttributedArray):
         chem_sym_set = set()
         for atoms in atoms_list:
             if not isinstance(atoms, Atoms):
-                raise TypeError("I have to receive a list/iterable over "
-                                "{}".format(Atoms))
+                raise TypeError('I have to receive a list/iterable over '
+                                '{}'.format(Atoms))
             chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
         if len(chem_sym_set) < 1:
-            raise ValueError("Empty list provided")
+            raise ValueError('Empty list provided')
         elif len(chem_sym_set) > 1:
             # let's try to fix that by reordering the atoms:
             chem_sym_set = set()
@@ -97,8 +97,8 @@ class Trajectory(AttributedArray):
                     pass
                 chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
             if len(chem_sym_set) > 1:
-                raise ValueError("The chemical_symbols list of provided atoms "
-                                 "are not the same for all, cannot proceed")
+                raise ValueError('The chemical_symbols list of provided atoms '
+                                 'are not the same for all, cannot proceed')
 
         positions = np.array([atoms.get_positions() for atoms in atoms_list])
         velocities = np.array([atoms.get_velocities() for atoms in atoms_list])
@@ -275,8 +275,8 @@ class Trajectory(AttributedArray):
         """
         if self._VELOCITIES_KEY in self.get_arraynames():
             if not overwrite:
-                raise Exception("I am overwriting an existing velocity array"
-                                "Pass overwrite=True to allow")
+                raise Exception('I am overwriting an existing velocity array'
+                                'Pass overwrite=True to allow')
         pos = self.get_positions()
         timestep_fs = self.get_timestep()
         vel_first = (pos[1] - pos[0]) / timestep_fs
@@ -312,7 +312,7 @@ class Trajectory(AttributedArray):
                            check_existing=check_existing, check_nstep=True,
                            wanted_shape_1=6, wanted_shape_len=2)
         else:
-            raise ValueError("Not implemented order {}".format(order))
+            raise ValueError('Not implemented order {}'.format(order))
 
     def get_stress(self):
         return self.get_array(self._STRESS_KEY)
@@ -338,7 +338,7 @@ class Trajectory(AttributedArray):
         :returns: an ase.Atoms instance from the trajectory at step
         """
         assert isinstance(index, (int, np.int64)
-                          ), "step index has to be an integer"
+                          ), 'step index has to be an integer'
 
         need_calculator = False
         if not ignore_calculated:
@@ -399,21 +399,21 @@ class Trajectory(AttributedArray):
         if end is None:
             end = self.nstep
         assert isinstance(
-            start, int) and start >= 0, "start has to be a positive integer"
+            start, int) and start >= 0, 'start has to be a positive integer'
         assert isinstance(
-            end, int) and end >= 0, "end has to be a positive integer"
+            end, int) and end >= 0, 'end has to be a positive integer'
         assert isinstance(
             stepsize, int
-        ) and stepsize >= 0, "stepsize has to be a positive integer"
+        ) and stepsize >= 0, 'stepsize has to be a positive integer'
         if end > self.nstep:
             raise ValueError(
-                "End > nsteps, leave None and it will be set to nstep")
+                'End > nsteps, leave None and it will be set to nstep')
         indices = np.arange(start, end, stepsize)
 
         if len(indices) < 1:
-            raise ValueError("No indices for trajectory")
+            raise ValueError('No indices for trajectory')
         assert isinstance(
-            start, int) and start >= 0, "start has to be a positive integer"
+            start, int) and start >= 0, 'start has to be a positive integer'
         atomslist = [self.get_step_atoms(idx) for idx in indices]
 
         return atomslist

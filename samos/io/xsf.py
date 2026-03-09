@@ -194,8 +194,8 @@ def write_grid(data, outfilename=None, vals_per_line=5,):
 if __name__ == '__main__':
     from argparse import ArgumentParser
     p = ArgumentParser(
-        "Reads and writes an XSF file or a data file.\n"
-        "python temp.xsf -o grid.xyz")
+        'Reads and writes an XSF file or a data file.\n'
+        'python temp.xsf -o grid.xyz')
     p.add_argument('file', type=str)
     p.add_argument('--format', choices=['xsf', 'grid', 'none'],
                    default='grid',
