@@ -34,8 +34,8 @@ POS_BLOCK_REGEX_DECOMPOSED = re.compile("""
 
 def plot_charge(
         files, forces_list=None, fscale_factor=1.0, title=None, colormap='cool', color=None, invert_colors=False,
-        do_isosurface=False, contours=[0.0001, 0.001], only_total=False, size=(1280, 720), azimuth=155, elevation=70,
-        opacity=0.15, shift=None, savefig=None, atoms_of_interest=None, no_legend=False, log_rho=False,
+        do_isosurface=True, contours=[0.0001, 0.001], only_total=False, size=(1280, 720), azimuth=155, elevation=70,
+        distance=50, opacity=0.15, shift=None, savefig=None, atoms_of_interest=None, no_legend=False, log_rho=False,
         no_cell=False, repeat=(1, 1, 1), base_unit='bohr', legend_title=None):
     # ~ x, y, z = np.ogrid[-10:10:20j, -10:10:20j, -10:10:20j]
     # ~ s = np.sin(x*y*z)/(x*y*z)
@@ -231,7 +231,7 @@ def plot_charge(
     if title is not None:
         mlab.title(title, color=(0, 0, 0), height=0.97, size=8e-4*size[1])
     # ~ print mlab.title.__doc__
-    mlab.view(azimuth=azimuth, elevation=elevation, distance='auto')
+    mlab.view(azimuth=azimuth, elevation=elevation, distance=distance)
     # Show the 3d plot:
 
     if savefig:
@@ -331,6 +331,7 @@ if __name__ == '__main__':
     p.add_argument('--shift', type=float)
     p.add_argument('--elevation', type=float, default=70)
     p.add_argument('--azimuth', type=float, default=155)
+    p.add_argument('--distance', type=float, default=50)
     p.add_argument('--savefig', type=str, default=None)
     p.add_argument('--base-units', type=str, choices=('bohr', 'atomic', 'angstrom'),
                    help='units on which the density is based', default='bohr')
@@ -358,6 +359,6 @@ if __name__ == '__main__':
                 title=pa.title, do_isosurface=not (pa.no_iso), contours=pa.contours, only_total=pa.total,
                 size=pa.size, opacity=pa.opacity, shift=pa.shift, savefig=pa.savefig, atoms_of_interest=pa.atoms_of_interest,
                 no_legend=pa.no_legend, log_rho=pa.log_rho, no_cell=pa.no_cell, repeat=pa.repeat, base_unit=pa.base_units, legend_title=pa.legend_title,
-                azimuth=pa.azimuth, elevation=pa.elevation
+                azimuth=pa.azimuth, elevation=pa.elevation, distance=pa.distance
                 )
     # ~ plot_charge(read_charge(filename=pa.file))
