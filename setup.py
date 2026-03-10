@@ -35,9 +35,9 @@ class BuildPyWithFortran(build_py):
 
         cmd = [
             sys.executable, "-m", "numpy.f2py",
+            "--backend", "meson",
             "-c", os.path.basename(source_file),
             "-m", module_short_name,
-            "--f90flags=-fPIC",
         ]
 
         old_cwd = os.getcwd()

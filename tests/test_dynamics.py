@@ -64,7 +64,8 @@ class TestRecenter(unittest.TestCase):
         """Cross-check numpy result against the original Fortran routines.
         Skipped automatically if the Fortran extension is not compiled."""
         try:
-            from samos.lib.mdutils import recenter_positions, recenter_velocities
+            from samos.lib.mdutils import (
+                recenter_positions, recenter_velocities)
         except ImportError:
             self.skipTest("Fortran mdutils extension not available")
 
@@ -80,12 +81,66 @@ class TestRecenter(unittest.TestCase):
 
         t.recenter()
 
-        np.testing.assert_allclose(t.get_positions(), pos_fortran, atol=1e-12)
-        np.testing.assert_allclose(t.get_velocities(), vel_fortran, atol=1e-12)
+        np.testing.assert_allclose(t.get_positions(),
+                                   pos_fortran, atol=1e-12)
+        np.testing.assert_allclose(t.get_velocities(),
+                                   vel_fortran, atol=1e-12)
 
 
 class TestDynamics(unittest.TestCase):
     def test_1(self):
+        def compare_values(val1, val2, label):
+            # print("Comparing {}: {} vs {}".format(label, val1, val2))
+            # check if they are floats and compare approximately:
+            if isinstance(val1, float) or isinstance(val2, float):
+                if not np.isclose(val1, val2, atol=1e-6):
+                    print(f"Float mismatch at '{label}': {val1} != {val2}")
+                    return False
+            elif isinstance(val1, (list, tuple, np.ndarray)
+                            ) and isinstance(
+                                val2, (list, tuple, np.ndarray)):
+                if len(val1) != len(val2):
+                    print(
+                        "Length mismatch at "
+                        f"'{label}': {len(val1)} != {len(val2)}")
+                    return False
+                for i, (v1, v2) in enumerate(zip(val1, val2)):
+                    if not compare_values(v1, v2, f"{label}[{i}]"):
+                        return False
+            elif val1 != val2:
+                print(f"Value mismatch at '{label}': {val1} != {val2}")
+                return False
+            return True
+
+        def compare_dicts(d1, d2, name, path=''):
+            """Recursively compare two dictionaries and print differences."""
+            for key in d1:
+                if key not in d2:
+                    print(f"Key '{path + key}' missing in second dict")
+                    return False
+                val1 = d1[key]
+                val2 = d2[key]
+                if isinstance(val1, dict) and isinstance(val2, dict):
+                    if not compare_dicts(val1, val2, name, path + key + '.'):
+                        return False
+                # not lists but iterable:
+                elif hasattr(val1, '__iter__') and hasattr(val2, '__iter__'):
+                    # loop and use compare_values for each element:
+                    for i, (v1, v2) in enumerate(zip(val1, val2
+                                                     )):
+                        if not compare_values(v1, v2,
+                                              f"{path + key}[{i}] in {name}"):
+                            return False
+                else:
+                    if not compare_values(val1, val2,
+                                          f"{path + key} in {name}"):
+                        return False
+                # check if these are floats and compare approximately:
+            for key in d2:
+                if key not in d1:
+                    print(f"Key '{path + key}' missing in first dict")
+                    return False
+            return True
         from samos.trajectory import Trajectory
         from samos.analysis.dynamics import DynamicsAnalyzer
         from samos.utils.constants import bohr_to_ang
@@ -123,7 +178,13 @@ class TestDynamics(unittest.TestCase):
             # ~ json.dump(attrs , f)
             with open('ref/{}_H2O-64-300K.json'.format(name), 'r') as f:
                 ref_attrs = json.load(f)
-            self.assertEqual(ref_attrs, attrs)
+            if ref_attrs != attrs:
+                # compare key by key and value by value.
+                # Since the dictionary is nested, I need a
+                # recursive function to compare them.
+                result = compare_dicts(ref_attrs, attrs, name)
+                if not result:
+                    self.fail(f"Attributes of {name} do not match reference.")
 
         # Uncomment to test plot:
         # ~ from matplotlib import pyplot as plt
