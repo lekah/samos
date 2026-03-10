@@ -459,11 +459,13 @@ class Trajectory(AttributedArray):
         else:
             factors = [1] * len(self.atoms)
 
-        rel_masses = np.array(factors, dtype=float) * np.array(masses, dtype=float)
+        rel_masses = np.array(factors, dtype=float
+                              ) * np.array(masses, dtype=float)
         rel_masses /= rel_masses.sum()
         # com shape: (nstep, 3)
         com = np.einsum('a,sac->sc', rel_masses, self.get_positions())
         self.set_positions(self.get_positions() - com[:, np.newaxis, :])
         if 'velocities' in self.get_arraynames():
             com_vel = np.einsum('a,sac->sc', rel_masses, self.get_velocities())
-            self.set_velocities(self.get_velocities() - com_vel[:, np.newaxis, :])
+            self.set_velocities(
+                self.get_velocities() - com_vel[:, np.newaxis, :])

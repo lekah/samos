@@ -9,25 +9,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y gfortran pkg-config
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache python dependencies
         id: cache-pip
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: pip-${{ matrix.python-version }}-build-${{ hashFiles('**/requirements.txt', '**/setup.py') }}
+          key: pip-${{ matrix.python-version }}-build-${{ hashFiles('**/pyproject.toml', '**/setup.py') }}
           restore-keys:
             pip-${{ matrix.python-version }}-
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -40,8 +45,9 @@ jobs:
         run: |
           # pre-commit run --all-files || (git status --short; git diff; exit 1)
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude ./samos/io/xsf.py
+
       - name: Run tests
         run: |
           cd tests
-          python test_dynamics.py;
+          python test_dynamics.py
           python test_trajectory.py

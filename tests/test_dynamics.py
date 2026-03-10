@@ -85,7 +85,6 @@ class TestRecenter(unittest.TestCase):
 
 
 class TestDynamics(unittest.TestCase):
-
     def test_1(self):
         from samos.trajectory import Trajectory
         from samos.analysis.dynamics import DynamicsAnalyzer
