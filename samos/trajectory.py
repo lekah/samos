@@ -69,7 +69,7 @@ class Trajectory(AttributedArray):
         super(Trajectory, self).__init__(**kwargs)
 
     @classmethod
-    def from_atoms(cls, atoms_list, timestep_fs=None):
+    def from_atoms(cls, atoms_list, timestep_fs=None, add_arrays=None):
         """
         Instantiate a new class instance given a set of atoms
         """
@@ -77,14 +77,28 @@ class Trajectory(AttributedArray):
         chem_sym_set = set()
         for atoms in atoms_list:
             if not isinstance(atoms, Atoms):
-                raise TypeError("I have to receive a list/iterable over "
-                                "{}".format(Atoms))
+                raise TypeError('I have to receive a list/iterable over '
+                                '{}'.format(Atoms))
             chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
         if len(chem_sym_set) < 1:
-            raise ValueError("Empty list provided")
+            raise ValueError('Empty list provided')
         elif len(chem_sym_set) > 1:
-            raise ValueError("The chemical_symbols list of provided atoms "
-                             "are not the same for all, cannot proceed")
+            # let's try to fix that by reordering the atoms:
+            chem_sym_set = set()
+            for atoms in atoms_list:
+                order = np.argsort(atoms.get_atomic_numbers())
+                atoms.set_atomic_numbers(atoms.get_atomic_numbers()[order])
+                atoms.set_positions(atoms.get_positions()[order])
+                if atoms.get_velocities() is not None:
+                    atoms.set_velocities(atoms.get_velocities()[order])
+                try:
+                    atoms.set_forces(atoms.get_forces()[order])
+                except Exception:
+                    pass
+                chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
+            if len(chem_sym_set) > 1:
+                raise ValueError('The chemical_symbols list of provided atoms '
+                                 'are not the same for all, cannot proceed')
 
         positions = np.array([atoms.get_positions() for atoms in atoms_list])
         velocities = np.array([atoms.get_velocities() for atoms in atoms_list])
@@ -106,6 +120,13 @@ class Trajectory(AttributedArray):
             new.set_cells(cells)
         if timestep_fs is not None:
             new.set_timestep(timestep_fs)
+        if add_arrays is not None:
+            for key in add_arrays:
+                array = np.array([atoms.get_array(key) for atoms
+                                  in atoms_list])
+                new.set_array(key, array,
+                              check_existing=False,
+                              check_nstep=True)
         return new
 
     def _save_atoms(self, folder_name):
@@ -157,7 +178,6 @@ class Trajectory(AttributedArray):
         if not isinstance(atoms, Atoms):
             raise ValueError('You have to pass an instance of ase.Atoms')
         self._atoms = atoms
-
 
     @property
     def nat(self):
@@ -215,7 +235,6 @@ class Trajectory(AttributedArray):
             raise TypeError('species  has  to be an integer or a string, '
                             'I got {}'.format(type(species)))
         return np.where(msk)[0] + start
-    
 
     def set_positions(self, array, check_existing=False):
         """
@@ -256,8 +275,8 @@ class Trajectory(AttributedArray):
         """
         if self._VELOCITIES_KEY in self.get_arraynames():
             if not overwrite:
-                raise Exception("I am overwriting an existing velocity array"
-                                "Pass overwrite=True to allow")
+                raise Exception('I am overwriting an existing velocity array'
+                                'Pass overwrite=True to allow')
         pos = self.get_positions()
         timestep_fs = self.get_timestep()
         vel_first = (pos[1] - pos[0]) / timestep_fs
@@ -293,7 +312,7 @@ class Trajectory(AttributedArray):
                            check_existing=check_existing, check_nstep=True,
                            wanted_shape_1=6, wanted_shape_len=2)
         else:
-            raise ValueError("Not implemented order {}".format(order))
+            raise ValueError('Not implemented order {}'.format(order))
 
     def get_stress(self):
         return self.get_array(self._STRESS_KEY)
@@ -319,7 +338,7 @@ class Trajectory(AttributedArray):
         :returns: an ase.Atoms instance from the trajectory at step
         """
         assert isinstance(index, (int, np.int64)
-                          ), "step index has to be an integer"
+                          ), 'step index has to be an integer'
 
         need_calculator = False
         if not ignore_calculated:
@@ -346,11 +365,22 @@ class Trajectory(AttributedArray):
                 if need_calculator:
                     calc_kwargs['stress'] = v[index]
             else:
-                try:
-                    getattr(atoms, 'set_{}'.format(k))(v[index])
-                except AttributeError as e:
-                    if warnings:
-                        print(e)
+                shape = v[index].shape
+                if len(shape) > 0:
+                    if shape[0] == len(atoms):
+                        try:
+                            if hasattr(atoms, 'set_{}'.format(k)):
+                                getattr(atoms, 'set_{}'.format(k))(v[index])
+                            else:
+                                atoms.set_array(k, v[index])
+                        except Exception:
+                            pass
+                    else:
+                        print(f"Warning. Can't pass array {k} to atoms")
+                else:
+                    # this must be a single number
+                    atoms.info[k] = v[index]
+
         if need_calculator:
             calc = SinglePointCalculator(atoms, **calc_kwargs)
             atoms.set_calculator(calc)  # this seems to be deprecated,
@@ -369,21 +399,21 @@ class Trajectory(AttributedArray):
         if end is None:
             end = self.nstep
         assert isinstance(
-            start, int) and start >= 0, "start has to be a positive integer"
+            start, int) and start >= 0, 'start has to be a positive integer'
         assert isinstance(
-            end, int) and end >= 0, "end has to be a positive integer"
+            end, int) and end >= 0, 'end has to be a positive integer'
         assert isinstance(
             stepsize, int
-        ) and stepsize >= 0, "stepsize has to be a positive integer"
+        ) and stepsize >= 0, 'stepsize has to be a positive integer'
         if end > self.nstep:
             raise ValueError(
-                "End > nsteps, leave None and it will be set to nstep")
+                'End > nsteps, leave None and it will be set to nstep')
         indices = np.arange(start, end, stepsize)
 
         if len(indices) < 1:
-            raise ValueError("No indices for trajectory")
+            raise ValueError('No indices for trajectory')
         assert isinstance(
-            start, int) and start >= 0, "start has to be a positive integer"
+            start, int) and start >= 0, 'start has to be a positive integer'
         atomslist = [self.get_step_atoms(idx) for idx in indices]
 
         return atomslist
@@ -397,8 +427,6 @@ class Trajectory(AttributedArray):
             If given, the trajectory will be centered on the
             center of mass of that sublattice.
         """
-        from samos.lib.mdutils import recenter_positions, recenter_velocities
-
         # masses are either set to 1.0 (all) or to the actual masses
         # of the atoms
         # Setting to 1 means that the mass is not accounted for and the
@@ -430,7 +458,14 @@ class Trajectory(AttributedArray):
                         'this is not recognized'.format(type(item), item))
         else:
             factors = [1] * len(self.atoms)
-        self.set_positions(recenter_positions(self.get_positions(), masses, factors))
+
+        rel_masses = np.array(factors, dtype=float
+                              ) * np.array(masses, dtype=float)
+        rel_masses /= rel_masses.sum()
+        # com shape: (nstep, 3)
+        com = np.einsum('a,sac->sc', rel_masses, self.get_positions())
+        self.set_positions(self.get_positions() - com[:, np.newaxis, :])
         if 'velocities' in self.get_arraynames():
-            self.set_velocities(recenter_velocities(
-                self.get_velocities(), masses, factors))
+            com_vel = np.einsum('a,sac->sc', rel_masses, self.get_velocities())
+            self.set_velocities(
+                self.get_velocities() - com_vel[:, np.newaxis, :])

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 
@@ -8,20 +9,20 @@ from samos.plotting.plot_rdf import plot_rdf
 
 def main():
     filename = '../data/Al31-1200K-1ps.lammpstrj'
-    print(f"Set filename to {filename}")
+    print(f'Set filename to {filename}')
     traj = read_lammps_dump(filename, elements=['Al']*31)
 
-    print("Running Dynamics Analyzer")
+    print('Running Dynamics Analyzer')
     rdf_analyzer = RDF(trajectory=traj)
     res = rdf_analyzer.run(radius=6)
-    print("Making figure 1")
+    print('Making figure 1')
     fig = plt.figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
     plot_rdf(res, ax=ax)
     plt.savefig('rdf-plot1.png', dpi=150)
-    print("Arraynames are: " + ', '.join(res.get_arraynames()))
+    print('Arraynames are: ' + ', '.join(res.get_arraynames()))
 
-    print("Making figure 2")
+    print('Making figure 2')
     # creating my own plot
     fig = plt.figure(figsize=(8, 3))
     gs = GridSpec(1, 2, left=0.08, bottom=0.15, right=0.98)

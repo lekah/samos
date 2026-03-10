@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import numpy as np
 import sys
 
@@ -7,11 +8,11 @@ from ase.data import atomic_masses, chemical_symbols
 from samos.trajectory import Trajectory
 
 #  only matches positive integers
-integer_regex = re.compile('(?P<int>\d+)')  # noqa: W605
-float_regex = re.compile('(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
+integer_regex = re.compile(r'(?P<int>\d+)')  # noqa: W605
+float_regex = re.compile(r'(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
 
 
-def get_indices(header_list, prefix="", postfix=""):
+def get_indices(header_list, prefix='', postfix=''):
     try:
         idc = np.array([header_list.index(f'{prefix}{dim}{postfix}')
                         for dim in 'xyz'])
@@ -23,51 +24,51 @@ def get_indices(header_list, prefix="", postfix=""):
 def get_position_indices(header_list):
     # Unwrapped positions u, # scaled positions s
     # wrapped positions given as x y z
-    for postfix in ("u", "s", ""):
+    for postfix in ('u', 's', ''):
         found, idc = get_indices(header_list, prefix='',
                                  postfix=postfix)
         if found:
-            if postfix in ("s", ""):
-                print("Warning: I am not unwrapping positions,"
-                      " this is not yet implemented")
+            if postfix in ('s', ''):
+                print('Warning: I am not unwrapping positions,'
+                      ' this is not yet implemented')
             return postfix, idc
     if 'xsu' in header_list:
-        raise NotImplementedError("Do not support scaled"
-                                  " unwrapped coordinates")
+        raise NotImplementedError('Do not support scaled'
+                                  ' unwrapped coordinates')
 
-    raise TypeError("No position indices found")
+    raise TypeError('No position indices found')
 
 
 def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     assert len(lines) == 9
-    if not lines[0].startswith("ITEM: TIMESTEP"):
+    if not lines[0].startswith('ITEM: TIMESTEP'):
         raise Exception("Did not start with 'ITEM: TIMESTEP'\n"
-                        "Is this not a valid lammps dump file?")
+                        'Is this not a valid lammps dump file?')
     try:
         timestep = int(integer_regex.search(lines[1]).group('int'))
     except Exception as e:
-        print("Timestep is not an integer or was not found in "
-              f"line {lidx+1} ({lines[1]})")
+        print('Timestep is not an integer or was not found in '
+              f'line {lidx+1} ({lines[1]})')
         raise e
-    if not lines[2].startswith("ITEM: NUMBER OF ATOMS"):
-        raise Exception("Not a valid lammps dump file, "
-                        "expected NUMBER OF ATOMS")
+    if not lines[2].startswith('ITEM: NUMBER OF ATOMS'):
+        raise Exception('Not a valid lammps dump file, '
+                        'expected NUMBER OF ATOMS')
     try:
         nat = int(integer_regex.search(lines[3]).group('int'))
     except Exception as e:
-        print("Could not read number of atoms")
+        print('Could not read number of atoms')
         raise e
     cell = np.zeros((3, 3))
-    if lines[4].startswith("ITEM: BOX BOUNDS pp pp pp"):
+    if lines[4].startswith('ITEM: BOX BOUNDS pp pp pp'):
         try:
             for idim in range(3):
                 d1, d2 = [float(m.group('float'))
                           for m in float_regex.finditer(lines[5+idim])]
                 cell[idim, idim] = d2 - d1
         except Exception as e:
-            print(f"Could not read cell dimension {idim}")
+            print(f'Could not read cell dimension {idim}')
             raise e
-    elif lines[4].startswith("ITEM: BOX BOUNDS xy xz yz pp pp pp"):
+    elif lines[4].startswith('ITEM: BOX BOUNDS xy xz yz pp pp pp'):
         try:
             # see https://docs.lammps.org/dump.html
             # and https://docs.lammps.org/Howto_triclinic.html
@@ -84,18 +85,18 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             cell[2, 0] = xz
             cell[2, 1] = yz
         except Exception as e:
-            print(f"Could not read cell dimension {idim}")
+            print(f'Could not read cell dimension {idim}')
             raise e
     else:
-        raise ValueError("unsupported lammps dump file, "
-                         "expected  BOX BOUNDS pp pp pp or "
-                         "BOX BOUNDS xy xz yz pp pp pp")
+        raise ValueError('unsupported lammps dump file, '
+                         'expected  BOX BOUNDS pp pp pp or '
+                         'BOX BOUNDS xy xz yz pp pp pp')
     if start:
         if not quiet:
-            print(f"Read starting cell as:\n{cell}")
-        if not lines[8].startswith("ITEM: ATOMS"):
-            raise Exception("Not a supported format, expected ITEM: ATOMS")
-        header_list = lines[8].lstrip("ITEM: ATOMS").split()
+            print(f'Read starting cell as:\n{cell}')
+        if not lines[8].startswith('ITEM: ATOMS'):
+            raise Exception('Not a supported format, expected ITEM: ATOMS')
+        header_list = lines[8].lstrip('ITEM: ATOMS').split()
 
         atomid_idx = header_list.index('id')
         if not quiet:
@@ -103,37 +104,46 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
         try:
             element_idx = header_list.index('element')
             if not quiet:
-                print("Element found at index {element_idx}")
+                print('Element found at index {element_idx}')
         except ValueError:
             element_idx = None
         try:
             type_idx = header_list.index('type')
-            if not quiet: print("type found at index {type_idx}")
+            if not quiet:
+                print('type found at index {type_idx}')
         except ValueError:
             type_idx = None
         try:
             postype, posids = get_position_indices(header_list)
         except Exception:
-            print("Abandoning because positions are not given")
+            print('Abandoning because positions are not given')
             sys.exit(1)
         if not quiet:
-            print("Positions are given as: {}".format(
-                {'u': "unwrapped", 's': "Scaled (wrapped)",
-                "": "Wrapped"}[postype]))
-        if not quiet: print("Position indices are: {}".format(posids))
+            print('Positions are given as: {}'.format(
+                {'u': 'unwrapped', 's': 'Scaled (wrapped)',
+                 '': 'Wrapped'}[postype]))
+        if not quiet:
+            print('Position indices are: {}'.format(posids))
         has_vel, velids = get_indices(header_list, 'v')
         if has_vel:
-            if not quiet: print("Velocities found at indices: {}".format(velids))
+            if not quiet:
+                print('Velocities found at indices: {}'.format(velids))
         else:
-            if not quiet: print("Velocities were not found")
+            if not quiet:
+                print('Velocities were not found')
         has_frc, frcids = get_indices(header_list, 'f')
         if has_frc:
-            if not quiet: print("Forces found at indices: {}".format(frcids))
+            if not quiet:
+                print('Forces found at indices: {}'.format(frcids))
         else:
-            if not quiet: print("Forces were not found")
+            if not quiet:
+                print('Forces were not found')
         additional_ids = []
         if additional_kw:
             for kw in additional_kw:
+                if kw not in header_list:
+                    raise ValueError(f'Keyword {kw} not found in '
+                                     f'header ({header_list})')
                 additional_ids.append(header_list.index(kw))
 
         return (nat, atomid_idx, element_idx, type_idx, postype,
@@ -146,7 +156,7 @@ def pos_2_absolute(cell, pos, postype):
     """
     Transforming positions to absolute positions
     """
-    if postype in ("u", "w", ""):
+    if postype in ('u', 'w', ''):
         return pos
     elif postype == 's':
         return pos.dot(cell)
@@ -171,7 +181,7 @@ def read_lammps_dump(filename, elements=None,
                      elements_file=None, types=None, timestep=None,
                      mass_types=None,
                      thermo_file=None, thermo_pe=None, thermo_stress=None,
-                     save_extxyz=False, outfile=None,
+                     thermo_keywords=[], save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
                      skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
                      additional_keywords_dump=[], quiet=False,
@@ -195,6 +205,8 @@ def read_lammps_dump(filename, elements=None,
     :param thermo_stress:
         stress column in thermo file (as given in header,
         will do the _xx/_yy etc)
+    :param thermo_keywords:
+        The columns to read that are not pe or stress from the thermo dump
     :param save_extxyz:
         save to extxyz file
         (or if outfile is given with .extxyz)
@@ -232,9 +244,11 @@ def read_lammps_dump(filename, elements=None,
         # figuring out elements of structure
         if types is not None:
             if type_idx is None:
-                raise ValueError("types specified but not found in file")
+                raise ValueError('types specified but not found in file')
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
-            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
+            if not quiet:
+                print('types in body: {}'.format(', '.join(
+                    sorted(map(str, set(types_in_body))))))
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
         elif element_idx is not None:
@@ -253,8 +267,8 @@ def read_lammps_dump(filename, elements=None,
                 elements = line.strip().split()
                 if len(elements) != nat_must:
                     raise ValueError(
-                        f"length of list of elements ({len(elements)}) "
-                        f"is not equal number of atoms ({nat_must})")
+                        f'length of list of elements ({len(elements)}) '
+                        f'is not equal number of atoms ({nat_must})')
                 symbols = elements[:]
         elif mass_types is not None:
             # reading in masses from lammps input file stored in mass_types
@@ -264,7 +278,8 @@ def read_lammps_dump(filename, elements=None,
                 reading_masses = False
                 for line in fmass:
                     line = line.strip()
-                    if not line: continue
+                    if not line:
+                        continue
                     if reading_masses:
                         try:
                             typ, mass = line.split()[:2]
@@ -280,21 +295,22 @@ def read_lammps_dump(filename, elements=None,
             type_indices = np.array(type_indices, dtype=int)
             # small check whether all types are present
             if not np.all(np.arange(1, type_indices.max()+1) == type_indices):
-                raise ValueError("Types are not consecutive")
+                raise ValueError('Types are not consecutive')
             # trying to figure out elements
             if type_idx is None:
-                raise ValueError("types specified but not found in file")
+                raise ValueError('types specified but not found in file')
             types = []
             for mass in masses:
                 # finding the closest element based on its mass
                 idx = np.argmin(np.abs(atomic_masses - mass))
                 types.append(chemical_symbols[idx])
             types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
-            print("types in body: {}".format(', '.join(sorted(map(str, set(types_in_body))))))
-            print("symbols: {}".format(', '.join(types)))
+            if not quiet:
+                print('types in body: {}'.format(', '.join(
+                    sorted(map(str, set(types_in_body))))))
+                print('symbols: {}'.format(', '.join(types)))
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
-
 
         else:
             # last resort, setting everything to Hydrogen
@@ -318,13 +334,13 @@ def read_lammps_dump(filename, elements=None,
             step_info = [f.readline() for _ in range(9)]
             if ''.join(step_info) == '':
                 if not quiet:
-                    print(f"End reached at line {lidx}, stopping")
+                    print(f'End reached at line {lidx}, stopping')
                 break
             nat, timestep_, cell = read_step_info(
                 step_info, lidx=lidx, start=False, quiet=quiet)
             lidx += 9
             if nat != nat_must:
-                print("Changing number of atoms is not supported, breaking")
+                print('Changing number of atoms is not supported, breaking')
                 break
 
             # these are read as strings
@@ -350,8 +366,8 @@ def read_lammps_dump(filename, elements=None,
                                  dtype=float)[sorting_key])
             iframe += 1
     if not quiet:
-        print(f"Read trajectory of length {iframe}\n"
-            f"Creating Trajectory of length {len(timesteps)}")
+        print(f'Read trajectory of length {iframe}\n'
+              f'Creating Trajectory of length {len(timesteps)}')
     try:
         atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
         traj = Trajectory(atoms=atoms,
@@ -375,14 +391,16 @@ def read_lammps_dump(filename, elements=None,
             try:
                 indices.append(timesteps_thermo.index(ts))
             except ValueError:
-                raise ValueError(f"Index {ts} is not in thermo file")
+                raise ValueError(f'Index {ts} is not in thermo file')
         indices = np.array(indices, dtype=int)
         # if thermo_te:
         #     colidx = header.index(thermo_te)
         #     traj.set_total_energies(arr[indices, colidx])
+        headers_to_do = set(header)
         if thermo_pe:
             colidx = header.index(thermo_pe)
             traj.set_pot_energies(e_conv*arr[indices, colidx])
+            headers_to_do.remove(thermo_pe)
         if thermo_stress:
             stressall = []
             # voigt notation for stress:
@@ -390,9 +408,15 @@ def read_lammps_dump(filename, elements=None,
             # first diagonal terms:
             for key in keys:
                 fullkey = thermo_stress + key
+                headers_to_do.remove(fullkey)
                 colidx = header.index(fullkey)
                 stressall.append(s_conv*arr[indices, colidx])
             traj.set_stress(np.array(stressall).T)
+        for kw in thermo_keywords:
+            try:
+                traj.set_array(kw, arr[indices, header.index(kw)])
+            except Exception as e:
+                print(e)
         # if thermo_ke:
         #     colidx = header.index(thermo_ke)
         #     traj.set_kinetic_energies(arr[indices, colidx])
@@ -425,7 +449,7 @@ if __name__ == '__main__':
                               'as space-separated strings'))
     parser.add_argument('--mass-types',
                         help=('The input file of lammps containing '
-                                'the masses of the types'))
+                              'the masses of the types'))
     parser.add_argument('--timestep', type=float,
                         help='The timestep of the trajectory printed')
     parser.add_argument('--f-conv', type=float,
@@ -437,8 +461,9 @@ if __name__ == '__main__':
     parser.add_argument('--s-conv', type=float,
                         help='The conversion factor for stresses',
                         default=1.0)
-    parser.add_argument('-i', '--istep', type=int, default=1,
-                        help='Just take this frequency of steps from the trajectory')
+    parser.add_argument(
+        '-i', '--istep', type=int, default=1,
+        help='Just take this frequency of steps from the trajectory')
     parser.add_argument(
         '--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument(
@@ -447,6 +472,9 @@ if __name__ == '__main__':
     parser.add_argument('--thermo-stress',
                         help=('Thermo keyword for stress '
                               'without the xx/yy/xz..'))
+    parser.add_argument('-tk', '--thermo-keywords',
+                        nargs='*', default=[],
+                        help='The keywrods to read from the thermo file')
     parser.add_argument('--save-extxyz',
                         action='store_true',
                         help='save extxyz instead of traj')

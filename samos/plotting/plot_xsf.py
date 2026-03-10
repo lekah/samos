@@ -6,11 +6,9 @@ import sys
 import numpy as np
 import re
 from ase.data.colors import jmol_colors
-from ase.data import atomic_numbers, covalent_radii, chemical_symbols
+from ase.data import covalent_radii, chemical_symbols
 from ase import Atoms
-from tvtk.api import tvtk
 
-from ase.visualize.mlab import plot
 
 from samos.io.xsf import read_xsf
 
@@ -19,7 +17,7 @@ covalent_radii[3] *= 0.66
 EPSILON = 1e-8
 bohr_to_ang = 0.52917720859
 
-POS_REGEX_DECOMPOSED = re.compile("""
+POS_REGEX_DECOMPOSED = re.compile(r"""
 ^                                                   # Linestart
 [ \t]*                                              # Optional white space
 (?P<sym>[A-Za-z]+[A-Za-z0-9]*)                      # get the symbol
@@ -27,16 +25,20 @@ POS_REGEX_DECOMPOSED = re.compile("""
 """, re.X | re.M)
 
 
-POS_BLOCK_REGEX_DECOMPOSED = re.compile("""
+POS_BLOCK_REGEX_DECOMPOSED = re.compile(r"""
 ([A-Za-z]+[A-Za-z0-9]*\s+([ \t]+ [\-|\+]?  ( \d*[\.]\d+  | \d+[\.]?\d* )  ([E | e][+|-]?\d+)?)+\s*)+
 """, re.X | re.M)
 
 
 def plot_charge(
-        files, forces_list=None, fscale_factor=1.0, title=None, colormap='cool', color=None, invert_colors=False,
-        do_isosurface=True, contours=[0.0001, 0.001], only_total=False, size=(1280, 720), azimuth=155, elevation=70,
-        distance=50, opacity=0.15, shift=None, savefig=None, atoms_of_interest=None, no_legend=False, log_rho=False,
-        no_cell=False, repeat=(1, 1, 1), base_unit='bohr', legend_title=None):
+        files, forces_list=None, fscale_factor=1.0, title=None,
+        colormap='cool', color=None, invert_colors=False,
+        do_isosurface=False, contours=[0.0001, 0.001], only_total=False,
+        size=(1280, 720), azimuth=155, elevation=70,
+        distance=50, opacity=0.15, shift=None, savefig=None, atoms_of_interest=None,
+        no_legend=False, log_rho=False,
+        no_cell=False, repeat=(1, 1, 1), base_unit='bohr',
+        legend_title=None):
     # ~ x, y, z = np.ogrid[-10:10:20j, -10:10:20j, -10:10:20j]
     # ~ s = np.sin(x*y*z)/(x*y*z)
     if len(files) > 2:
@@ -104,7 +106,8 @@ def plot_charge(
                 cyls.glyph.glyph_source.glyph_source.shaft_radius = 0.2
                 cyls.glyph.glyph_source.glyph_source.tip_radius = 0.4
 
-                # t = mlab.text3d(pos[0], pos[1], pos[2], chemical_symbols[Z], color=(0,0,0), scale=.5)
+                # t = mlab.text3d(pos[0], pos[1], pos[2], chemical_symbols[Z],
+                #  color=(0,0,0), scale=.5)
 
     if forces_list is not None:
         opacity = 0.7
@@ -119,7 +122,8 @@ def plot_charge(
                 x, y, z = pos
                 if not only_total:
                     colors = iter(
-                        ((0.1, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), (1., 0.84, 0)))
+                        ((0.1, 0, 0), (1, 0, 0), (0, 1, 0),
+                         (0, 0, 1), (1., 0.84, 0)))
                 for u, v, w in vecs:
                     if not only_total:
                         color = next(colors)
@@ -132,15 +136,11 @@ def plot_charge(
                         scale_factor=fscale_factor,
                         opacity=opacity
                     )
-                    # ~ print cyls.glyph.glyph_source.glyph_source.__dict__.keys()
 
                     cyls.glyph.glyph_source.glyph_source.shaft_radius = 0.2 * \
                         min([np.sqrt(1./(u**2+v**2+w**2)), 4.5])
                     cyls.glyph.glyph_source.glyph_source.tip_radius = 0.4 * \
                         min([np.sqrt(1./(u**2+v**2+w**2)), 4.5])
-                    # ~ cyls.glyph.glyph_source.glyph_source.shaft_radius = np.sqrt(1./(u**2+v**2+w**2))
-                    # ~ cyls.glyph.glyph_source.glyph_source.shaft_radius = 0.3
-                    # total is the first 3 columns, so I break out of loop if I do not want to show the rest.
                     if only_total:
                         break
 
@@ -173,7 +173,7 @@ def plot_charge(
         elif base_unit in ('bohr', 'atomic'):
             total_charge *= bohr_to_ang**(-3)
         else:
-            raise NotImplemented
+            raise NotImplementedError(f'Unit {base_unit} not implemented')
         print('The total charge sums to {:6.3f} electrons'.format(
             total_charge))
         mean_charge_value = rho.sum() / rho.size
@@ -223,7 +223,8 @@ def plot_charge(
             cb.scalar_bar_representation.position = [0.05, 0.00]
             cb.scalar_bar_representation.position2 = [0.9, 0.14]
         if legend_title:
-            #        legend_title = "{} {}-density".format('log' if log_rho else '', '-'.join(atoms_of_interest))
+            #        legend_title = "{} {}-density".format('log'
+            #  if log_rho else '', '-'.join(atoms_of_interest))
             width = len(legend_title)*size[0]*0.00003
             mlab.text(0.5*(1-width), 0.0025, legend_title,
                       line_width=10, width=width, color=(0, 0, 0))
@@ -246,7 +247,8 @@ def read_forces(files, atoms_of_interest, take_difference=False):
     # ~ elif len(files)==2:
     # ~ print '2 forces files detected, taking difference'
     # ~ else:
-    # ~ raise Exception("unsupported number of files ({}) for forces".format(len(files)))
+    # ~ raise Exception("unsupported number of files ({})
+    # for forces".format(len(files)))
     forces = []
     for fname in files:
 
@@ -256,7 +258,8 @@ def read_forces(files, atoms_of_interest, take_difference=False):
                 [
                     list(map(float, pos_match.group('vals').split()))
                     for match in POS_BLOCK_REGEX_DECOMPOSED.finditer(f.read())
-                    for pos_match in POS_REGEX_DECOMPOSED.finditer(match.group(0))
+                    for pos_match
+                    in POS_REGEX_DECOMPOSED.finditer(match.group(0))
                     if pos_match.group('sym') in atoms_of_interest
 
                 ]
@@ -307,24 +310,28 @@ if __name__ == '__main__':
                    help='Do not show the isosurface')
     p.add_argument('--no-cell', action='store_true',
                    help='Do not show the cell')
-    # ~ p.add_argument('--diff', action='store_true', help='Show difference in forces')
+    # ~ p.add_argument('--diff', action='store_true',
+    # help='Show difference in forces')
     p.add_argument('-a', '--atoms-of-interest', type=str,
                    nargs='+')  # , default=['Li'])
     p.add_argument('-m', '--colormap', type=str,  default='spring')
-    p.add_argument('--color', nargs=3, type=float,
-                   help='Colors as RGB tuple in range 0->1 (overrides colormap setting)')
+    p.add_argument(
+        '--color', nargs=3, type=float,
+        help='Colors as RGB tuple in range 0->1 (overrides colormap setting)')
     p.add_argument('--invert-colors',
                    help='invert the colormap', action='store_true')
     p.add_argument(
-        '--log-rho', help='Convert the field to its logarithm', action='store_true')
+        '--log-rho',
+        help='Convert the field to its logarithm', action='store_true')
     p.add_argument('-c', '--contours', type=float, nargs='+')
     p.add_argument('-s', '--size', type=int, nargs=2, default=(1280, 720))
     p.add_argument('-t', '--title', type=str, help='title')
     p.add_argument('--legend-title', type=str, help='title')
     p.add_argument('-o', '--opacity', type=float,
                    help='opacity of iso surface', default=0.15)
-    p.add_argument('-d', '--diff', action='store_true',
-                   help='take difference (with respect to first force provided)')
+    p.add_argument(
+        '-d', '--diff', action='store_true',
+        help='take difference (with respect to first force provided)')
     p.add_argument('-r', '--repeat',  type=int, nargs=3, default=(1, 1, 1))
     p.add_argument('--total', action='store_true',
                    help='Show only total force')
@@ -333,15 +340,17 @@ if __name__ == '__main__':
     p.add_argument('--azimuth', type=float, default=155)
     p.add_argument('--distance', type=float, default=50)
     p.add_argument('--savefig', type=str, default=None)
-    p.add_argument('--base-units', type=str, choices=('bohr', 'atomic', 'angstrom'),
-                   help='units on which the density is based', default='bohr')
+    p.add_argument(
+        '--base-units', type=str, choices=('bohr', 'atomic', 'angstrom'),
+        help='units on which the density is based', default='bohr')
 
     # ~ p.add_argument('--histo', action='store_true')
     pa = p.parse_args(sys.argv[1:])
 
     if pa.forces is not None:
         forces_list = []
-        for forces in read_forces(pa.forces, pa.atoms_of_interest, take_difference=pa.diff):
+        for forces in read_forces(pa.forces, pa.atoms_of_interest,
+                                  take_difference=pa.diff):
             forces = pa.fstretch*forces
             nat, idim = forces.shape
 
@@ -355,10 +364,15 @@ if __name__ == '__main__':
     else:
         forces_list = None
 
-    plot_charge(pa.files, forces_list=forces_list, fscale_factor=pa.fscale, colormap=pa.colormap, color=tuple(pa.color) if pa.color else None, invert_colors=pa.invert_colors,
-                title=pa.title, do_isosurface=not (pa.no_iso), contours=pa.contours, only_total=pa.total,
-                size=pa.size, opacity=pa.opacity, shift=pa.shift, savefig=pa.savefig, atoms_of_interest=pa.atoms_of_interest,
-                no_legend=pa.no_legend, log_rho=pa.log_rho, no_cell=pa.no_cell, repeat=pa.repeat, base_unit=pa.base_units, legend_title=pa.legend_title,
-                azimuth=pa.azimuth, elevation=pa.elevation, distance=pa.distance
-                )
+    plot_charge(
+        pa.files, forces_list=forces_list, fscale_factor=pa.fscale,
+        colormap=pa.colormap, color=tuple(pa.color) if pa.color else None,
+        invert_colors=pa.invert_colors, title=pa.title,
+        do_isosurface=not (pa.no_iso), contours=pa.contours,
+        only_total=pa.total, size=pa.size, opacity=pa.opacity, shift=pa.shift,
+        savefig=pa.savefig, atoms_of_interest=pa.atoms_of_interest,
+        no_legend=pa.no_legend, log_rho=pa.log_rho, no_cell=pa.no_cell,
+        repeat=pa.repeat, base_unit=pa.base_units,
+        legend_title=pa.legend_title, azimuth=pa.azimuth,
+        elevation=pa.elevation, distance=pa.distance)
     # ~ plot_charge(read_charge(filename=pa.file))

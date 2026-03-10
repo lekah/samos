@@ -134,8 +134,8 @@ class RDF(BaseAnalyzer):
         if istop is None:
             istop = len(positions)
         elif istop >= len(positions):
-            raise ValueError("Istop ({}) is higher than (or equal to) "
-                             "number of positions ({})".format(
+            raise ValueError('Istop ({}) is higher than (or equal to) '
+                             'number of positions ({})'.format(
                                  istop, len(positions)))
         if species_pairs is None:
             species_pairs = sorted(list(
@@ -162,6 +162,7 @@ class RDF(BaseAnalyzer):
         binsize = float(radius)/nbins
 
         # wrapping the positions:
+        shortest_distance_all = np.inf
         for label, (ind1, ind2) in zip(labels, indices_pairs):
             if ind1 == ind2:
                 # lists are equal, I will therefore not double calculate
@@ -204,6 +205,8 @@ class RDF(BaseAnalyzer):
                 #  into periodic cell
                 shortest_distances = cdist(
                     diff_real_wrapped, corners).min(axis=1)
+                shortest_distance_all = min([shortest_distance_all,
+                                             shortest_distances.min()])
                 hist += prefactor * \
                     (np.histogram(shortest_distances, bins=nbins,
                      range=(0, radius))[0]).astype(float)
@@ -224,7 +227,8 @@ class RDF(BaseAnalyzer):
             rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
             rdf_res.set_attr('n_data_{}'.format(label),
                              len(pairs_of_atoms) * ((istop-istart)//stepsize))
-
+            rdf_res.set_attr('shortest_distance',
+                             shortest_distance_all)
         return rdf_res
 
 
@@ -263,24 +267,33 @@ class AngularSpectrum(BaseAnalyzer):
 
 
 def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
-                      species_pairs=None, savefig=None, plot=False,
-                      printrdf=False, no_int=False):
+                      species_pairs=None, species=None, savefig=None,
+                      plot=False, printrdf=False, no_int=False, index=':'):
     if trajectory_path.endswith('.extxyz'):
         from ase.io import read
-        aselist = read(trajectory_path, format='extxyz', index=':')
+        aselist = read(trajectory_path, format='extxyz', index=index)
         traj = Trajectory.from_atoms(aselist)
     else:
         traj = Trajectory.load_file(trajectory_path)
-    print("Read trajectory of shape {}".format(traj.get_positions().shape))
+    print('Read trajectory of shape {}'.format(traj.get_positions().shape))
     if species_pairs:
         species_pairs_ = []
         for spec in species_pairs:
             species_pairs_.append(spec.split('-'))
+    elif species:
+        species_pairs_ = []
+        other_species = [s for s in traj.get_atoms().get_chemical_symbols()
+                         if s not in species]
+        for thisspec in species:
+            for otherspec in other_species:
+                species_pairs_.append((thisspec, otherspec))
     else:
         species_pairs_ = None
     rdf = RDF(trajectory=traj)
     res = rdf.run(radius=radius, stepsize=stepsize,
                   nbins=bins, species_pairs=species_pairs_)
+    print('Shortest distance: {}'.format(
+        res.get_attr('shortest_distance')))
     if plot or savefig:
         from samos.plotting.plot_rdf import plot_rdf
         from matplotlib import pyplot as plt
@@ -314,7 +327,7 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
-    parser = ArgumentParser("analysis/plot of a RDF, given a trajectory")
+    parser = ArgumentParser('analysis/plot of a RDF, given a trajectory')
     parser.add_argument('trajectory_path')
     parser.add_argument('-r', '--radius', required=False, type=float,
                         default=5.0,
@@ -324,15 +337,23 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--stepsize', type=int,
                         help='Stepsize over the trajectory, defaults to 1',
                         default=1)
-    parser.add_argument('--species-pairs', nargs='+',
-                        help=('species pairs separated by a dash, e.g., '
-                              '--species-pairs C-O O-O'))
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        '--species-pairs', nargs='+',
+        help=('species pairs separated by a space between pairs and a'
+              ' dash within the pair, e.g., '
+              '--species C-O O-O'))
+    group.add_argument(
+        '--species', nargs='+',
+        help=('species separated by a space, e.g., --species C O'))
     parser.add_argument('--printrdf',
                         help='Print the RDF to a file as a csv',)
     parser.add_argument('--plot', action='store_true',
                         help='Plot the RDF to screen')
     parser.add_argument('--no-int', action='store_true',
                         help='dont plot integral')
+    parser.add_argument('-i', '--index', type=str, default=':',
+                        help='index to read from trajectory, default is all')
     parser.add_argument(
         '--savefig',
         help='Where to save figure (will otherwise show on screen)')

@@ -28,7 +28,7 @@ class CombinedBuild(build_ext):
         self.extensions = cpp_exts
         build_ext.run(self)
 
-        # Python < 3.12: numpy.distutils is used by f2py but the stdlib env var 
+        # Python < 3.12: numpy.distutils is used by f2py but the stdlib env var
         # bypasses that by using Python's own distutils instead of setuptools.
         # Python >= 3.12: distutils is removed, numpy.f2py uses the meson backend.
         if sys.version_info >= (3, 12):

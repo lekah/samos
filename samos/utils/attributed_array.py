@@ -52,18 +52,18 @@ class AttributedArray(object):
         if wanted_shape_len:
             if len(array.shape) != wanted_shape_len:
                 raise TypeError(
-                    f"array {name} is of wrong type, has to be of "
-                    f"dimension {wanted_shape_len}")
+                    f'array {name} is of wrong type, has to be of '
+                    f'dimension {wanted_shape_len}')
         if wanted_shape_1:
             if array.shape[1] != wanted_shape_1:
                 raise IndexError(
-                    f"1st dimension of array {name} has to "
-                    f"be {wanted_shape_1}")
+                    f'1st dimension of array {name} has to '
+                    f'be {wanted_shape_1}')
         if wanted_shape_2:
             if array.shape[2] != wanted_shape_2:
                 raise IndexError(
-                    f"2nd dimension of array {name} has "
-                    f"to be {wanted_shape_2}")
+                    f'2nd dimension of array {name} has '
+                    f'to be {wanted_shape_2}')
         if check_nstep:
             if self._nstep is None:
                 self._nstep = array.shape[0]
@@ -92,8 +92,8 @@ class AttributedArray(object):
         :returns: The number of trajectory steps
         :raises: ValueError if no unique number of steps can be determined.
         """
-        if self._nstep is None:
-            raise ValueError('Number of steps has not been set')
+        # if self._nstep is None:
+        #     raise ValueError('Number of steps has not been set')
         return self._nstep
 
     def get_array(self, name):
@@ -150,7 +150,7 @@ class AttributedArray(object):
 
     def remove_array(self, arrayname):
         if arrayname not in self._arrays:
-            raise KeyError(f"{arrayname} is not one of arrays")
+            raise KeyError(f'{arrayname} is not one of arrays')
         del self._arrays[arrayname]
 
     def _save_attributes(self, folder_name):
