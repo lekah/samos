@@ -5,6 +5,7 @@
 
 
 
+! DEPRECATED: replaced by numpy in Trajectory.recenter() (trajectory.py)
 SUBROUTINE recenter_positions(positions, masses, factors, positions_, nstep, nat)
     implicit none
     INTEGER, intent(in)                             ::  nstep, nat
@@ -43,6 +44,7 @@ SUBROUTINE recenter_positions(positions, masses, factors, positions_, nstep, nat
 END SUBROUTINE recenter_positions
 
 
+! DEPRECATED: replaced by numpy in Trajectory.recenter() (trajectory.py)
 SUBROUTINE recenter_velocities(velocities, masses, factors, velocities_, nstep, nat)
     implicit none
     ! Make the center of mass velocity disappear

@@ -427,8 +427,6 @@ class Trajectory(AttributedArray):
             If given, the trajectory will be centered on the
             center of mass of that sublattice.
         """
-        from samos.lib.mdutils import recenter_positions, recenter_velocities
-
         # masses are either set to 1.0 (all) or to the actual masses
         # of the atoms
         # Setting to 1 means that the mass is not accounted for and the
@@ -460,8 +458,12 @@ class Trajectory(AttributedArray):
                         'this is not recognized'.format(type(item), item))
         else:
             factors = [1] * len(self.atoms)
-        self.set_positions(recenter_positions(
-            self.get_positions(), masses, factors))
+
+        rel_masses = np.array(factors, dtype=float) * np.array(masses, dtype=float)
+        rel_masses /= rel_masses.sum()
+        # com shape: (nstep, 3)
+        com = np.einsum('a,sac->sc', rel_masses, self.get_positions())
+        self.set_positions(self.get_positions() - com[:, np.newaxis, :])
         if 'velocities' in self.get_arraynames():
-            self.set_velocities(recenter_velocities(
-                self.get_velocities(), masses, factors))
+            com_vel = np.einsum('a,sac->sc', rel_masses, self.get_velocities())
+            self.set_velocities(self.get_velocities() - com_vel[:, np.newaxis, :])

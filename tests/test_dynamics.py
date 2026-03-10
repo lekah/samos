@@ -1,6 +1,87 @@
 # -*- coding: utf-8 -*-
 
 import unittest
+import numpy as np
+from ase import Atoms
+from samos.trajectory import Trajectory
+
+
+class TestRecenter(unittest.TestCase):
+    """Tests for Trajectory.recenter(), which replaced the Fortran
+    recenter_positions / recenter_velocities routines."""
+
+    def _make_trajectory(self, seed=42):
+        rng = np.random.default_rng(seed)
+        # 5 atoms (3 H, 2 O), 20 steps
+        atoms = Atoms('H3O2')
+        pos = rng.random((20, 5, 3))
+        vel = rng.random((20, 5, 3))
+        t = Trajectory(atoms=atoms, timestep=1.0)
+        t.set_positions(pos)
+        t.set_velocities(vel)
+        return t
+
+    def _weighted_com(self, array, rel_masses):
+        """array: (nstep, nat, 3), rel_masses: (nat,) normalised"""
+        return np.einsum('a,sac->sc', rel_masses, array)  # (nstep, 3)
+
+    def test_recenter_full_com_is_zero(self):
+        t = self._make_trajectory()
+        masses = t.atoms.get_masses()
+        rel_masses = masses / masses.sum()
+
+        t.recenter()
+
+        com_pos = self._weighted_com(t.get_positions(), rel_masses)
+        com_vel = self._weighted_com(t.get_velocities(), rel_masses)
+        np.testing.assert_allclose(com_pos, 0.0, atol=1e-12)
+        np.testing.assert_allclose(com_vel, 0.0, atol=1e-12)
+
+    def test_recenter_geometric_com_is_zero(self):
+        t = self._make_trajectory()
+        nat = len(t.atoms)
+        rel_masses = np.ones(nat) / nat
+
+        t.recenter(mode='geometric')
+
+        com_pos = self._weighted_com(t.get_positions(), rel_masses)
+        np.testing.assert_allclose(com_pos, 0.0, atol=1e-12)
+
+    def test_recenter_sublattice_com_is_zero(self):
+        """Only the O sublattice COM should be zeroed."""
+        t = self._make_trajectory()
+        masses = t.atoms.get_masses()
+        # O atoms are indices 3 and 4 in 'H3O2'
+        factors = np.array([0, 0, 0, 1, 1], dtype=float)
+        rel_masses = (factors * masses) / (factors * masses).sum()
+
+        t.recenter(sublattice=['O'])
+
+        com_pos = self._weighted_com(t.get_positions(), rel_masses)
+        np.testing.assert_allclose(com_pos, 0.0, atol=1e-12)
+
+    def test_recenter_matches_fortran(self):
+        """Cross-check numpy result against the original Fortran routines.
+        Skipped automatically if the Fortran extension is not compiled."""
+        try:
+            from samos.lib.mdutils import recenter_positions, recenter_velocities
+        except ImportError:
+            self.skipTest("Fortran mdutils extension not available")
+
+        t = self._make_trajectory()
+        masses = t.atoms.get_masses().astype(float)
+        factors = np.ones(len(t.atoms), dtype=int)
+
+        pos = t.get_positions()
+        vel = t.get_velocities()
+
+        pos_fortran = recenter_positions(pos, masses, factors)
+        vel_fortran = recenter_velocities(vel, masses, factors)
+
+        t.recenter()
+
+        np.testing.assert_allclose(t.get_positions(), pos_fortran, atol=1e-12)
+        np.testing.assert_allclose(t.get_velocities(), vel_fortran, atol=1e-12)
 
 
 class TestDynamics(unittest.TestCase):

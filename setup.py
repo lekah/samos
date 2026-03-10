@@ -1,71 +1,77 @@
 import os
 import sys
+import glob
+import shutil
 import subprocess
 from setuptools import setup
-from setuptools.command.build_ext import build_ext
+from setuptools.command.build_py import build_py
 
-class F2pyBuildExt(build_ext):
-    """Custom build command to compile Fortran files using f2py directly."""
-    
+
+class BuildPyWithFortran(build_py):
+    """Extend build_py to also compile Fortran extensions via f2py."""
+
     def run(self):
-        # Ensure numpy is available
-        try:
-            import numpy
-            numpy_include = numpy.get_include()
-        except ImportError:
-            raise RuntimeError("NumPy must be installed to build extensions.")
-        
-        # We do NOT call super().run() here because that triggers the standard 
-        # Extension compilation logic which fails on .f90 files.
-        # Instead, we compile everything manually.
-        
-        # Define the modules to build
+        # First do the normal Python build
+        super().run()
+
+        # numpy is guaranteed by pyproject.toml build requirements
         modules = [
             ('samos.lib.gaussian_density', 'samos/lib/gaussian_density.f90'),
-            ('samos.lib.mdutils', 'samos/lib/mdutils.f90'),
-            ('samos.lib.rdf', 'samos/lib/rdf.f90'),
+            ('samos.lib.mdutils',          'samos/lib/mdutils.f90'),
+            ('samos.lib.rdf',              'samos/lib/rdf.f90'),
         ]
-        
-        for module_name, source_file in modules:
-            self.build_module(module_name, source_file, numpy_include)
 
-    def build_module(self, module_name, source_file, numpy_include):
-        """Compile a single Fortran module using f2py."""
+        for module_name, source_file in modules:
+            self._build_f2py_module(module_name, source_file)
+
+    def _build_f2py_module(self, module_name, source_file):
         if not os.path.exists(source_file):
-            print(f"Warning: Source file {source_file} not found, skipping.")
+            print(f"Warning: {source_file} not found, skipping.")
             return
 
         source_dir = os.path.dirname(os.path.abspath(source_file))
         module_short_name = module_name.split('.')[-1]
-        
-        # Construct the f2py command
-        # We use the system f2py module
+        package_path = os.path.join(*module_name.split('.')[:-1])  # e.g. samos/lib
+
         cmd = [
             sys.executable, "-m", "numpy.f2py",
-            "-c", source_file,
+            "-c", os.path.basename(source_file),
             "-m", module_short_name,
-            f"--include-paths={numpy_include}",
-            "--f90flags=-fPIC"
+            "--f90flags=-fPIC",
         ]
-        
-        # Change to the source directory to run f2py
+
         old_cwd = os.getcwd()
         try:
             os.chdir(source_dir)
             print(f"Compiling {source_file} -> {module_short_name}...")
-            subprocess.check_call(cmd)
-            
-            # f2py creates the .so file in the current directory (source_dir)
-            # We need to move it to the correct package location if building inplace
-            # or let setuptools handle the installation later.
-            # For 'build_ext --inplace', the .so ends up in source_dir, which is correct
-            # if source_dir is part of the package (samos/lib/).
-            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr)
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, cmd)
         except subprocess.CalledProcessError as e:
             print(f"Error compiling {source_file}: {e}")
             raise
         finally:
             os.chdir(old_cwd)
+
+        # Copy the compiled .so into the build lib directory so it gets installed
+        pattern = os.path.join(source_dir, f"{module_short_name}*.so")
+        so_files = glob.glob(pattern)
+        if not so_files:
+            # Also check for .pyd on Windows
+            pattern = os.path.join(source_dir, f"{module_short_name}*.pyd")
+            so_files = glob.glob(pattern)
+
+        dest_dir = os.path.join(self.build_lib, package_path)
+        os.makedirs(dest_dir, exist_ok=True)
+        for so in so_files:
+            dest = os.path.join(dest_dir, os.path.basename(so))
+            print(f"Copying {so} -> {dest}")
+            shutil.copy2(so, dest)
+
 
 if __name__ == '__main__':
     setup_kwargs = {
@@ -98,11 +104,9 @@ if __name__ == '__main__':
         'name': 'samos',
         'url': 'https://github.com/lekah/samos',
         'version': '0.8',
-        'packages': ['samos', 'samos.lib'],
+        'packages': ['samos', 'samos.lib', 'samos.utils', 'samos.io', 'samos.analysis', 'samos.plotting'],
         'package_data': {'samos.lib': ['*.f90']},
-        # IMPORTANT: Do NOT include ext_modules here. 
-        # The custom build command handles everything.
-        'cmdclass': {'build_ext': F2pyBuildExt},
+        'cmdclass': {'build_py': BuildPyWithFortran},
     }
 
     setup(**setup_kwargs)
