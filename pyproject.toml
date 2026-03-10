@@ -1,0 +1,45 @@
+[build-system]
+# meson + ninja are needed by numpy.f2py on Python >= 3.12 (meson backend replaces
+# numpy.distutils which was removed from numpy 2.x / Python 3.12).
+requires = ["setuptools>=61", "wheel", "pybind11>=2.6", "numpy", "meson>=1.1", "ninja"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "samos"
+version = "0.7.1"
+description = "Package for Analysis and Tricks for MOlecular Simulations: a set of useful tools to analyze molecular dynamics trajectoris"
+license = {text = "MIT License"}
+authors = [{name = "Leonid Kahle", email = "leonid.kahle@epfl.ch"}]
+requires-python = ">=3.6"
+dependencies = [
+    "numpy>=1.14.0",
+    "ase>=3.17.0",
+    "scipy>=1.0.0",
+    "matplotlib>=2.1.2",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+pre-commit = ["pre-commit", "flake8"]
+tests = ["pytest"]
+docs = ["Sphinx", "docutils", "sphinx_rtd_theme"]
+
+[project.urls]
+Homepage = "https://github.com/lekah/samos"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+"*" = ["*.f90", "*.cpp"]

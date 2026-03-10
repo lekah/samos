@@ -1,51 +1,66 @@
 # -*- coding: utf-8 -*-
+# Metadata is declared in pyproject.toml.
+# This file handles only the C++ (pybind11) and Fortran (f2py) extension builds.
 
 import os
-from setuptools import find_packages, setup, Extension
-from json import load as json_load
+import sys
+from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
+from pybind11.setup_helpers import Pybind11Extension
 
-ext1 = Extension(
-        name = 'samos.lib.gaussian_density',
-        sources = ['samos/lib/gaussian_density.f90'],
-    )
-ext2 = Extension(
-        name = 'samos.lib.mdutils',
-        sources = ['samos/lib/mdutils.f90'],
-    )
-ext3 = Extension(
-        name = 'samos.lib.rdf',
-        sources = ['samos/lib/rdf.f90'],
-    )
 
 class f2py_Extension(Extension):
 
     def __init__(self, name, sourcedirs):
         Extension.__init__(self, name, sources=[])
-        self.sourcedirs = [os.path.abspath(sourcedir) for sourcedir in sourcedirs]
+        self.sourcedirs = [os.path.abspath(s) for s in sourcedirs]
         self.dirs = sourcedirs
 
-class f2py_Build(build_ext):
+
+class CombinedBuild(build_ext):
+    """Builds f2py (Fortran) and pybind11 (C++) extensions in one pass."""
 
     def run(self):
-        for ext in self.extensions:
-            self.build_extension(ext)
+        f2py_exts = [e for e in self.extensions if isinstance(e, f2py_Extension)]
+        cpp_exts  = [e for e in self.extensions if not isinstance(e, f2py_Extension)]
 
-    def build_extension(self, ext):
-        for index, to_compile in enumerate(ext.sourcedirs):
-            module_loc = os.path.split(ext.dirs[index])[0]
-            module_name = os.path.split(to_compile)[1].split('.')[0]
-            os.system('cd %s;f2py -c %s -m %s' % (module_loc,to_compile,module_name))
+        # Standard setuptools path initialises the compiler; run for C++ only.
+        self.extensions = cpp_exts
+        build_ext.run(self)
 
-if __name__ == '__main__':
-    with open('setup.json', 'r') as info:
-        kwargs = json_load(info)
-    setup(
-        include_package_data=True,
-        packages=find_packages(),
-        package_data = {'': ['*.f90']},
-        ## Following inexplicably works even though there is single name for all 3 f90 files
-        ext_modules = [f2py_Extension('fortran_lib', ['samos/lib/gaussian_density.f90', 'samos/lib/mdutils.f90', 'samos/lib/rdf.f90'])],
-        cmdclass=dict(build_ext=f2py_Build),
-        **kwargs
-    )
+        # Python < 3.12: numpy.distutils is used by f2py but the stdlib env var 
+        # bypasses that by using Python's own distutils instead of setuptools.
+        # Python >= 3.12: distutils is removed, numpy.f2py uses the meson backend.
+        if sys.version_info >= (3, 12):
+            env_prefix = ''
+        else:
+            env_prefix = 'SETUPTOOLS_USE_DISTUTILS=stdlib '
+
+        for ext in f2py_exts:
+            for i, src in enumerate(ext.sourcedirs):
+                module_loc = os.path.split(ext.dirs[i])[0]
+                module_name = os.path.split(src)[1].split('.')[0]
+                os.system(
+                    'cd %s; %s%s -m numpy.f2py -c %s -m %s'
+                    % (module_loc, env_prefix, sys.executable, src, module_name)
+                )
+
+        self.extensions = cpp_exts + f2py_exts
+
+
+setup(
+    ext_modules=[
+        f2py_Extension('fortran_lib', [
+            'samos/lib/gaussian_density.f90',
+            'samos/lib/mdutils.f90',
+            'samos/lib/rdf.f90',
+        ]),
+        Pybind11Extension(
+            'samos.lib.mdutils_cpp_omp',
+            ['samos/lib/mdutils_cpp_omp.cpp'],
+            extra_compile_args=['-O3', '-fopenmp'],
+            extra_link_args=['-fopenmp'],
+        ),
+    ],
+    cmdclass=dict(build_ext=CombinedBuild),
+)
