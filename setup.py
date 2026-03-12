@@ -2,7 +2,10 @@
 # Metadata is declared in pyproject.toml.
 # This file handles only the C++ (pybind11) and Fortran (f2py) extension builds.
 
+import glob
 import os
+import shutil
+import subprocess
 import sys
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
@@ -28,22 +31,25 @@ class CombinedBuild(build_ext):
         self.extensions = cpp_exts
         build_ext.run(self)
 
-        # Python < 3.12: numpy.distutils is used by f2py but the stdlib env var
-        # bypasses that by using Python's own distutils instead of setuptools.
-        # Python >= 3.12: distutils is removed, numpy.f2py uses the meson backend.
-        if sys.version_info >= (3, 12):
-            env_prefix = ''
-        else:
-            env_prefix = 'SETUPTOOLS_USE_DISTUTILS=stdlib '
+        use_stdlib_distutils = sys.version_info < (3, 12)
 
         for ext in f2py_exts:
             for i, src in enumerate(ext.sourcedirs):
                 module_loc = os.path.split(ext.dirs[i])[0]
                 module_name = os.path.split(src)[1].split('.')[0]
-                os.system(
-                    'cd %s; %s%s -m numpy.f2py -c %s -m %s'
-                    % (module_loc, env_prefix, sys.executable, src, module_name)
+                env = os.environ.copy()
+                if use_stdlib_distutils:
+                    env['SETUPTOOLS_USE_DISTUTILS'] = 'stdlib'
+                subprocess.check_call(
+                    [sys.executable, '-m', 'numpy.f2py', '-c', src, '-m', module_name],
+                    cwd=module_loc, env=env
                 )
+                # Copy the built .so into the build tree so setuptools includes
+                # it in non-editable installs (regular pip install).
+                dest_dir = os.path.join(self.build_lib, module_loc)
+                os.makedirs(dest_dir, exist_ok=True)
+                for so in glob.glob(os.path.join(module_loc, module_name + '*.so')):
+                    shutil.copy(so, dest_dir)
 
         self.extensions = cpp_exts + f2py_exts
 
