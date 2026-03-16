@@ -469,3 +469,31 @@ class Trajectory(AttributedArray):
             com_vel = np.einsum('a,sac->sc', rel_masses, self.get_velocities())
             self.set_velocities(
                 self.get_velocities() - com_vel[:, np.newaxis, :])
+
+    def transform_species(self, target):
+        """
+        Relabel every atom in the trajectory as *target* in-place.
+
+        This is useful when the analysis should treat a multi-species
+        trajectory as a single-component system — for example, computing
+        a collective MSD for a sublattice without filtering by element.
+
+        Two storage locations must be kept in sync:
+
+        * ``self._atoms`` — the ASE :class:`~ase.Atoms` object that
+          holds chemical symbols and masses.  Setting new symbols here
+          also updates per-atom masses via ASE's internal table, which
+          matters for mass-weighted operations such as :meth:`recenter`.
+        * The ``_TYPES_KEY`` array — an optional override stored in the
+          :class:`~samos.utils.attributed_array.AttributedArray` that
+          :meth:`get_types` checks before falling back to ``_atoms``.
+          If present it must be overwritten; otherwise callers going
+          through :meth:`get_types` would still see the old labels.
+
+        :param str target:
+            Chemical symbol of the target species (e.g. ``'H'``).
+        """
+        nat = len(self._atoms)
+        self._atoms.set_chemical_symbols([target] * nat)
+        if self._TYPES_KEY in self.get_arraynames():
+            self.set_types([target] * nat)
