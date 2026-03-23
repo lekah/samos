@@ -322,7 +322,8 @@ class DynamicsAnalyzer(object):
                 stepsize_t, stepsize_tau, block_length_dt, do_com,
                 do_long, t_long_end_dt, t_long_factor)
 
-    def get_msd(self, decomposed=False, atom_indices=None, **kwargs):
+    def get_msd(self, decomposed=False, atom_indices=None,
+                backend='fortran', num_threads=None, **kwargs):
         """
         Calculates the mean square discplacement (MSD),
 
@@ -341,6 +342,12 @@ class DynamicsAnalyzer(object):
             for example [0, 1, 2, 5].
             The intersection of atom_indices and species_of_interest
             is taken, so aotm_indices can be used to narrow the list of atoms
+        :param str backend:
+            Which backend to use for MSD kernel: 'cpp' (OpenMP
+            parallelised) or 'fortran' (default).
+        :param int num_threads:
+            Number of OpenMP threads for the C++ backend. Only used when
+            backend='cpp'. Defaults to the current OMP_NUM_THREADS setting.
         :param **kwargs:
             All other parameters required by
             DynamicsAnalyzer._get_running_params()
@@ -349,10 +356,22 @@ class DynamicsAnalyzer(object):
         be lists/arrays. The slope and conductivities
         will be computed for each (t_start_fit, t_end_fit) pair.
         """
-        from samos.lib.mdutils import (
-            calculate_msd_specific_atoms,
-            calculate_msd_specific_atoms_decompose_d,
-            calculate_msd_specific_atoms_max_stats, get_com_positions)
+        if backend == 'cpp':
+            from samos.lib.mdutils_cpp_omp import (
+                calculate_msd_specific_atoms,
+                calculate_msd_specific_atoms_decompose_d,
+                calculate_msd_specific_atoms_max_stats,
+                get_com_positions, set_num_threads)
+            if num_threads is not None:
+                set_num_threads(int(num_threads))
+        elif backend == 'fortran':
+            from samos.lib.mdutils import (
+                calculate_msd_specific_atoms,
+                calculate_msd_specific_atoms_decompose_d,
+                calculate_msd_specific_atoms_max_stats,
+                get_com_positions)
+        else:
+            raise ValueError("backend must be 'cpp' or 'fortran'")
         try:
             timestep_fs = self._timestep_fs
             trajectories = self._trajectories
