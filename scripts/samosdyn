@@ -23,11 +23,13 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 from samos.trajectory import Trajectory
 from samos.analysis.dynamics import DynamicsAnalyzer
+from samos.analysis.rdf import RDF
 from samos.plotting.plot_dynamics import (
     plot_msd_isotropic,
     plot_power_spectrum,
     plot_vaf_isotropic,
 )
+from samos.plotting.plot_rdf import plot_rdf
 
 
 def _write_csv(filename, x_col, x_label, y_cols, y_labels):
@@ -69,7 +71,6 @@ def load_trajectory(trajectory_path, timestep=None):
         traj = Trajectory.from_atoms(aselist)
     if timestep is not None:
         traj.set_timestep(timestep)
-
     return traj
 
 
@@ -307,66 +308,128 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
     return vdos
 
 
+def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
+            radius=5.0, bins=100, no_int=False,
+            plot=False, savefig=None, write=None):
+    """
+    Compute the radial distribution function for *traj* and optionally
+    display, save, or write a plot.
+
+    :param traj: Pre-loaded trajectory.
+    :type traj: :class:`~samos.trajectory.Trajectory`
+    :param int stepsize:
+        Step size over trajectory frames (default 1).
+    :param list species:
+        Compute all pairs between these species and the remaining
+        species in the trajectory. Mutually exclusive with
+        *species_pairs*.
+    :param list species_pairs:
+        Explicit list of ``'A-B'`` pair strings to compute,
+        e.g. ``['Li-O', 'O-O']``. Mutually exclusive with *species*.
+    :param float radius:
+        Maximum radius of the RDF in Angstrom (default 5.0).
+    :param int bins:
+        Number of histogram bins (default 100).
+    :param bool no_int:
+        Suppress the running integral from the plot.
+    :param bool plot:
+        Show the RDF plot interactively (requires a display).
+    :param str savefig:
+        File path to save the plot. Mutually exclusive with *plot*.
+    :param str write:
+        If given, write the RDF and integral for each species pair to
+        this CSV file. Columns: ``radius_A``, then
+        ``rdf_{A}_{B}`` and ``int_{A}_{B}`` for each pair.
+    """
+    if species_pairs is not None and species is not None:
+        raise ValueError(
+            '--species-pairs and --species are mutually exclusive')
+
+    if species_pairs is not None:
+        pairs = [sp.split('-') for sp in species_pairs]
+    elif species is not None:
+        # Build pairs between the requested species and all others,
+        # matching the behaviour of the original util_rdf_and_plot.
+        all_sym = traj.get_atoms().get_chemical_symbols()
+        other = [s for s in all_sym if s not in species]
+        pairs = [(s, o) for s in species for o in other]
+    else:
+        pairs = None
+
+    rdf_analyzer = RDF(trajectory=traj)
+    res = rdf_analyzer.run(
+        radius=radius, stepsize=stepsize, nbins=bins,
+        species_pairs=pairs)
+
+    if write:
+        computed_pairs = res.get_attr('species_pairs')
+        # All pairs share the same radii array; use the first pair's
+        # radii as the x column.
+        s1, s2 = computed_pairs[0]
+        x = res.get_array('radii_{}_{}'.format(s1, s2))
+        y_cols, y_labels = [], []
+        for sp1, sp2 in computed_pairs:
+            key = '{}_{}'.format(sp1, sp2)
+            y_cols.append(res.get_array('rdf_{}'.format(key)))
+            y_labels.append('rdf_{}'.format(key))
+            y_cols.append(res.get_array('int_{}'.format(key)))
+            y_labels.append('int_{}'.format(key))
+        _write_csv(write, x_col=x, x_label='radius_A',
+                   y_cols=y_cols, y_labels=y_labels)
+
+    if plot or savefig:
+        gs = GridSpec(1, 1, top=0.99, right=0.83,
+                      left=0.14, bottom=0.16)
+        fig = plt.figure(figsize=(4, 3))
+        ax = fig.add_subplot(gs[0])
+        plot_rdf(res, ax=ax, no_int=no_int)
+        ax.set_xlim(-0.2, radius)
+
+        if savefig:
+            plt.savefig(savefig, dpi=240)
+        else:
+            plt.show()
+
+    return res
+
+
 def _build_parser():
     parser = ArgumentParser(
-        prog='samosdyn',
-        description=__doc__,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
+        prog='samosdyn', description=__doc__,
+        formatter_class=RawDescriptionHelpFormatter)
 
     # Trajectory arguments are shared by all sub-commands and are
     # placed before the sub-command name so they appear in the top-level
     # help and do not need to be repeated in every sub-parser.
     parser.add_argument(
         'trajectory_path',
-        help='Path to the trajectory file '
-             '(.extxyz or native samos format).',
-    )
+        help='Path to the trajectory file (.extxyz or native samos format).')
     parser.add_argument(
-        '--timestep',
-        type=float, default=None, metavar='FS',
-        help='Override the trajectory timestep in femtoseconds.',
-    )
+        '--timestep', type=float, default=None, metavar='FS',
+        help='Override the trajectory timestep in femtoseconds.')
     parser.add_argument(
-        '--species',
-        nargs='+', metavar='SYMBOL',
-        help='Chemical symbols to analyse '
-             '(default: all species in trajectory).',
-    )
+        '--species', nargs='+', metavar='SYMBOL',
+        help='Chemical symbols to analyse (default: all species).')
     parser.add_argument(
-        '-n', '--nblocks',
-        type=int, default=1, metavar='N',
-        help='Number of blocks to split the trajectory into (default: 1).',
-    )
-
+        '-n', '--nblocks', type=int, default=1, metavar='N',
+        help='Number of blocks to split the trajectory into (default: 1).')
     parser.add_argument(
-        '--write',
-        metavar='FILE',
-        help='Write results to FILE as CSV (one column per species).',
-    )
-
+        '--write', metavar='FILE',
+        help='Write results to FILE as CSV (one column per species).')
     parser.add_argument(
-        '--recenter',
-        action='store_true',
-        help='Recenter positions and velocities before analysis.',
-    )
+        '--recenter', action='store_true',
+        help='Recenter positions and velocities before analysis.')
     parser.add_argument(
-        '--transform-species',
-        metavar='SYMBOL', default=None, dest='transform_species',
-        help='Relabel all atoms as SYMBOL before analysis.',
-    )
+        '--transform-species', metavar='SYMBOL', default=None,
+        dest='transform_species',
+        help='Relabel all atoms as SYMBOL before analysis.')
 
     plot_group = parser.add_mutually_exclusive_group()
     plot_group.add_argument(
-        '--plot',
-        action='store_true',
-        help='Show the plot interactively.',
-    )
+        '--plot', action='store_true', help='Show the plot interactively.')
     plot_group.add_argument(
-        '--savefig',
-        metavar='FILE',
-        help='Save the plot to FILE instead of showing it.',
-    )
+        '--savefig', metavar='FILE',
+        help='Save the plot to FILE instead of showing it.')
 
     sub = parser.add_subparsers(dest='command', metavar='COMMAND')
     sub.required = True
@@ -377,107 +440,97 @@ def _build_parser():
     p_msd = sub.add_parser(
         'msd',
         help='Calculate and optionally plot the mean-square displacement.',
-        description='Calculate and optionally plot the MSD.',
-    )
+        description='Calculate and optionally plot the MSD.')
     p_msd.add_argument(
-        '-s', '--stepsize',
-        type=int, default=1, metavar='N',
-        help='Step size over trajectory frames (default: 1).',
-    )
+        '-s', '--stepsize', type=int, default=1, metavar='N',
+        help='Step size over trajectory frames (default: 1).')
     p_msd.add_argument(
-        '-ts', '--t-start-fit-ps',
-        type=float, default=5., metavar='PS',
+        '-ts', '--t-start-fit-ps', type=float, default=5., metavar='PS',
         dest='t_start_fit_ps',
-        help='Start of the linear-fit window in picoseconds (default: 5).',
-    )
+        help='Start of the linear-fit window in picoseconds (default: 5).')
     p_msd.add_argument(
-        '-te', '--t-end-fit-ps',
-        type=float, default=10., metavar='PS',
+        '-te', '--t-end-fit-ps', type=float, default=10., metavar='PS',
         dest='t_end_fit_ps',
-        help='End of the linear-fit window in picoseconds (default: 10).',
-    )
+        help='End of the linear-fit window in picoseconds (default: 10).')
     p_msd.add_argument(
-        '-b', '--backend',
-        default='fortran', choices=['fortran', 'cpp'],
-        help='Compute kernel: fortran (default) or cpp (OpenMP).',
-    )
+        '-b', '--backend', default='fortran', choices=['fortran', 'cpp'],
+        help='Compute kernel: fortran (default) or cpp (OpenMP).')
     p_msd.add_argument(
-        '-n', '--num-threads',
-        type=int, default=None, metavar='N', dest='num_threads',
-        help='OpenMP thread count for the cpp backend (default: '
-             'OMP_NUM_THREADS).',
-    )
+        '-n', '--num-threads', type=int, default=None, metavar='N',
+        dest='num_threads',
+        help='OpenMP thread count for the cpp backend '
+             '(default: OMP_NUM_THREADS).')
+
     # ------------------------------------------------------------------
     # vaf sub-command
     # ------------------------------------------------------------------
     p_vaf = sub.add_parser(
         'vaf',
-        help='Calculate and optionally plot the velocity autocorrelation '
-             'function.',
-        description='Calculate the VAF and its running integral '
-                    '(diffusion coefficient).',
-    )
+        help='Calculate and plot the velocity autocorrelation function.',
+        description='Calculate the VAF and its integral (diff. coefficient).')
     p_vaf.add_argument(
-        '-s', '--stepsize',
-        type=int, default=1, metavar='N',
-        help='Step size over trajectory frames (default: 1).',
-    )
+        '-s', '--stepsize', type=int, default=1, metavar='N',
+        help='Step size over trajectory frames (default: 1).')
     p_vaf.add_argument(
-        '-ts', '--t-start-fit-ps',
-        type=float, default=5., metavar='PS',
-        dest='t_start_fit_ps',
-        help='Start of the integral-averaging window in picoseconds '
-             '(default: 5).',
-    )
+        '-ts', '--t-start-fit-ps', type=float, default=5., metavar='PS',
+        help='Start of the integral-averaging window in picoseconds (default: 5).')
     p_vaf.add_argument(
-        '-te', '--t-end-fit-ps',
-        type=float, default=10., metavar='PS',
-        dest='t_end_fit_ps',
+        '-te', '--t-end-fit-ps', type=float, default=10., metavar='PS',
         help='End of the integral-averaging window in picoseconds '
-             '(default: 10).',
-    )
+             '(default: 10).')
     p_vaf.add_argument(
-        '--t-end-ps',
-        type=float, default=None, metavar='PS',
-        dest='t_end_ps',
+        '--t-end-ps', type=float, default=None, metavar='PS',
         help='Maximum lag time of the VAF in picoseconds '
-             '(default: t-end-fit-ps).',
-    )
+             '(default: t-end-fit-ps).')
     p_vaf.add_argument(
-        'i', '--integration',
-        default='trapezoid', metavar='METHOD',
+        '-i', '--integration', default='trapezoid', metavar='METHOD',
         choices=['trapezoid', 'simpson'],
-        help='Integration method for the VAF integral '
-             '(trapezoid or simpson, default: trapezoid).',
-    )
+        help='Integration method: trapezoid (default) or simpson.')
     p_vaf.add_argument(
-        '-a', '--remove-angular-momentum',
-        action='store_true', dest='remove_angular_momentum',
-        help='Remove rigid-body rotational contribution from velocities '
-             'before computing the VAF.',
-    )
+        '-a', '--remove-angular-momentum', action='store_true',
+        dest='remove_angular_momentum',
+        help='Remove rigid-body rotational contribution from velocities.')
+
     # ------------------------------------------------------------------
     # vdos sub-command
     # ------------------------------------------------------------------
     p_vdos = sub.add_parser(
         'vdos',
-        help='Calculate and optionally plot the vibrational density of '
-             'states (power spectrum).',
-        description='Calculate the vibrational density of states via a '
-                    'Welch periodogram of the atomic velocities.',
-    )
+        help='Calculate and optionally plot the vibrational density of states.',
+        description='Calculate the VDOS via a Welch periodogram of atomic velocities.')
     p_vdos.add_argument(
-        '-sm', '--smoothing',
-        type=int, default=1, metavar='N',
-        help='Smoothing kernel width in frequency bins '
-             '(default: 1, no smoothing).',
-    )
+        '-sm', '--smoothing', type=int, default=1, metavar='N',
+        help='Smoothing kernel width in frequency bins (default: 1, no smoothing).')
     p_vdos.add_argument(
-        '-a', '--remove-angular-momentum',
-        action='store_true', dest='remove_angular_momentum',
-        help='Remove rigid-body rotational contribution from velocities '
-             'before computing the power spectrum.',
-    )
+        '-a', '--remove-angular-momentum', action='store_true',
+        dest='remove_angular_momentum',
+        help='Remove rigid-body rotational contribution from velocities.')
+
+    # ------------------------------------------------------------------
+    # rdf sub-command
+    # ------------------------------------------------------------------
+    p_rdf = sub.add_parser(
+        'rdf', help='Calculate and optionally plot the radial distribution function.',
+        description='Calculate the RDF and its running integral.')
+    p_rdf.add_argument(
+        '-s', '--stepsize', type=int, default=1, metavar='N',
+        help='Step size over trajectory frames (default: 1).')
+    p_rdf.add_argument(
+        '-r', '--radius', type=float, default=5.0, metavar='A',
+        help='Maximum radius of the RDF in Angstrom (default: 5.0).')
+    p_rdf.add_argument(
+        '-b', '--bins', type=int, default=100, metavar='N',
+        help='Number of histogram bins (default: 100).')
+    # --species (top-level) and --species-pairs are mutually exclusive;
+    # enforced in run_rdf since they cannot share an argparse group.
+    p_rdf.add_argument(
+        '--species-pairs', nargs='+', metavar='A-B', dest='species_pairs',
+        help='Species pairs to compute, e.g. Li-O O-O. '
+             'Mutually exclusive with top-level --species.')
+    p_rdf.add_argument(
+        '--no-int', action='store_true', dest='no_int',
+        help='Suppress the running integral from the plot.')
+
     return parser
 
 
@@ -493,43 +546,29 @@ if __name__ == '__main__':
     if args.recenter:
         traj.recenter()
 
+    # Arguments shared by every sub-command.
+    common = dict(species=args.species, plot=args.plot,
+                  savefig=args.savefig, write=args.write)
+
     if args.command == 'msd':
-        run_msd(
-            traj,
-            stepsize=args.stepsize,
-            species=args.species,
-            plot=args.plot,
-            savefig=args.savefig,
-            t_start_fit_ps=args.t_start_fit_ps,
-            t_end_fit_ps=args.t_end_fit_ps,
-            nblocks=args.nblocks,
-            backend=args.backend,
-            num_threads=args.num_threads,
-            write=args.write,
-        )
+        run_msd(traj, stepsize=args.stepsize, nblocks=args.nblocks,
+                t_start_fit_ps=args.t_start_fit_ps,
+                t_end_fit_ps=args.t_end_fit_ps,
+                backend=args.backend, num_threads=args.num_threads,
+                **common)
     elif args.command == 'vaf':
-        run_vaf(
-            traj,
-            stepsize=args.stepsize,
-            species=args.species,
-            plot=args.plot,
-            savefig=args.savefig,
-            t_start_fit_ps=args.t_start_fit_ps,
-            t_end_fit_ps=args.t_end_fit_ps,
-            t_end_ps=args.t_end_ps,
-            nblocks=args.nblocks,
-            integration=args.integration,
-            remove_angular_momentum=args.remove_angular_momentum,
-            write=args.write,
-        )
+        run_vaf(traj, stepsize=args.stepsize, nblocks=args.nblocks,
+                t_start_fit_ps=args.t_start_fit_ps,
+                t_end_fit_ps=args.t_end_fit_ps,
+                t_end_ps=args.t_end_ps, integration=args.integration,
+                remove_angular_momentum=args.remove_angular_momentum,
+                **common)
     elif args.command == 'vdos':
-        run_vdos(
-            traj,
-            species=args.species,
-            plot=args.plot,
-            savefig=args.savefig,
-            nblocks=args.nblocks,
-            smoothing=args.smoothing,
-            remove_angular_momentum=args.remove_angular_momentum,
-            write=args.write,
-        )
+        run_vdos(traj, nblocks=args.nblocks, smoothing=args.smoothing,
+                 remove_angular_momentum=args.remove_angular_momentum,
+                 **common)
+    elif args.command == 'rdf':
+        run_rdf(traj, stepsize=args.stepsize,
+                species_pairs=args.species_pairs,
+                radius=args.radius, bins=args.bins,
+                no_int=args.no_int, **common)

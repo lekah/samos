@@ -192,6 +192,8 @@ class Trajectory(AttributedArray):
         return self.atoms.cell
 
     def set_cells(self, array, check_existing=False):
+        if array.shape == (3, 3):
+            array = np.tile(array, (self.nstep, 1, 1))
         self.set_array(self._CELL_KEY, array,
                        check_existing=check_existing,
                        check_nat=False, check_nstep=True,
