@@ -3,8 +3,12 @@
 #include <omp.h>
 #include <vector>
 
-// Only contains calculate_msd functions along with get_com_positions for ease of import when switching between fortran and C++
-// All functions are taken as is from the fortran code to preserve the logic
+// Contains calculate_msd functions and get_com_positions, matching the
+// Fortran API in mdutils.f90 for drop-in switching between backends.
+// Most functions are direct ports of the Fortran logic. Exception:
+// calculate_msd_specific_atoms_max_stats uses Welford's online mean
+// (accumulate a running mean in one pass) rather than the Fortran
+// accumulate-then-divide approach, to avoid storing all displacements.
 
 namespace py = pybind11;
 
@@ -88,7 +92,7 @@ py::array_t<double> calculate_msd_specific_atoms(
 py::array_t<double> calculate_msd_specific_atoms_decompose_d(
     py::array_t<double, py::array::c_style | py::array::forcecast> positions,
     py::array_t<int,    py::array::c_style | py::array::forcecast> indices,
-    int stepsize, int stepsize_inner, int block_length_dt, int nr_of_blocks,
+    int stepsize_t, int stepsize_tau, int block_length_dt, int nr_of_blocks,
     int nr_of_t, int nstep, int nat, int nat_of_interest)
 {
     auto pos = positions.unchecked<3>();
@@ -107,10 +111,10 @@ py::array_t<double> calculate_msd_specific_atoms_decompose_d(
                         int iat = idx(ai) - 1;
                         for (int tau = iblock * block_length_dt;
                              tau < (iblock + 1) * block_length_dt;
-                             tau += stepsize_inner) {
-                            acc += (pos(tau + stepsize * t, iat, ipol)
+                             tau += stepsize_tau) {
+                            acc += (pos(tau + stepsize_t * t, iat, ipol)
                                   - pos(tau, iat, ipol))
-                                 * (pos(tau + stepsize * t, iat, jpol)
+                                 * (pos(tau + stepsize_t * t, iat, jpol)
                                   - pos(tau, iat, jpol));
                         }
                     }
@@ -119,8 +123,8 @@ py::array_t<double> calculate_msd_specific_atoms_decompose_d(
             }
         }
     }
-    // Matches Fortran: msd / block_length_dt / nat_of_interest * stepsize_inner
-    double norm = (double)block_length_dt / (double)stepsize_inner * (double)nat_of_interest;
+    // Matches Fortran: msd / block_length_dt / nat_of_interest * stepsize_tau
+    double norm = (double)block_length_dt / (double)stepsize_tau * (double)nat_of_interest;
     for (int iblock = 0; iblock < nr_of_blocks; iblock++)
         for (int t = 0; t < nr_of_t; t++)
             for (int ipol = 0; ipol < 3; ipol++)
