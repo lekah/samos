@@ -9,6 +9,8 @@ Currently implemented are:
   * Several plotting utilities
 
 This code is written mostly in Python 3, the computationally intensive functions are in fortran90 and wrapped with f2py.
+Function calculating MSD is now also written in C++ with OpenMP parallelisation, by default MSD is computed with fortran implementation. To use C++, specify `backend='cpp'` when calling `get_msd()` function, and `num_threads=n` to run over `n` CPU threads. Check `benchmark-msd.py` in the first example for more details.
+
 To install, clone or download this repository, move into the directory of this file, and type:
 
     pip install numpy # or conda install numpy
