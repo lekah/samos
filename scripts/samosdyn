@@ -74,7 +74,8 @@ def load_trajectory(trajectory_path, timestep=None):
 
 
 def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
-            t_start_fit_ps=5., t_end_fit_ps=10., nblocks=1, write=None):
+            t_start_fit_ps=5., t_end_fit_ps=10., nblocks=1,
+            backend='fortran', num_threads=None, write=None):
     """
     Compute the MSD for *traj* and optionally display or save a plot.
 
@@ -95,6 +96,11 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         End of the linear-fit window in picoseconds.
     :param int nblocks:
         Number of blocks to split the trajectory into (default 1).
+    :param str backend:
+        Compute kernel: ``'fortran'`` (default) or ``'cpp'`` (OpenMP).
+    :param int num_threads:
+        Number of OpenMP threads for the C++ backend. Ignored when
+        backend is ``'fortran'``.
     :param str write:
         If given, write the mean MSD for each species to this CSV file.
         Columns: ``t_fs``, then ``msd_{species}_A2`` per species.
@@ -109,6 +115,8 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         t_start_fit_ps=t_start_fit_ps,
         t_end_fit_ps=t_end_fit_ps,
         nr_of_blocks=nblocks,
+        backend=backend,
+        num_threads=num_threads,
     )
 
     if write:
@@ -383,6 +391,17 @@ def _build_parser():
         dest='t_end_fit_ps',
         help='End of the linear-fit window in picoseconds (default: 10).',
     )
+    p_msd.add_argument(
+        '--backend',
+        default='fortran', choices=['fortran', 'cpp'],
+        help='Compute kernel: fortran (default) or cpp (OpenMP).',
+    )
+    p_msd.add_argument(
+        '--num-threads',
+        type=int, default=None, metavar='N', dest='num_threads',
+        help='OpenMP thread count for the cpp backend (default: '
+             'OMP_NUM_THREADS).',
+    )
     # ------------------------------------------------------------------
     # vaf sub-command
     # ------------------------------------------------------------------
@@ -467,6 +486,8 @@ if __name__ == '__main__':
             t_start_fit_ps=args.t_start_fit_ps,
             t_end_fit_ps=args.t_end_fit_ps,
             nblocks=args.nblocks,
+            backend=args.backend,
+            num_threads=args.num_threads,
             write=args.write,
         )
     elif args.command == 'vaf':
