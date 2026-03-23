@@ -149,7 +149,8 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
 
 def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
             t_start_fit_ps=5., t_end_fit_ps=10., t_end_ps=None,
-            nblocks=1, integration='trapezoid', write=None):
+            nblocks=1, integration='trapezoid',
+            remove_angular_momentum=False, write=None):
     """
     Compute the VAF and its running integral (diffusion coefficient)
     for *traj*, and optionally display or save a plot.
@@ -195,7 +196,9 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
         kwargs['t_end_ps'] = t_end_ps
 
     dyn = DynamicsAnalyzer(trajectories=[traj])
-    vaf = dyn.get_vaf(integration=integration, **kwargs)
+    vaf = dyn.get_vaf(integration=integration,
+                      remove_angular_momentum=remove_angular_momentum,
+                      **kwargs)
 
     if write:
         # Reconstruct the time axis from stored attributes; the VAF
@@ -233,7 +236,8 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
 
 
 def run_vdos(traj, species=None, plot=False, savefig=None,
-             nblocks=1, smoothing=1, write=None):
+             nblocks=1, smoothing=1,
+             remove_angular_momentum=False, write=None):
     """
     Compute the vibrational density of states (power spectrum via
     Welch periodogram) for *traj*, and optionally display or save a plot.
@@ -269,6 +273,7 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         species_of_interest=species,
         nr_of_blocks=nblocks,
         smothening=smoothing,
+        remove_angular_momentum=remove_angular_momentum,
     )
 
     if write:
@@ -392,12 +397,12 @@ def _build_parser():
         help='End of the linear-fit window in picoseconds (default: 10).',
     )
     p_msd.add_argument(
-        '--backend',
+        '-b', '--backend',
         default='fortran', choices=['fortran', 'cpp'],
         help='Compute kernel: fortran (default) or cpp (OpenMP).',
     )
     p_msd.add_argument(
-        '--num-threads',
+        '-n', '--num-threads',
         type=int, default=None, metavar='N', dest='num_threads',
         help='OpenMP thread count for the cpp backend (default: '
              'OMP_NUM_THREADS).',
@@ -439,11 +444,17 @@ def _build_parser():
              '(default: t-end-fit-ps).',
     )
     p_vaf.add_argument(
-        '--integration',
+        'i', '--integration',
         default='trapezoid', metavar='METHOD',
         choices=['trapezoid', 'simpson'],
         help='Integration method for the VAF integral '
              '(trapezoid or simpson, default: trapezoid).',
+    )
+    p_vaf.add_argument(
+        '-a', '--remove-angular-momentum',
+        action='store_true', dest='remove_angular_momentum',
+        help='Remove rigid-body rotational contribution from velocities '
+             'before computing the VAF.',
     )
     # ------------------------------------------------------------------
     # vdos sub-command
@@ -456,10 +467,16 @@ def _build_parser():
                     'Welch periodogram of the atomic velocities.',
     )
     p_vdos.add_argument(
-        '--smoothing',
+        '-sm', '--smoothing',
         type=int, default=1, metavar='N',
         help='Smoothing kernel width in frequency bins '
              '(default: 1, no smoothing).',
+    )
+    p_vdos.add_argument(
+        '-a', '--remove-angular-momentum',
+        action='store_true', dest='remove_angular_momentum',
+        help='Remove rigid-body rotational contribution from velocities '
+             'before computing the power spectrum.',
     )
     return parser
 
@@ -502,6 +519,7 @@ if __name__ == '__main__':
             t_end_ps=args.t_end_ps,
             nblocks=args.nblocks,
             integration=args.integration,
+            remove_angular_momentum=args.remove_angular_momentum,
             write=args.write,
         )
     elif args.command == 'vdos':
@@ -512,5 +530,6 @@ if __name__ == '__main__':
             savefig=args.savefig,
             nblocks=args.nblocks,
             smoothing=args.smoothing,
+            remove_angular_momentum=args.remove_angular_momentum,
             write=args.write,
         )

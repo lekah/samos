@@ -286,8 +286,60 @@ class Trajectory(AttributedArray):
         self.set_velocities(vel)
         return vel.copy()
 
-    def get_velocities(self):
-        return self.get_array(self._VELOCITIES_KEY)
+    def get_velocities(self, remove_angular_momentum=False):
+        """
+        Return the velocity array (nstep, nat, 3) in Angstrom/fs.
+
+        :param bool remove_angular_momentum:
+            If True, subtract the rigid-body rotational velocity
+            ``omega(t) x r_i(t)`` from each atom at each timestep
+            before returning, without modifying the stored array.
+
+            The correction requires positions and masses and must be
+            applied after any centre-of-mass translation has been
+            removed (e.g. via :meth:`recenter`), because the inertia
+            tensor and angular momentum are both defined relative to
+            the centre of mass.  If COM recentering has not been
+            applied the result is still correct but omega will include
+            a spurious contribution from the translational offset.
+
+            An in-place variant was not chosen here because angular
+            momentum removal is only meaningful for velocity-based
+            analysis (VAF, VDOS).  Modifying the stored array would
+            silently corrupt any subsequent position-based analysis
+            (MSD) that re-derives velocities from positions, and would
+            prevent the user from toggling the correction without
+            reloading the trajectory.
+        """
+        vel = self.get_array(self._VELOCITIES_KEY)
+        if not remove_angular_momentum:
+            return vel
+
+        pos = self.get_positions()        # (nstep, nat, 3)
+        masses = self.atoms.get_masses()  # (nat,)
+        vel = vel.copy()                  # do not modify the stored array
+
+        # Inertia tensor per step: shape (nstep, 3, 3).
+        # I[s,a,b] = sum_i m_i * (|r_i|^2 * delta_ab - r_i[a] * r_i[b])
+        # Written as the outer-product form to avoid explicit delta_ab:
+        #   I = sum_i m_i * (|r_i|^2 * eye(3) - outer(r_i, r_i))
+        r2 = np.einsum('sia,sia->si', pos, pos)       # (nstep, nat)
+        I = (np.einsum('si,ab->sab', masses * r2, np.eye(3))
+             - np.einsum('i,sia,sib->sab', masses, pos, pos))
+
+        # Angular momentum per step: L = sum_i m_i * (r_i x v_i)
+        L = np.einsum('i,sia->sa', masses,
+                      np.cross(pos, vel))             # (nstep, 3)
+
+        # Solve I @ omega = L for omega at each step.
+        # numpy.linalg.solve accepts batched (nstep, 3, 3) input since
+        # NumPy 1.14, already required by this package.
+        omega = np.linalg.solve(I, L)                 # (nstep, 3)
+
+        # Subtract rigid-body rotational contribution v_rot = omega x r_i.
+        vel -= np.cross(omega[:, np.newaxis, :], pos)  # broadcast over nat
+
+        return vel
 
     def set_forces(self, array, check_existing=False):
         """

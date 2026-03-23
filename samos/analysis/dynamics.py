@@ -723,7 +723,8 @@ class DynamicsAnalyzer(object):
             msd.set_attr(k, v)
         return msd
 
-    def get_vaf(self, arrayname=None, integration='trapezoid', **kwargs):
+    def get_vaf(self, arrayname=None, integration='trapezoid',
+                remove_angular_momentum=False, **kwargs):
 
         from samos.lib.mdutils import (
             calculate_vaf_specific_atoms,
@@ -761,7 +762,8 @@ class DynamicsAnalyzer(object):
                 if arrayname:
                     velocities = trajectory.get_array(arrayname)
                 else:
-                    velocities = trajectory.get_velocities()
+                    velocities = trajectory.get_velocities(
+                        remove_angular_momentum=remove_angular_momentum)
                 if do_com:
                     # I replace the array positions with the COM!
                     # Getting the masses for recentering:
@@ -974,7 +976,8 @@ class DynamicsAnalyzer(object):
 
         return kinetic_energies_series
 
-    def get_power_spectrum(self, arrayname=None, **kwargs):
+    def get_power_spectrum(self, arrayname=None,
+                           remove_angular_momentum=False, **kwargs):
         """
         Calculate the power spectrum.
         :param int smothening:
@@ -1043,7 +1046,8 @@ class DynamicsAnalyzer(object):
                         arrayname)[:, trajectory.get_indices_of_species(
                             atomic_species, start=0), :]
                 else:
-                    vel_array = trajectory.get_velocities()[
+                    vel_array = trajectory.get_velocities(
+                        remove_angular_momentum=remove_angular_momentum)[
                         :, trajectory.get_indices_of_species(atomic_species,
                                                              start=0), :]
                 nstep, _, _ = vel_array.shape
