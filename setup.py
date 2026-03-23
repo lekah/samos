@@ -55,7 +55,7 @@ class CombinedBuild(build_ext):
 
 
 setup(
-    scripts=['scripts/samosdyn'],
+    scripts=['scripts/samos'],
     ext_modules=[
         f2py_Extension('fortran_lib', [
             'samos/lib/gaussian_density.f90',
