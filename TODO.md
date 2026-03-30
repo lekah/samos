@@ -7,55 +7,72 @@
 - [ ] **`get_kinetic_energies` — wrong array stored for species decomposition** (line ~935)
   `kinE` (system-level) is stored under `'species_kinetic_energy_*'`; should be `kinE_species`.
 
-- [ ] **`get_vaf` — TypeError when `block_length_*` is used** (line ~762)
-  `if nr_of_blocks > 0:` raises `TypeError` when `nr_of_blocks` is `None`.
-  Fix: use `if nr_of_blocks:` (falsy test), consistent with `get_msd`.
-
-- [ ] **`get_vaf` — division by zero for single block** (line ~831)
+- [ ] **`get_vaf` — division by zero for single block**
   `arr_sem = arr_std / np.sqrt(arr.shape[0] - 1)` divides by zero when
   there is only one block. Guard with `if arr.shape[0] > 1` as `get_msd` does.
 
 ### Performance
 
-- [ ] **`get_kinetic_energies` — Python triple-nested loop** (lines ~893, ~910, ~925)
+- [ ] **`get_kinetic_energies` — Python triple-nested loop**
   Inner loops over steps/atoms/polarizations should be replaced with
   vectorized numpy operations (e.g. `np.einsum`). Critical for large trajectories.
 
 ### Design
-
-- [ ] **`_get_running_params` — repeated unit-conversion logic**
-  The fs/ps/dt resolution pattern is copy-pasted ~8 times. Extract a helper
-  `_to_dt(kwargs, fs_key, ps_key, dt_key, timestep_fs, default=None)`.
-
-- [ ] **`_get_running_params` — 14-element positional return tuple**
-  Fragile: adding/reordering a value silently breaks all call sites.
-  Replace with a `namedtuple` or `dataclass`.
-
-- [ ] **`get_power_spectrum` — duplicates block-length parsing**
-  Reimplements the block-length logic from `_get_running_params` instead of
-  delegating to it. Any fix must be manually mirrored.
 
 - [ ] **`__init__` dynamic dispatch via `getattr(self, 'set_*')`**
   Produces cryptic errors on bad kwargs. Consider explicit keyword arguments.
 
 ### Code hygiene
 
-- [ ] **Typos in public API and error messages**
-  - `smothening` → `smoothing` (parameter name + docstring in `get_power_spectrum`)
-  - `'Uncrecognized keywords'` → `'Unrecognized keywords'` (appears twice)
-  - `'block_length_ft'` → `'block_length_dt'` in `RuntimeError` in `get_vaf`
-  - `'aotm_indices'` → `'atom_indices'` in `get_msd` docstring
+- [ ] **`smothening` typo in public API**
+  `smothening` → `smoothing` (parameter name in `get_power_spectrum` and its
+  docstring). Requires updating all call sites, including `scripts/samos`.
 
 - [ ] **Python 2 class declaration** (line 15)
   `class DynamicsAnalyzer(object):` → `class DynamicsAnalyzer:`
-
-- [ ] **Dead commented-out code in `get_vaf`**
-  Remove `# ~` lines (old print statements and commented-out assignments).
 
 - [ ] **Magic numbers lack unit-conversion explanation**
   `0.1 / 3.` in `get_vaf` and `1e-1 / dimensionality_factor` in `get_msd`
   are Å²/fs → cm²/s conversions. Add comments explaining the formula.
 
-- [ ] **Misleading comment above dead code in `_get_running_params`** (line ~303)
-  Comment says "I see whether factors are calculated" but nothing follows.
-  The actual adaptation to trajectory length happens later in `get_msd`.
+- [ ] **`util_msd` — legacy parameter names in signature**
+  `util_msd(t_start_fit_ps=..., t_end_fit_ps=...)` uses the old unit-suffix
+  style in its own signature (though the internal call to `get_msd` is
+  already updated). Low priority since `util_msd` is not part of the main
+  public API.
+
+---
+
+## Completed
+
+- [x] **`_get_running_params` — repeated unit-conversion logic**
+  Replaced ~8 copy-pasted fs/ps/dt if/elif chains with a single
+  `parse_time(value, unit, timestep_fs)` utility in `samos/utils/time_units.py`.
+
+- [x] **`_get_running_params` — 14-element positional return tuple**
+  Replaced with `RunningParams` namedtuple; callers use named field access.
+
+- [x] **`get_power_spectrum` — duplicates block-length parsing**
+  Block-length parsing now uses `parse_time` directly; duplication removed.
+
+- [x] **`get_vaf` — TypeError when `block_length` is used**
+  Fixed: block/nr_of_blocks dispatch now uses falsy test consistently with
+  `get_msd`.
+
+- [x] **`**kwargs` in public API obscures accepted parameters**
+  `get_msd`, `get_vaf`, and `get_power_spectrum` now have fully explicit
+  signatures. `_get_running_params` is also fully explicit. No `**kwargs`
+  anywhere in the public analysis API.
+
+- [x] **Unit-suffix kwargs (`t_end_fit_ps`, `block_length_dt`, etc.)**
+  Old-style kwargs removed; all time parameters now take a plain numeric
+  value and a single `t_unit` argument per call ('fs', 'ps', or 'dt').
+
+- [x] **Typos: `'Uncrecognized'`, `'block_length_ft'`, `'aotm_indices'`**
+  All corrected during the refactor.
+
+- [x] **Dead commented-out code in `get_vaf`**
+  Removed `# ~` lines (old print statements and commented-out assignments).
+
+- [x] **Misleading comment in `_get_running_params`**
+  "I see whether factors are calculated" comment — gone with the rewrite.

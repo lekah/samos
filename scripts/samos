@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-samosdyn.py — command-line interface for samos dynamics analysis.
+samosdyn.py - command-line interface for samos dynamics analysis.
 
 Usage
 -----
@@ -75,7 +75,7 @@ def load_trajectory(trajectory_path, timestep=None):
 
 
 def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
-            t_start_fit_ps=5., t_end_fit_ps=10., nblocks=1,
+            t_start_fit=5., t_end_fit=10., t_unit='ps', nblocks=1,
             backend='fortran', num_threads=None, write=None):
     """
     Compute the MSD for *traj* and optionally display or save a plot.
@@ -91,10 +91,13 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         Show the MSD plot interactively (requires a display).
     :param str savefig:
         File path to save the plot. Mutually exclusive with *plot*.
-    :param float t_start_fit_ps:
-        Start of the linear-fit window in picoseconds.
-    :param float t_end_fit_ps:
-        End of the linear-fit window in picoseconds.
+    :param float t_start_fit:
+        Start of the linear-fit window (in *t_unit*; default 5).
+    :param float t_end_fit:
+        End of the linear-fit window (in *t_unit*; default 10).
+    :param str t_unit:
+        Time unit for *t_start_fit* and *t_end_fit*
+        (``'fs'``, ``'ps'``, or ``'dt'``; default ``'ps'``).
     :param int nblocks:
         Number of blocks to split the trajectory into (default 1).
     :param str backend:
@@ -113,8 +116,9 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
     msd = dyn.get_msd(
         stepsize_t=stepsize,
         species_of_interest=species,
-        t_start_fit_ps=t_start_fit_ps,
-        t_end_fit_ps=t_end_fit_ps,
+        t_start_fit=t_start_fit,
+        t_end_fit=t_end_fit,
+        t_unit=t_unit,
         nr_of_blocks=nblocks,
         backend=backend,
         num_threads=num_threads,
@@ -149,7 +153,7 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
 
 
 def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
-            t_start_fit_ps=5., t_end_fit_ps=10., t_end_ps=None,
+            t_start_fit=5., t_end_fit=10., t_end=None, t_unit='ps',
             nblocks=1, integration='trapezoid',
             remove_angular_momentum=False, write=None):
     """
@@ -167,13 +171,16 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
         Show the VAF plot interactively (requires a display).
     :param str savefig:
         File path to save the plot. Mutually exclusive with *plot*.
-    :param float t_start_fit_ps:
-        Start of the integral-averaging window in picoseconds.
-    :param float t_end_fit_ps:
-        End of the integral-averaging window in picoseconds.
-    :param float t_end_ps:
-        Maximum lag time of the VAF in picoseconds. Defaults to
-        *t_end_fit_ps* when not set.
+    :param float t_start_fit:
+        Start of the integral-averaging window (in *t_unit*; default 5).
+    :param float t_end_fit:
+        End of the integral-averaging window (in *t_unit*; default 10).
+    :param float t_end:
+        Maximum lag time of the VAF (in *t_unit*).
+        Defaults to *t_end_fit* when not set.
+    :param str t_unit:
+        Time unit for all time arguments
+        (``'fs'``, ``'ps'``, or ``'dt'``; default ``'ps'``).
     :param int nblocks:
         Number of blocks to split the trajectory into (default 1).
     :param str integration:
@@ -186,20 +193,18 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
     if species is None:
         species = sorted(set(traj.atoms.get_chemical_symbols()))
 
-    kwargs = dict(
+    dyn = DynamicsAnalyzer(trajectories=[traj])
+    vaf = dyn.get_vaf(
+        integration=integration,
+        remove_angular_momentum=remove_angular_momentum,
         stepsize_t=stepsize,
         species_of_interest=species,
-        t_start_fit_ps=t_start_fit_ps,
-        t_end_fit_ps=t_end_fit_ps,
+        t_start_fit=t_start_fit,
+        t_end_fit=t_end_fit,
+        t_end=t_end,
+        t_unit=t_unit,
         nr_of_blocks=nblocks,
     )
-    if t_end_ps is not None:
-        kwargs['t_end_ps'] = t_end_ps
-
-    dyn = DynamicsAnalyzer(trajectories=[traj])
-    vaf = dyn.get_vaf(integration=integration,
-                      remove_angular_momentum=remove_angular_momentum,
-                      **kwargs)
 
     if write:
         # Reconstruct the time axis from stored attributes; the VAF
@@ -445,13 +450,17 @@ def _build_parser():
         '-s', '--stepsize', type=int, default=1, metavar='N',
         help='Step size over trajectory frames (default: 1).')
     p_msd.add_argument(
-        '-ts', '--t-start-fit-ps', type=float, default=5., metavar='PS',
-        dest='t_start_fit_ps',
-        help='Start of the linear-fit window in picoseconds (default: 5).')
+        '-ts', '--t-start-fit', type=float, default=5., metavar='T',
+        dest='t_start_fit',
+        help='Start of the linear-fit window (default: 5, unit: --t-unit).')
     p_msd.add_argument(
-        '-te', '--t-end-fit-ps', type=float, default=10., metavar='PS',
-        dest='t_end_fit_ps',
-        help='End of the linear-fit window in picoseconds (default: 10).')
+        '-te', '--t-end-fit', type=float, default=10., metavar='T',
+        dest='t_end_fit',
+        help='End of the linear-fit window (default: 10, unit: --t-unit).')
+    p_msd.add_argument(
+        '--t-unit', default='ps', choices=['fs', 'ps', 'dt'],
+        dest='t_unit', metavar='UNIT',
+        help='Time unit for -ts and -te: fs, ps, or dt (default: ps).')
     p_msd.add_argument(
         '-b', '--backend', default='fortran', choices=['fortran', 'cpp'],
         help='Compute kernel: fortran (default) or cpp (OpenMP).')
@@ -472,16 +481,25 @@ def _build_parser():
         '-s', '--stepsize', type=int, default=1, metavar='N',
         help='Step size over trajectory frames (default: 1).')
     p_vaf.add_argument(
-        '-ts', '--t-start-fit-ps', type=float, default=5., metavar='PS',
-        help='Start of the integral-averaging window in picoseconds (default: 5).')
+        '-ts', '--t-start-fit', type=float, default=5., metavar='T',
+        dest='t_start_fit',
+        help='Start of the integral-averaging window '
+             '(default: 5, unit: --t-unit).')
     p_vaf.add_argument(
-        '-te', '--t-end-fit-ps', type=float, default=10., metavar='PS',
-        help='End of the integral-averaging window in picoseconds '
-             '(default: 10).')
+        '-te', '--t-end-fit', type=float, default=10., metavar='T',
+        dest='t_end_fit',
+        help='End of the integral-averaging window '
+             '(default: 10, unit: --t-unit).')
     p_vaf.add_argument(
-        '--t-end-ps', type=float, default=None, metavar='PS',
-        help='Maximum lag time of the VAF in picoseconds '
-             '(default: t-end-fit-ps).')
+        '--t-end', type=float, default=None, metavar='T',
+        dest='t_end',
+        help='Maximum lag time of the VAF (unit: --t-unit; '
+             'default: t-end-fit).')
+    p_vaf.add_argument(
+        '--t-unit', default='ps', choices=['fs', 'ps', 'dt'],
+        dest='t_unit', metavar='UNIT',
+        help='Time unit for -ts, -te, and --t-end: fs, ps, or dt '
+             '(default: ps).')
     p_vaf.add_argument(
         '-i', '--integration', default='trapezoid', metavar='METHOD',
         choices=['trapezoid', 'simpson'],
@@ -552,15 +570,18 @@ if __name__ == '__main__':
 
     if args.command == 'msd':
         run_msd(traj, stepsize=args.stepsize, nblocks=args.nblocks,
-                t_start_fit_ps=args.t_start_fit_ps,
-                t_end_fit_ps=args.t_end_fit_ps,
+                t_start_fit=args.t_start_fit,
+                t_end_fit=args.t_end_fit,
+                t_unit=args.t_unit,
                 backend=args.backend, num_threads=args.num_threads,
                 **common)
     elif args.command == 'vaf':
         run_vaf(traj, stepsize=args.stepsize, nblocks=args.nblocks,
-                t_start_fit_ps=args.t_start_fit_ps,
-                t_end_fit_ps=args.t_end_fit_ps,
-                t_end_ps=args.t_end_ps, integration=args.integration,
+                t_start_fit=args.t_start_fit,
+                t_end_fit=args.t_end_fit,
+                t_end=args.t_end,
+                t_unit=args.t_unit,
+                integration=args.integration,
                 remove_angular_momentum=args.remove_angular_momentum,
                 **common)
     elif args.command == 'vdos':

@@ -154,21 +154,21 @@ class TestDynamics(unittest.TestCase):
 
         pws = d.get_power_spectrum(smothening=1, nr_of_blocks=6)
 
-        vaf = d.get_vaf(t_start_fit_fs=2000.,
-                        stepsize_tau=20, t_end_fit_fs=4000.,
+        vaf = d.get_vaf(t_start_fit=2., t_end_fit=4., t_unit='ps',
+                        stepsize_tau=20,
                         nr_of_blocks=12, species_of_interest=['O', 'H'])
 
         msd_iso = d.get_msd(
-            t_start_fit_fs=2000.,
-            t_end_fit_fs=4000.,
-            # ~ nr_of_blocks=12,)
-            block_length_dt=640, species_of_interest=['O', 'H'],
+            t_start_fit=2., t_end_fit=4.,
+            # block_length_dt=640 @ 12.5 fs/step = 8 ps
+            block_length=8., t_unit='ps',
+            species_of_interest=['O', 'H'],
             backend='fortran')
-        
+
         msd_iso_dec = d.get_msd(
-            t_start_fit_fs=2000.,
-            t_end_fit_fs=4000., stepsize_tau=20,
-            nr_of_blocks=12, decomposed=True, 
+            t_start_fit=2., t_end_fit=4., t_unit='ps',
+            stepsize_tau=20,
+            nr_of_blocks=12, decomposed=True,
             backend='fortran')
 
         for attributed_array, name in ((msd_iso, 'msd_iso'),
@@ -188,16 +188,15 @@ class TestDynamics(unittest.TestCase):
                     self.fail(f"Attributes of {name} do not match reference.")
 
         msd_iso = d.get_msd(
-            t_start_fit_fs=2000.,
-            t_end_fit_fs=4000.,
-            # ~ nr_of_blocks=12,)
-            block_length_dt=640, species_of_interest=['O', 'H'],
+            t_start_fit=2., t_end_fit=4.,
+            block_length=8., t_unit='ps',
+            species_of_interest=['O', 'H'],
             backend='cpp')
-        
+
         msd_iso_dec = d.get_msd(
-            t_start_fit_fs=2000.,
-            t_end_fit_fs=4000., stepsize_tau=20,
-            nr_of_blocks=12, decomposed=True, 
+            t_start_fit=2., t_end_fit=4., t_unit='ps',
+            stepsize_tau=20,
+            nr_of_blocks=12, decomposed=True,
             backend='cpp')
 
         for attributed_array, name in ((msd_iso, 'msd_iso'),
