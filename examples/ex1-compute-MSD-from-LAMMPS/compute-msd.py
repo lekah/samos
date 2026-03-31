@@ -14,13 +14,14 @@ def main():
 
     print('Running Dynamics Analyzer')
     da = DynamicsAnalyzer(trajectories=[traj])
-    res = da.get_msd(t_end_fit_ps=100,  # where to end fit of MSD
-                     t_start_fit_ps=50,  # where to start fitting MSD
+    res = da.get_msd(t_start_fit=50,   # where to start fitting MSD
+                     t_end_fit=100,    # where to end fit of MSD
+                     t_unit='ps',
                      species_of_interest=['Al',],  # can be left empty
                      # all will be calculated by default
                      nr_of_blocks=4,  # how many independent blocks to
                                       # to average over
-                     stepsize_t=1,  # stepsize of times in MSD analysis,
+                     stepsize_t=1,    # stepsize of times in MSD analysis,
                      stepsize_tau=10  # stepsize for time averaging,
                      )
     print('Making figure 1')

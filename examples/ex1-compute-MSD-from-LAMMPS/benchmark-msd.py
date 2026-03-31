@@ -5,8 +5,9 @@ from samos.analysis.dynamics import DynamicsAnalyzer
 from samos.plotting.plot_dynamics import plot_msd_isotropic
 
 MSD_KWARGS = dict(
-    t_end_fit_ps=100,
-    t_start_fit_ps=50,
+    t_start_fit=50,
+    t_end_fit=100,
+    t_unit='ps',
     species_of_interest=['Li'],
     nr_of_blocks=3,
     stepsize_t=1,

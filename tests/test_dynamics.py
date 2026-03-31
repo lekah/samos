@@ -5,6 +5,7 @@ import numpy as np
 from ase import Atoms
 from samos.trajectory import Trajectory
 
+
 class TestRecenter(unittest.TestCase):
     """Tests for Trajectory.recenter(), which replaced the Fortran
     recenter_positions / recenter_velocities routines."""
@@ -208,19 +209,14 @@ class TestDynamics(unittest.TestCase):
                 try:
                     self.assertEqual(ref_attrs[key], attrs[key])
                 except AssertionError:
-                    # the c++ values do not match bit for bit because omp ordering can have slightly different
-                    # rounding, but it should still be extremely close, so use numpy testing that can use tolerances 
+                    # the c++ values do not match bit for bit because
+                    # omp ordering can have slightly different
+                    # rounding, but it should still be extremely
+                    # close, so use numpy testing that can use tolerances
                     for subkey in ref_attrs[key]:
-                        np.testing.assert_allclose(attrs[key][subkey], ref_attrs[key][subkey], rtol=1e-12)
-
-        # Uncomment to test plot:
-        # ~ from matplotlib import pyplot as plt
-        # ~ fig = plt.figure(figsize=(12,7))
-        # ~ plt.suptitle(r'Diffusion TIP4P-$H_2O$ at 300K', fontsize=18)
-        # ~ plot_msd_isotropic(msd_iso, fig.add_subplot(3,1,1))
-        # ~ plot_vaf_isotropic(vaf, fig.add_subplot(3,1,2))
-        # ~ plot_power_spectrum(pws, fig.add_subplot(3,1,3), )
-        # ~ plt.show()
+                        np.testing.assert_allclose(
+                            attrs[key][subkey], ref_attrs[key][subkey],
+                            rtol=1e-12)
 
 
 if __name__ == '__main__':

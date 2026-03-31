@@ -32,6 +32,30 @@ from samos.plotting.plot_dynamics import (
 from samos.plotting.plot_rdf import plot_rdf
 
 
+def _expand_elements(values):
+    """
+    Expand *values* (a list of strings from argparse) to a flat list of
+    chemical symbols, one per atom.
+
+    Two forms are accepted:
+
+    * **Formula string** -- a single token that contains at least one
+      digit, e.g. ``['Al31']`` or ``['Li10GeP2S12']``.  The formula is
+      parsed with :class:`ase.formula.Formula` and expanded to the
+      corresponding flat symbol list.
+    * **Explicit list** -- multiple tokens (or a single token with no
+      digit), e.g. ``['Al', 'Al', 'Al']``.  Returned unchanged.
+
+    :param list values: Raw string list from ``--lammps-elements``.
+    :returns: Flat list of chemical symbol strings.
+    :raises ValueError: If a single-token formula cannot be parsed.
+    """
+    if len(values) == 1 and any(c.isdigit() for c in values[0]):
+        from ase.formula import Formula
+        return list(Formula(values[0]))
+    return values
+
+
 def _write_csv(filename, x_col, x_label, y_cols, y_labels):
     """
     Write a two-dimensional dataset to a CSV file.
@@ -51,19 +75,44 @@ def _write_csv(filename, x_col, x_label, y_cols, y_labels):
     np.savetxt(filename, data, delimiter=',', header=header, comments='')
 
 
-def load_trajectory(trajectory_path, timestep=None):
+def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
+                    lammps_elements=None, lammps=False):
     """
     Load a trajectory from *trajectory_path* and return a
     :class:`~samos.trajectory.Trajectory` instance.
 
     :param str trajectory_path:
-        Path to the trajectory file. The ``.extxyz`` format is read via
-        ASE; all other formats are passed to
+        Path to the trajectory file. When *lammps* is True,
+        *lammps_types* is given, or *lammps_elements* is given, the
+        file is read as a LAMMPS dump; the ``.extxyz`` format is read
+        via ASE; all other formats are passed to
         :meth:`~samos.trajectory.Trajectory.load_file`.
     :param float timestep:
         If given, override the timestep stored in the file (femtoseconds).
+    :param list lammps_types:
+        Chemical symbols in LAMMPS integer-type order, one entry per
+        type (e.g. ``['Li', 'P', 'S']`` maps type 1->Li, 2->P, 3->S).
+        Use this when the dump stores a ``type`` column but no
+        ``element`` column.
+    :param list lammps_elements:
+        Explicit chemical symbol for every atom, length must equal the
+        number of atoms in the dump (e.g. ``['Al']*31``).  Use this
+        when neither a ``type`` column with a type map nor an
+        ``element`` column is available.
+    :param bool lammps:
+        Read the file as a LAMMPS dump without supplying element
+        information.  Use this when the dump already contains an
+        ``element`` column so the symbols can be read directly.
     :returns: :class:`~samos.trajectory.Trajectory`
     """
+    if lammps_types is not None or lammps_elements is not None or lammps:
+        from samos.io.lammps import read_lammps_dump
+        traj = read_lammps_dump(trajectory_path,
+                                types=lammps_types,
+                                elements=lammps_elements,
+                                timestep=timestep)
+        # timestep already passed to the reader; skip the override below.
+        return traj
     try:
         traj = Trajectory.load_file(trajectory_path)
     except Exception:
@@ -400,7 +449,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
 
 def _build_parser():
     parser = ArgumentParser(
-        prog='samosdyn', description=__doc__,
+        prog='samos', description=__doc__,
         formatter_class=RawDescriptionHelpFormatter)
 
     # Trajectory arguments are shared by all sub-commands and are
@@ -413,6 +462,27 @@ def _build_parser():
         '--timestep', type=float, default=None, metavar='FS',
         help='Override the trajectory timestep in femtoseconds.')
     parser.add_argument(
+        '--lammps-types', nargs='+', metavar='SYMBOL',
+        dest='lammps_types',
+        help='Read the trajectory as a LAMMPS dump file and map LAMMPS '
+             'integer types to these chemical symbols in type order '
+             '(e.g. Li P S for types 1 2 3). Use when the dump stores '
+             'a "type" column but no "element" column.')
+    parser.add_argument(
+        '--lammps-elements', nargs='+', metavar='SYMBOL',
+        dest='lammps_elements',
+        help='Read the trajectory as a LAMMPS dump file and assign '
+             'chemical symbols explicitly, one per atom in atom-id order. '
+             'Accepts either a formula string (e.g. Al31 or Li10GeP2S12) '
+             'or a space-separated list (e.g. Al Al Al). Use when '
+             'neither a "type" column with a type map nor an "element" '
+             'column is available.')
+    parser.add_argument(
+        '--lammps', action='store_true', default=False,
+        help='Read the trajectory as a LAMMPS dump file. Use this when '
+             'the dump already contains an "element" column so no element '
+             'list needs to be supplied.')
+    parser.add_argument(
         '--species', nargs='+', metavar='SYMBOL',
         help='Chemical symbols to analyse (default: all species).')
     parser.add_argument(
@@ -424,6 +494,12 @@ def _build_parser():
     parser.add_argument(
         '--recenter', action='store_true',
         help='Recenter positions and velocities before analysis.')
+    parser.add_argument(
+        '--compute-velocities', action='store_true',
+        dest='compute_velocities',
+        help='Compute velocities from positions using the Verlet finite-'
+             'difference formula before analysis. Required for VAF and '
+             'VDOS when the trajectory does not store velocities.')
     parser.add_argument(
         '--transform-species', metavar='SYMBOL', default=None,
         dest='transform_species',
@@ -556,13 +632,23 @@ if __name__ == '__main__':
     parser = _build_parser()
     args = parser.parse_args()
 
-    traj = load_trajectory(args.trajectory_path, timestep=args.timestep)
+    lammps_elements = (
+        _expand_elements(args.lammps_elements)
+        if args.lammps_elements is not None else None
+    )
+    traj = load_trajectory(args.trajectory_path, timestep=args.timestep,
+                           lammps_types=args.lammps_types,
+                           lammps_elements=lammps_elements,
+                           lammps=args.lammps)
 
     if args.transform_species:
         traj.transform_species(args.transform_species)
 
     if args.recenter:
         traj.recenter()
+
+    if args.compute_velocities:
+        traj.calculate_velocities_from_positions()
 
     # Arguments shared by every sub-command.
     common = dict(species=args.species, plot=args.plot,

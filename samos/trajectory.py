@@ -136,6 +136,7 @@ class Trajectory(AttributedArray):
             write(join(folder_name, self._ATOMS_FILENAME), self._atoms)
 
     def get_timestep(self):
+        """Return the MD timestep in femtoseconds, or None if not set."""
         return self.get_attr(self._TIMESTEP_KEY)
 
     def set_timestep(self, timestep_fs):
@@ -145,6 +146,13 @@ class Trajectory(AttributedArray):
         self.set_attr(self._TIMESTEP_KEY, float(timestep_fs))
 
     def get_atoms(self):
+        """
+        Return a copy of the reference :class:`~ase.Atoms` object, or
+        None if atoms have not been set.
+
+        A copy is returned so that modifications by the caller do not
+        affect the stored atoms.
+        """
         if self._atoms is not None:
             return self._atoms.copy()
         else:
@@ -152,12 +160,32 @@ class Trajectory(AttributedArray):
             # raise ValueError('Atoms have not been set')
 
     def set_types(self, types):
+        """
+        Override the chemical-symbol list stored in this trajectory.
+
+        Normally :meth:`get_types` reads symbols from the ASE
+        :class:`~ase.Atoms` object set via :meth:`set_atoms`.  Calling
+        this method stores a separate override array, which takes
+        priority.  Useful when the trajectory has been relabelled (e.g.
+        via :meth:`transform_species`) without changing the underlying
+        atoms object.
+
+        :param array-like types: 1-D sequence of chemical symbols,
+            one per atom.
+        """
         types = np.array(types, dtype=str)
         self.set_array(self._TYPES_KEY, types,
                        check_existing=False,
                        check_nat=False, check_nstep=False,)
 
     def get_types(self):
+        """
+        Return a 1-D array of chemical symbols, one per atom.
+
+        Priority: the override array set by :meth:`set_types` is
+        returned if present; otherwise symbols are taken from the ASE
+        atoms object; returns None if neither is available.
+        """
         if self._TYPES_KEY in self.get_arraynames():
             return self.get_array(self._TYPES_KEY)
         elif self._atoms is not None:
@@ -192,6 +220,10 @@ class Trajectory(AttributedArray):
         return self.atoms.cell
 
     def set_cells(self, array, check_existing=False):
+        # make sure a list is converted to an array before
+        # calling shape:
+        
+        array = np.array(array)
         if array.shape == (3, 3):
             array = np.tile(array, (self.nstep, 1, 1))
         self.set_array(self._CELL_KEY, array,
@@ -201,11 +233,26 @@ class Trajectory(AttributedArray):
                        wanted_shape_2=3)
 
     def get_cells(self):
+        """
+        Return the per-step cell array of shape (nstep, 3, 3) in
+        Angstrom, or None if no time-varying cell has been stored.
+
+        When the cell is constant throughout the trajectory it is not
+        stored here; use :attr:`cell` (from the reference atoms object)
+        instead.
+        """
         if self._CELL_KEY in self.get_arraynames():
             return self.get_array(self._CELL_KEY)
         return None
 
     def get_volumes(self):
+        """
+        Return the cell volume at each step as a 1-D array of length
+        nstep, in Angstrom^3.
+
+        If no time-varying cell is stored, the constant volume from the
+        reference atoms object is broadcast across all steps.
+        """
         cells = self.get_cells()
         if cells is None:
             volume = self.atoms.get_volume()

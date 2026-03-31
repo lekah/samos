@@ -13,10 +13,11 @@ from ase.io import read
 def calculate_plot_vaf(traj):
     da = DynamicsAnalyzer(trajectories=[traj])
     res = da.get_vaf(
-        t_end_fit_ps=5,  # where to end fit of MSD
-        t_start_fit_ps=1,  # where to start fitting MSD
+        t_start_fit=1,   # where to start fitting VAF integral
+        t_end_fit=5,     # where to end fit of VAF integral
+        t_unit='ps',
         nr_of_blocks=4,  # how many independent blocks to calculate
-        stepsize_t=1,  # stepsize of times in MSD analysis,
+        stepsize_t=1,    # stepsize of times in VAF analysis,
         stepsize_tau=10  # stepsize for time averaging,
     )
     plot_vaf_isotropic(res)

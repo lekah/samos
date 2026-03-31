@@ -185,7 +185,7 @@ def read_lammps_dump(filename, elements=None,
                      ignore_forces=False, ignore_velocities=False,
                      skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
                      additional_keywords_dump=[], quiet=False,
-                     istep=1):
+                     istep=1, nsteps=None):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
@@ -221,6 +221,9 @@ def read_lammps_dump(filename, elements=None,
         additional keywords to be added read form dump and
         to be added as array. The column name is used both
         as key but also as arrayname
+    :param nsteps:
+        Stop after this many frames have been stored (i.e. after
+        applying *skip* and *istep*).  If None, read until end of file.
     """
     # opening a first time to check file and get
     # indices of positions, velocities etc...
@@ -364,6 +367,10 @@ def read_lammps_dump(filename, elements=None,
                     additional_arrays[kw].append(
                         np.array(body[:, idx_add],
                                  dtype=float)[sorting_key])
+                if nsteps is not None and len(positions) >= nsteps:
+                    if not quiet:
+                        print(f'Reached nsteps={nsteps}, stopping')
+                    break
             iframe += 1
     if not quiet:
         print(f'Read trajectory of length {iframe}\n'
@@ -464,6 +471,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '-i', '--istep', type=int, default=1,
         help='Just take this frequency of steps from the trajectory')
+    parser.add_argument(
+        '--nsteps', type=int, default=None,
+        help='Stop after storing this many frames (after skip and istep).')
     parser.add_argument(
         '--thermo-file', help='File path to equivalent thermo-file')
     parser.add_argument(

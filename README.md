@@ -26,11 +26,68 @@ Other dependencies: `ase`, `scipy`, `matplotlib`.
 
 ---
 
+## Examples
+
+Working examples are in the `examples/` directory:
+
+| Folder | What it shows |
+|--------|---------------|
+| `ex1-compute-MSD-from-LAMMPS/` | MSD from a LAMMPS dump; Fortran vs C++ benchmark |
+| `ex2-compute-VAF-from-extxyz/` | VAF and VDOS from an extxyz file |
+| `ex3-compute-RDF/` | Radial distribution function |
+| `ex4-compute-ionic-density/` | Ionic probability densities |
+| `ex5-using-the-script/` | All of the above reproduced with the `samos` CLI |
+
+Run `bash examples/ex5-using-the-script/run.sh` from the repository root
+to see every sub-command in action.
+
+---
+
 ## Command-line usage
 
 The `samos` script accepts a trajectory path followed by a sub-command.
+Global options (trajectory format, preprocessing, output) come before the
+sub-command; sub-command-specific options come after it.
+
+```
+samos TRAJECTORY [global options] COMMAND [command options]
+```
+
 Time values are plain floats; the unit is set once per sub-command with
 `--t-unit` (choices: `fs`, `ps`, `dt`; default: `ps`).
+
+### Reading LAMMPS dump files
+
+LAMMPS dump files are not auto-detected.  Use one of these flags to
+tell `samos` how to resolve element names:
+
+```bash
+# Dump has an 'element' column -- no element list needed
+samos traj.lammpstrj --lammps --timestep 2 msd ...
+
+# Dump has a 'type' column -- supply symbols in LAMMPS type order
+samos traj.lammpstrj --lammps-types Li Ge P S --timestep 2 msd ...
+
+# No type or element column -- supply one symbol per atom
+# Accepts a formula string or a space-separated list
+samos traj.lammpstrj --lammps-elements Li10GeP2S12 --timestep 2 msd ...
+samos traj.lammpstrj --lammps-elements Al Al Al --timestep 2 msd ...
+```
+
+### Preprocessing
+
+```bash
+# Subtract centre-of-mass motion before analysis
+samos traj.extxyz --recenter msd ...
+
+# Derive velocities from positions (required for VAF/VDOS when the
+# trajectory file does not store velocities)
+samos traj.extxyz --compute-velocities vaf ...
+
+# Relabel all atoms as a single species before analysis
+samos traj.lammpstrj --lammps-types Li Ge P S \
+    --transform-species Li msd ...
+```
 
 ### MSD
 
@@ -38,38 +95,54 @@ Time values are plain floats; the unit is set once per sub-command with
 # Fit window 2-4 ps, 6 blocks, Li and O species
 samos traj.extxyz --species Li O -n 6 msd --t-start-fit 2 --t-end-fit 4
 
-# Same but specify fit window in femtoseconds
+# Specify fit window in femtoseconds
 samos traj.extxyz msd --t-start-fit 2000 --t-end-fit 4000 --t-unit fs
 
-# Use the C++ backend with 4 threads; write results to CSV
-samos traj.extxyz msd -b cpp -n 4 --write msd.csv
-
-# Fit window in timesteps (dt)
+# Fit window in timesteps
 samos traj.extxyz msd --t-start-fit 160 --t-end-fit 320 --t-unit dt
+
+# C++ backend with 4 OpenMP threads; write results to CSV
+samos traj.extxyz msd -b cpp -n 4 --write msd.csv --savefig msd.png
+
+# LAMMPS dump, Li species, 3 blocks
+samos traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
+    --species Li -n 3 \
+    msd --t-start-fit 50 --t-end-fit 100
 ```
 
 ### VAF
+
+VAF and VDOS require velocities.  If the trajectory file does not store
+them, add `--compute-velocities` to derive them from positions, if every timestep was stored (otherwise velocities cannot be re-computed)
 
 ```bash
 # 12 blocks, integral-averaging window 2-4 ps, max lag time 5 ps
 samos traj.extxyz -n 12 vaf --t-start-fit 2 --t-end-fit 4 --t-end 5
 
-# Remove rigid-body angular momentum before computing the VAF
-samos traj.extxyz vaf --remove-angular-momentum --t-unit fs \
-    --t-start-fit 2000 --t-end-fit 4000
+# extxyz without velocities: derive from positions first
+samos traj.extxyz --compute-velocities --timestep 2 \
+    -n 4 vaf --t-start-fit 1 --t-end-fit 5
+
+# Remove rigid-body angular momentum
+samos traj.extxyz --compute-velocities \
+    vaf --remove-angular-momentum --t-start-fit 1 --t-end-fit 5
 
 # Write VAF to CSV and save plot
-samos traj.extxyz vaf --write vaf.csv --savefig vaf.png
+samos traj.extxyz --compute-velocities \
+    vaf --write vaf.csv --savefig vaf.png
 ```
 
 ### VDOS (vibrational density of states)
 
 ```bash
 # 4 blocks, smoothing kernel width of 3 bins
-samos traj.extxyz -n 4 vdos --smoothing 3
+samos traj.extxyz --compute-velocities -n 4 vdos --smoothing 3
 
 # Plot interactively
-samos traj.extxyz vdos --plot
+samos traj.extxyz --compute-velocities vdos --plot
+
+# Save to file
+samos traj.extxyz --compute-velocities vdos --savefig vdos.png
 ```
 
 ### RDF
@@ -78,8 +151,12 @@ samos traj.extxyz vdos --plot
 # All pairs involving Li, radius 6 A
 samos traj.extxyz --species Li rdf --radius 6
 
-# Explicit pairs only
+# Explicit pairs, custom bin count
 samos traj.extxyz rdf --species-pairs Li-O O-O --bins 200
+
+# LAMMPS dump
+samos traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
+    rdf --radius 6 --savefig rdf.png
 ```
 
 ### Global options
@@ -87,9 +164,13 @@ samos traj.extxyz rdf --species-pairs Li-O O-O --bins 200
 | Flag | Description |
 |------|-------------|
 | `--timestep FS` | Override the trajectory timestep (fs) |
+| `--lammps` | Read as LAMMPS dump (file must have an `element` column) |
+| `--lammps-types SYM ...` | Read as LAMMPS dump; map integer types to symbols in order |
+| `--lammps-elements SYM...\|FORMULA` | Read as LAMMPS dump; assign symbols per atom or via formula |
 | `--species SYM ...` | Restrict analysis to these chemical symbols |
 | `-n N` / `--nblocks N` | Split trajectory into N blocks |
 | `--recenter` | Subtract centre-of-mass motion before analysis |
+| `--compute-velocities` | Derive velocities from positions (Verlet formula) |
 | `--transform-species SYM` | Relabel all atoms as SYM |
 | `--write FILE` | Write results to a CSV file |
 | `--plot` | Show the plot interactively |
@@ -108,7 +189,7 @@ traj.recenter()
 
 d = DynamicsAnalyzer(trajectories=[traj])
 
-# MSD — fit window and block length both in ps
+# MSD -- fit window and block length both in ps
 msd = d.get_msd(
     species_of_interest=['Li', 'O'],
     t_start_fit=2., t_end_fit=4., t_unit='ps',
@@ -151,7 +232,7 @@ The following changes break existing call sites.
 Old code used per-parameter unit suffixes:
 
 ```python
-# OLD — no longer accepted; raises InputError
+# OLD -- no longer accepted; raises InputError
 d.get_msd(t_start_fit_ps=2., t_end_fit_ps=4., block_length_dt=640)
 d.get_vaf(t_end_fs=5000., nr_of_blocks=12)
 ```

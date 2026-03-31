@@ -32,6 +32,50 @@ RunningParams = namedtuple('RunningParams', [
 ])
 
 
+def _check_deprecated_time_kwargs(kwargs):
+    """
+    Raise InputError if *kwargs* contains old-style unit-suffix time
+    parameters (e.g. ``t_end_fit_ps``, ``block_length_dt``).
+
+    These were removed when the API was redesigned to accept a plain
+    numeric value plus a single ``t_unit`` argument per call.  Any
+    remaining unrecognised keyword is also rejected here so callers do
+    not need a second guard.
+
+    :param dict kwargs: The ``**kwargs`` dict from the calling method.
+    :raises InputError: Always, when *kwargs* is non-empty.
+    """
+    _TIME_PARAMS = (
+        't_start', 't_end', 't_start_fit', 't_end_fit',
+        'block_length', 't_long_end',
+    )
+    _OLD_SUFFIXES = ('_fs', '_ps', '_dt')
+    old = [
+        k for k in kwargs
+        if any(k == p + s for p in _TIME_PARAMS for s in _OLD_SUFFIXES)
+    ]
+    if old:
+        raise InputError(
+            "Unrecognized keyword argument(s): {}.\n"
+            "The time-parameter API changed: unit suffixes (_fs, _ps, "
+            "_dt) are no longer supported.\n"
+            "Pass a plain numeric value and set t_unit instead, e.g.:\n"
+            "  get_msd(t_end_fit=10, t_unit='ps')   "
+            "# was: t_end_fit_ps=10\n"
+            "  get_msd(t_end_fit=10000, t_unit='fs')  "
+            "# was: t_end_fit_fs=10000\n"
+            "  get_msd(t_end_fit=800, t_unit='dt')   "
+            "# was: t_end_fit_dt=800\n"
+            "See README.md for the full list of changes.".format(
+                ', '.join(old))
+        )
+    if kwargs:
+        raise InputError(
+            "Unrecognized keyword argument(s): {}.".format(
+                ', '.join(kwargs))
+        )
+
+
 class TimeSeries(AttributedArray):
     pass
 
@@ -260,7 +304,8 @@ class DynamicsAnalyzer(object):
                 t_start_fit=0, t_end_fit=None,
                 block_length=None, nr_of_blocks=None,
                 do_com=False, do_long=False,
-                t_long_end=None, t_long_factor=None):
+                t_long_end=None, t_long_factor=None,
+                **kwargs):
         """
         Calculate the mean-square displacement (MSD).
 
@@ -317,7 +362,13 @@ class DynamicsAnalyzer(object):
         :param float t_long_factor:
             Fraction of the trajectory length to use as the long-time
             window (dimensionless). Mutually exclusive with *t_long_end*.
+        :raises InputError:
+            If old-style unit-suffix kwargs are passed (e.g.
+            ``t_end_fit_ps``). These were removed in the API redesign;
+            pass a plain value and ``t_unit`` instead.
         """
+        _check_deprecated_time_kwargs(kwargs)
+
         if backend == 'cpp':
             from samos.lib.mdutils_cpp_omp import (
                 calculate_msd_specific_atoms,
@@ -710,7 +761,9 @@ class DynamicsAnalyzer(object):
                 t_start=0, t_end=None,
                 t_start_fit=0, t_end_fit=None,
                 block_length=None, nr_of_blocks=None,
-                do_com=False):
+                do_com=False, **kwargs):
+
+        _check_deprecated_time_kwargs(kwargs)
 
         from samos.lib.mdutils import (
             calculate_vaf_specific_atoms,
@@ -969,7 +1022,8 @@ class DynamicsAnalyzer(object):
                            species_of_interest=None,
                            smothening=1,
                            block_length=None,
-                           nr_of_blocks=None):
+                           nr_of_blocks=None,
+                           **kwargs):
         """
         Calculate the power spectrum.
 
@@ -998,6 +1052,8 @@ class DynamicsAnalyzer(object):
         """
 
         from scipy import signal
+
+        _check_deprecated_time_kwargs(kwargs)
 
         try:
             trajectories = self._trajectories
