@@ -21,12 +21,13 @@ POS_REGEX_DECOMPOSED = re.compile(r"""
 ^                                                   # Linestart
 [ \t]*                                              # Optional white space
 (?P<sym>[A-Za-z]+[A-Za-z0-9]*)                      # get the symbol
-(?P<vals>(\s+ ([\-|\+]?  ( \d*[\.]\d+  | \d+[\.]?\d* )  ([E | e][+|-]?\d+)? ))+)
+(?P<vals>(\s+ ([\-|\+]? ( \d*[\.]\d+ | \d+[\.]?\d* ) ([E | e][+|-]?\d+)? ))+)
 """, re.X | re.M)
 
 
 POS_BLOCK_REGEX_DECOMPOSED = re.compile(r"""
-([A-Za-z]+[A-Za-z0-9]*\s+([ \t]+ [\-|\+]?  ( \d*[\.]\d+  | \d+[\.]?\d* )  ([E | e][+|-]?\d+)?)+\s*)+
+([A-Za-z]+[A-Za-z0-9]*\s+([ \t]+ [\-|\+]?
+( \d*[\.]\d+  | \d+[\.]?\d* )  ([E | e][+|-]?\d+)?)+\s*)+
 """, re.X | re.M)
 
 
@@ -35,7 +36,8 @@ def plot_charge(
         colormap='cool', color=None, invert_colors=False,
         do_isosurface=False, contours=[0.0001, 0.001], only_total=False,
         size=(1280, 720), azimuth=155, elevation=70,
-        distance=50, opacity=0.15, shift=None, savefig=None, atoms_of_interest=None,
+        distance=50, opacity=0.15, shift=None, savefig=None,
+        atoms_of_interest=None,
         no_legend=False, log_rho=False,
         no_cell=False, repeat=(1, 1, 1), base_unit='bohr',
         legend_title=None):

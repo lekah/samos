@@ -11,6 +11,69 @@ from samos.trajectory import Trajectory
 integer_regex = re.compile(r'(?P<int>\d+)')  # noqa: W605
 float_regex = re.compile(r'(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
 
+# Conversion factors from each LAMMPS unit system to samos internal units:
+#   velocity -> A/fs,  force -> eV/A,  energy -> eV
+# s_conv (stress) is left at 1.0 for all systems because samos does not
+# define a canonical internal stress unit.
+# Sources: https://docs.lammps.org/units.html
+# Physical constants used:
+#   1 eV  = 23.0609 kcal/mol  (NIST 2018)
+#   1 eV  = 27.2114 Hartree^-1
+#   1 Bohr = 0.529177 A
+#   1 atu  = 0.0241888 fs  (Hartree atomic time unit)
+_LAMMPS_UNITS = {
+    # real: distance A, time fs, energy kcal/mol, velocity A/fs
+    'real': {
+        'v_conv': 1.0,
+        'f_conv': 1.0 / 23.0609,
+        'e_conv': 1.0 / 23.0609,
+        's_conv': 1.0,
+    },
+    # metal: distance A, time ps, energy eV, velocity A/ps
+    'metal': {
+        'v_conv': 1e-3,
+        'f_conv': 1.0,
+        'e_conv': 1.0,
+        's_conv': 1.0,
+    },
+    # si: distance m, time s, energy J, velocity m/s
+    'si': {
+        'v_conv': 1e-5,          # m/s -> A/fs: 1e10 A / 1e15 fs
+        'f_conv': 6.2415e8,      # N -> eV/A:  6.2415e18 eV / 1e10 A
+        'e_conv': 6.2415e18,     # J -> eV
+        's_conv': 1.0,
+    },
+    # cgs: distance cm, time s, energy erg, velocity cm/s
+    'cgs': {
+        'v_conv': 1e-7,          # cm/s -> A/fs: 1e8 A / 1e15 fs
+        'f_conv': 6.2415e3,      # dyne -> eV/A: 1e-5 N * 6.2415e8 eV*A/N/A
+        'e_conv': 6.2415e11,     # erg -> eV: 1e-7 J * 6.2415e18 eV/J
+        's_conv': 1.0,
+    },
+    # electron: distance Bohr, time atu, energy Hartree, velocity Bohr/atu
+    'electron': {
+        'v_conv': 0.529177 / 0.0241888,   # Bohr/atu -> A/fs ~ 21.877
+        'f_conv': 27.2114 / 0.529177,     # Ha/Bohr -> eV/A ~ 51.42
+        'e_conv': 27.2114,                 # Ha -> eV
+        's_conv': 1.0,
+    },
+    # micro: distance micron, time microsecond,
+    # velocity micron/microsecond = m/s
+    'micro': {
+        'v_conv': 1e-5,          # micron/us = m/s -> A/fs
+        'f_conv': 6.2415e-1,     # pg*micron/us^2 = 1e-9 N -> eV/A
+        'e_conv': 6.2415e3,      # pg*micron^2/us^2 = 1e-15 J -> eV
+        's_conv': 1.0,
+    },
+    # nano: distance nm, time ns, velocity nm/ns = m/s
+    'nano': {
+        'v_conv': 1e-5,          # nm/ns = m/s -> A/fs
+        'f_conv': 6.2415e-4,     # ag*nm/ns^2 = 1e-12 N -> eV/A
+        'e_conv': 6.2415e-3,     # ag*nm^2/ns^2 = 1e-21 J -> eV
+        's_conv': 1.0,
+    },
+}
+
 
 def get_indices(header_list, prefix='', postfix=''):
     try:
@@ -183,9 +246,9 @@ def read_lammps_dump(filename, elements=None,
                      thermo_file=None, thermo_pe=None, thermo_stress=None,
                      thermo_keywords=[], save_extxyz=False, outfile=None,
                      ignore_forces=False, ignore_velocities=False,
-                     skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0,
+                     skip=0, f_conv=1.0, e_conv=1.0, s_conv=1.0, v_conv=1.0,
                      additional_keywords_dump=[], quiet=False,
-                     istep=1, nsteps=None):
+                     istep=1, nsteps=None, units=None):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
@@ -214,9 +277,18 @@ def read_lammps_dump(filename, elements=None,
     :param ignore_forces: ignore forces even if written in dump
     :param ignore_velocities: ignore velocities even if written in dump
     :param skip: skip first n steps
-    :param f_conv: force conversion factor
-    :param e_conv: energy conversion factor
+    :param f_conv: force conversion factor to eV/Angstrom
+    :param e_conv: energy conversion factor to eV
     :param s_conv: stress conversion factor
+    :param v_conv:
+        Velocity conversion factor to Angstrom/femtosecond (internal
+        units).  Ignored when *units* is set.
+    :param units:
+        LAMMPS unit system name.  When given, sets *v_conv*, *f_conv*,
+        *e_conv*, and *s_conv* automatically.  Cannot be combined with
+        any of those individual conversion factors.
+        Supported values: ``'real'``, ``'metal'``, ``'si'``, ``'cgs'``,
+        ``'electron'``, ``'micro'``, ``'nano'``.
     :param additional_keywords_dump:
         additional keywords to be added read form dump and
         to be added as array. The column name is used both
@@ -225,6 +297,21 @@ def read_lammps_dump(filename, elements=None,
         Stop after this many frames have been stored (i.e. after
         applying *skip* and *istep*).  If None, read until end of file.
     """
+    if units is not None:
+        if units not in _LAMMPS_UNITS:
+            raise ValueError(
+                "Unknown unit system '{}'. Supported: {}.".format(
+                    units, ', '.join(sorted(_LAMMPS_UNITS))))
+        if any(c != 1.0 for c in (v_conv, f_conv, e_conv, s_conv)):
+            raise ValueError(
+                "Cannot combine 'units' with individual conversion "
+                "factors (v_conv, f_conv, e_conv, s_conv).")
+        _u = _LAMMPS_UNITS[units]
+        v_conv = _u['v_conv']
+        f_conv = _u['f_conv']
+        e_conv = _u['e_conv']
+        s_conv = _u['s_conv']
+
     # opening a first time to check file and get
     # indices of positions, velocities etc...
     with open(filename) as f:
@@ -357,8 +444,9 @@ def read_lammps_dump(filename, elements=None,
                 timesteps.append(timestep_)
                 cells.append(cell)
                 if has_vel:
-                    velocities.append(np.array(body[:, velids],
-                                               dtype=float)[sorting_key])
+                    velocities.append(
+                        v_conv*np.array(body[:, velids],
+                                        dtype=float)[sorting_key])
                 if has_frc:
                     forces.append(f_conv*np.array(body[:, frcids],
                                                   dtype=float)[sorting_key])
@@ -459,15 +547,22 @@ if __name__ == '__main__':
                               'the masses of the types'))
     parser.add_argument('--timestep', type=float,
                         help='The timestep of the trajectory printed')
+    parser.add_argument(
+        '--units', default=None, choices=sorted(_LAMMPS_UNITS),
+        help='LAMMPS unit system. Sets all conversion factors automatically. '
+             'Cannot be combined with --v-conv, --f-conv, --e-conv, or '
+             '--s-conv.')
     parser.add_argument('--f-conv', type=float,
-                        help='The conversion factor for forces',
+                        help='Conversion factor for forces to eV/A.',
                         default=1.0)
     parser.add_argument('--e-conv', type=float,
-                        help='The conversion factor for energies',
+                        help='Conversion factor for energies to eV.',
                         default=1.0)
     parser.add_argument('--s-conv', type=float,
-                        help='The conversion factor for stresses',
+                        help='Conversion factor for stresses.',
                         default=1.0)
+    parser.add_argument('--v-conv', type=float, default=1.0,
+                        help='Conversion factor for velocities to A/fs.')
     parser.add_argument(
         '-i', '--istep', type=int, default=1,
         help='Just take this frequency of steps from the trajectory')
@@ -501,4 +596,13 @@ if __name__ == '__main__':
     parser.add_argument('-q', '--quiet', action='store_true',
                         help='Do not print anything')
     args = parser.parse_args()
+    if args.units is not None:
+        manual = [f'--{k.replace("_", "-")}'
+                  for k, default in (('v_conv', 1.0), ('f_conv', 1.0),
+                                     ('e_conv', 1.0), ('s_conv', 1.0))
+                  if getattr(args, k) != default]
+        if manual:
+            parser.error(
+                '--units cannot be combined with individual conversion '
+                'flags: ' + ', '.join(manual))
     read_lammps_dump(**vars(args))

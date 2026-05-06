@@ -24,6 +24,52 @@ pip install .
 
 Other dependencies: `ase`, `scipy`, `matplotlib`.
 
+The build compiles Fortran extensions with f2py and a C++ extension with
+pybind11 + OpenMP.  A Fortran compiler (gfortran) and a C++ compiler must
+be present before running `pip install .`.
+
+```bash
+# conda
+conda install -c conda-forge gfortran
+
+# apt (Debian/Ubuntu)
+sudo apt install gfortran
+```
+
+### Troubleshooting build failures
+
+**`numpy.f2py` returns non-zero exit status during `pip install`**
+
+The pip output usually truncates the real compiler error.  Run the
+failing f2py command directly to see it:
+
+```bash
+cd samos/lib
+python -m numpy.f2py -c gaussian_density.f90 -m gaussian_density
+```
+
+Common root causes:
+
+| Symptom | Fix |
+|---------|-----|
+| `gfortran: command not found` | Install gfortran (see above) |
+| `meson: command not found` | `pip install meson ninja` |
+| Errors about `numpy.distutils` on Python 3.12+ | Upgrade numpy to 2.x (`pip install "numpy>=2.0"`) and ensure meson/ninja are installed |
+
+**C++ extension fails to compile (`-fopenmp` not found)**
+
+The C++ backend uses OpenMP.  On macOS with Apple Clang, `-fopenmp` is
+not available by default.  Install LLVM via Homebrew and set the
+compiler environment variables, or install gcc:
+
+```bash
+brew install gcc
+CC=gcc-14 CXX=g++-14 pip install .
+```
+
+The Fortran backend works without OpenMP and is used by default; the
+C++ backend is optional.
+
 ---
 
 ## Examples

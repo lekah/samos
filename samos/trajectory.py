@@ -222,7 +222,7 @@ class Trajectory(AttributedArray):
     def set_cells(self, array, check_existing=False):
         # make sure a list is converted to an array before
         # calling shape:
-        
+
         array = np.array(array)
         if array.shape == (3, 3):
             array = np.tile(array, (self.nstep, 1, 1))
@@ -373,7 +373,7 @@ class Trajectory(AttributedArray):
         # Written as the outer-product form to avoid explicit delta_ab:
         #   I = sum_i m_i * (|r_i|^2 * eye(3) - outer(r_i, r_i))
         r2 = np.einsum('sia,sia->si', pos, pos)       # (nstep, nat)
-        I = (np.einsum('si,ab->sab', masses * r2, np.eye(3))
+        I = (np.einsum('si,ab->sab', masses * r2, np.eye(3))  # noqa: E741
              - np.einsum('i,sia,sib->sab', masses, pos, pos))
 
         # Angular momentum per step: L = sum_i m_i * (r_i x v_i)
