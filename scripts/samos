@@ -23,7 +23,7 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 from samos.trajectory import Trajectory
 from samos.analysis.dynamics import DynamicsAnalyzer
-from samos.analysis.rdf import RDF
+from samos.analysis.rdf import RDF, ADF
 from samos.plotting.plot_dynamics import (
     plot_msd_isotropic,
     plot_power_spectrum,
@@ -447,6 +447,146 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
     return res
 
 
+def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
+            bonds=None, bonds_file=None, radius=None, static_bonds=False,
+            bins=180, plot=False, savefig=None, write=None,
+            species=None):
+    """
+    Compute the angular distribution function for *traj* and optionally
+    display, save, or write results.
+
+    :param traj: Pre-loaded trajectory.
+    :type traj: :class:`~samos.trajectory.Trajectory`
+    :param int stepsize:
+        Step size over trajectory frames (default 1).
+    :param list centers:
+        Center species symbols.  Expands to all (*,center,*) triplets
+        for species present in the trajectory.
+        Mutually exclusive with *species_triplets*.
+    :param list species_triplets:
+        Explicit triplet strings ``'A-B-C'`` (center in the middle),
+        e.g. ``['O-Si-O', 'O-Al-O']``.
+        Mutually exclusive with *centers*.
+    :param list bonds:
+        Per-bond cutoff strings ``'SPEC:RMIN:RMAX'`` in Angstrom,
+        e.g. ``['Si-O:1.4:2.0']``.  Mutually exclusive with
+        *bonds_file* and *radius*.
+    :param str bonds_file:
+        Path to a LAMMPS data file whose ``Bonds`` section provides
+        explicit bond topology.  Mutually exclusive with *bonds* and
+        *radius*.
+    :param float radius:
+        Global cutoff in Angstrom: all atom pairs within this distance
+        are treated as bonded.  Expands to ``(0, radius)`` for every
+        species pair present in the trajectory.  Mutually exclusive
+        with *bonds* and *bonds_file*.
+    :param bool static_bonds:
+        When using *bonds* cutoffs, detect topology once from the first
+        frame and reuse it for all frames.
+    :param int bins:
+        Number of angle bins over [0, 180] degrees (default 180).
+    :param bool plot:
+        Show the ADF plot interactively (requires a display).
+    :param str savefig:
+        File path to save the plot.
+    :param str write:
+        If given, write the ADF for each triplet to this CSV file.
+        Columns: ``angle_deg``, then ``adf_A_B_C`` per triplet.
+    :param list species:
+        Fallback center species when neither *centers* nor
+        *species_triplets* is given (mapped from the top-level
+        ``--species`` flag).
+    """
+    # Parse bond cutoffs: ['Si-O:1.4:2.0', ...] -> {'Si-O': (1.4, 2.0)}
+    bonds_dict = None
+    if bonds is not None:
+        bonds_dict = {}
+        for token in bonds:
+            parts = token.split(':')
+            if len(parts) != 3:
+                raise ValueError(
+                    "Bond cutoff must be SPEC:RMIN:RMAX "
+                    "(e.g. Si-O:1.4:2.0), got '{}'.".format(token))
+            bonds_dict[parts[0]] = (float(parts[1]), float(parts[2]))
+    elif radius is not None:
+        # Expand to all species pairs present in the trajectory.
+        all_species = sorted(set(traj.get_types()))
+        bonds_dict = {}
+        for i, s1 in enumerate(all_species):
+            for s2 in all_species[i:]:
+                bonds_dict['{}-{}'.format(s1, s2)] = (0.0, radius)
+
+    # Parse triplet strings: ['O-Si-O', ...] -> [('O','Si','O'), ...]
+    triplets = None
+    if species_triplets is not None:
+        triplets = []
+        for t in species_triplets:
+            parts = t.split('-')
+            if len(parts) != 3:
+                raise ValueError(
+                    "Triplet must be A-B-C with the center species in "
+                    "the middle (e.g. O-Si-O), got '{}'.".format(t))
+            triplets.append(tuple(parts))
+
+    # Species selection priority: triplets > centers > species (top-level)
+    effective_centers = centers
+    if triplets is None and effective_centers is None:
+        effective_centers = species  # None -> ADF computes all triplets
+
+    adf_analyzer = ADF(trajectory=traj)
+    if bonds_file is not None:
+        adf_analyzer.load_bonds_lammps(bonds_file)
+
+    res = adf_analyzer.run(
+        species_triplets=triplets,
+        centers=effective_centers,
+        stepsize=stepsize,
+        nbins=bins,
+        bonds=bonds_dict,
+        static_bonds=static_bonds)
+
+    computed_triplets = res.get_attr('species_triplets')
+
+    if write:
+        if not computed_triplets:
+            print('Warning: no triplets computed; not writing output.')
+        else:
+            sl, sc, sr = computed_triplets[0]
+            x = res.get_array('angles_{}_{}_{}'.format(sl, sc, sr))
+            y_cols, y_labels = [], []
+            for sl, sc, sr in computed_triplets:
+                key = '{}_{}_{}'.format(sl, sc, sr)
+                if 'adf_{}'.format(key) in res:
+                    y_cols.append(res.get_array('adf_{}'.format(key)))
+                    y_labels.append('adf_{}'.format(key))
+            if y_cols:
+                _write_csv(write, x_col=x, x_label='angle_deg',
+                           y_cols=y_cols, y_labels=y_labels)
+
+    if plot or savefig:
+        gs = GridSpec(1, 1, left=0.18, right=0.95,
+                      bottom=0.18, top=0.95)
+        fig = plt.figure(figsize=(4, 3))
+        ax = fig.add_subplot(gs[0])
+        for sl, sc, sr in computed_triplets:
+            key = '{}_{}_{}'.format(sl, sc, sr)
+            if 'adf_{}'.format(key) not in res:
+                continue
+            angles = res.get_array('angles_{}'.format(key))
+            adf = res.get_array('adf_{}'.format(key))
+            ax.plot(angles, adf, label='{}-{}-{}'.format(sl, sc, sr))
+        ax.set_xlabel('angle (deg)')
+        ax.set_ylabel('ADF (per center atom per frame per deg)')
+        ax.legend()
+
+        if savefig:
+            plt.savefig(savefig, dpi=240)
+        else:
+            plt.show()
+
+    return res
+
+
 def _build_parser():
     parser = ArgumentParser(
         prog='samos', description=__doc__,
@@ -625,6 +765,55 @@ def _build_parser():
         '--no-int', action='store_true', dest='no_int',
         help='Suppress the running integral from the plot.')
 
+    # ------------------------------------------------------------------
+    # adf sub-command
+    # ------------------------------------------------------------------
+    p_adf = sub.add_parser(
+        'adf',
+        help='Calculate and optionally plot the angular distribution '
+             'function.',
+        description='Calculate the ADF for bond triplets A-B-C '
+                    '(B is the center atom).')
+    p_adf.add_argument(
+        '-s', '--stepsize', type=int, default=1, metavar='N',
+        help='Step size over trajectory frames (default: 1).')
+    p_adf.add_argument(
+        '-b', '--bins', type=int, default=180, metavar='N',
+        help='Number of angle bins over [0, 180] degrees (default: 180).')
+    p_adf.add_argument(
+        '--static-bonds', action='store_true', dest='static_bonds',
+        help='When using --bonds cutoffs, detect topology once from the '
+             'first frame and reuse it for all frames (default: detect '
+             'per frame).')
+
+    bond_src = p_adf.add_mutually_exclusive_group(required=True)
+    bond_src.add_argument(
+        '-r', '--radius', type=float, metavar='A',
+        help='Global neighbor cutoff in Angstrom: all pairs within this '
+             'distance are treated as bonded.  Applied to every species '
+             'pair present in the trajectory.')
+    bond_src.add_argument(
+        '--bonds', nargs='+', metavar='SPEC:RMIN:RMAX',
+        help='Per-bond distance cutoffs for neighbor detection.  Each '
+             'token has the form SPEC:RMIN:RMAX in Angstrom, e.g. '
+             'Si-O:1.4:2.0 Al-O:1.6:2.2.')
+    bond_src.add_argument(
+        '--bonds-file', metavar='FILE', dest='bonds_file',
+        help='LAMMPS data file containing a Bonds section with explicit '
+             'bond topology.')
+
+    triplet_sel = p_adf.add_mutually_exclusive_group()
+    triplet_sel.add_argument(
+        '--centers', nargs='+', metavar='SYMBOL',
+        help='Center species for the ADF.  Computes all (*,center,*) '
+             'triplets.  Mutually exclusive with --species-triplets.')
+    triplet_sel.add_argument(
+        '--species-triplets', nargs='+', metavar='A-B-C',
+        dest='species_triplets',
+        help='Explicit triplets to compute, center in the middle, '
+             'separated by dashes (e.g. O-Si-O O-Al-O).  '
+             'Mutually exclusive with --centers.')
+
     return parser
 
 
@@ -679,3 +868,13 @@ if __name__ == '__main__':
                 species_pairs=args.species_pairs,
                 radius=args.radius, bins=args.bins,
                 no_int=args.no_int, **common)
+    elif args.command == 'adf':
+        run_adf(traj, stepsize=args.stepsize,
+                centers=args.centers,
+                species_triplets=args.species_triplets,
+                bonds=args.bonds,
+                bonds_file=args.bonds_file,
+                radius=args.radius,
+                static_bonds=args.static_bonds,
+                bins=args.bins,
+                **common)
