@@ -24,6 +24,7 @@ from matplotlib.gridspec import GridSpec
 from samos.trajectory import Trajectory
 from samos.analysis.dynamics import DynamicsAnalyzer
 from samos.analysis.rdf import RDF, ADF
+from samos.utils.units import UNIT_SYSTEMS
 from samos.plotting.plot_dynamics import (
     plot_msd_isotropic,
     plot_power_spectrum,
@@ -76,7 +77,7 @@ def _write_csv(filename, x_col, x_label, y_cols, y_labels):
 
 
 def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
-                    lammps_elements=None, lammps=False):
+                    lammps_elements=None, lammps=False, units=None):
     """
     Load a trajectory from *trajectory_path* and return a
     :class:`~samos.trajectory.Trajectory` instance.
@@ -103,6 +104,11 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         Read the file as a LAMMPS dump without supplying element
         information.  Use this when the dump already contains an
         ``element`` column so the symbols can be read directly.
+    :param str units:
+        Named unit system to convert from (e.g. ``'metal'``, ``'real'``).
+        For LAMMPS dumps the conversion is applied during reading; for
+        all other formats it is applied after loading via
+        :meth:`~samos.trajectory.Trajectory.apply_unit_conversion`.
     :returns: :class:`~samos.trajectory.Trajectory`
     """
     if lammps_types is not None or lammps_elements is not None or lammps:
@@ -110,8 +116,8 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         traj = read_lammps_dump(trajectory_path,
                                 types=lammps_types,
                                 elements=lammps_elements,
-                                timestep=timestep)
-        # timestep already passed to the reader; skip the override below.
+                                timestep=timestep,
+                                units=units)
         return traj
     try:
         traj = Trajectory.load_file(trajectory_path)
@@ -120,6 +126,8 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         traj = Trajectory.from_atoms(aselist)
     if timestep is not None:
         traj.set_timestep(timestep)
+    if units is not None:
+        traj.apply_unit_conversion(**UNIT_SYSTEMS[units])
     return traj
 
 
@@ -644,6 +652,14 @@ def _build_parser():
         '--transform-species', metavar='SYMBOL', default=None,
         dest='transform_species',
         help='Relabel all atoms as SYMBOL before analysis.')
+    parser.add_argument(
+        '--units', default=None, metavar='SYSTEM',
+        choices=sorted(UNIT_SYSTEMS),
+        help='Convert trajectory arrays to samos internal units '
+             '(velocities -> A/fs, forces -> eV/A, energies -> eV). '
+             'For LAMMPS dumps conversion is applied during reading; '
+             'for all other formats it is applied after loading. '
+             'Choices: ' + ', '.join(sorted(UNIT_SYSTEMS)) + '.')
 
     plot_group = parser.add_mutually_exclusive_group()
     plot_group.add_argument(
@@ -828,7 +844,8 @@ if __name__ == '__main__':
     traj = load_trajectory(args.trajectory_path, timestep=args.timestep,
                            lammps_types=args.lammps_types,
                            lammps_elements=lammps_elements,
-                           lammps=args.lammps)
+                           lammps=args.lammps,
+                           units=args.units)
 
     if args.transform_species:
         traj.transform_species(args.transform_species)

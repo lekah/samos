@@ -428,6 +428,36 @@ class Trajectory(AttributedArray):
                        check_nat=False, check_nstep=True,
                        wanted_shape_len=1)
 
+    def apply_unit_conversion(self, l_conv=1.0, v_conv=1.0, f_conv=1.0,
+                              e_conv=1.0, s_conv=1.0):
+        """
+        Scale stored arrays to samos internal units in-place.
+
+        Only arrays present in the trajectory are touched; missing arrays
+        are silently skipped.
+
+        :param float l_conv: length factor (multiply to get Angstrom);
+            applied to both positions and cell vectors
+        :param float v_conv: velocity factor (multiply to get A/fs)
+        :param float f_conv: force factor (multiply to get eV/A)
+        :param float e_conv: energy factor (multiply to get eV)
+        :param float s_conv: stress factor
+        """
+        names = self.get_arraynames()
+        if l_conv != 1.0:
+            if self._POSITIONS_KEY in names:
+                self._arrays[self._POSITIONS_KEY] *= l_conv
+            if self._CELL_KEY in names:
+                self._arrays[self._CELL_KEY] *= l_conv
+        if v_conv != 1.0 and self._VELOCITIES_KEY in names:
+            self._arrays[self._VELOCITIES_KEY] *= v_conv
+        if f_conv != 1.0 and self._FORCES_KEY in names:
+            self._arrays[self._FORCES_KEY] *= f_conv
+        if e_conv != 1.0 and self._POT_ENER_KEY in names:
+            self._arrays[self._POT_ENER_KEY] *= e_conv
+        if s_conv != 1.0 and self._STRESS_KEY in names:
+            self._arrays[self._STRESS_KEY] *= s_conv
+
     def get_step_atoms(self, index, ignore_calculated=False,
                        warnings=True):
         """
