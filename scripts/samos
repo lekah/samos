@@ -76,6 +76,33 @@ def _write_csv(filename, x_col, x_label, y_cols, y_labels):
     np.savetxt(filename, data, delimiter=',', header=header, comments='')
 
 
+def _make_axes(margins=None):
+    """
+    Create the single-axes figure every sub-command plots into.
+
+    :param dict margins:
+        GridSpec margins, defaults to the layout used by the time-series
+        plots. The RDF passes its own, since its twin axis needs room on
+        the right.
+    :returns: the matplotlib Axes
+    """
+    if margins is None:
+        margins = dict(left=0.18, right=0.95, bottom=0.18, top=0.95)
+    gs = GridSpec(1, 1, **margins)
+    fig = plt.figure(figsize=(4, 3))
+    return fig.add_subplot(gs[0])
+
+
+def _finish_plot(savefig):
+    """
+    Save the current figure to *savefig*, or show it when that is None.
+    """
+    if savefig:
+        plt.savefig(savefig, dpi=240)
+    else:
+        plt.show()
+
+
 def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
                     lammps_elements=None, lammps=False, units=None):
     """
@@ -195,16 +222,10 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         )
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         plot_msd_isotropic(msd, ax=ax)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return msd
 
@@ -284,16 +305,10 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
         )
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         plot_vaf_isotropic(vaf, ax=ax)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return vaf
 
@@ -356,16 +371,10 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         )
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         plot_power_spectrum(vdos, ax=ax)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return vdos
 
@@ -436,17 +445,12 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
                    y_cols=y_cols, y_labels=y_labels)
 
     if plot or savefig:
-        gs = GridSpec(1, 1, top=0.99, right=0.83,
-                      left=0.14, bottom=0.16)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes(dict(top=0.99, right=0.83,
+                             left=0.14, bottom=0.16))
         plot_rdf(res, ax=ax, no_int=no_int)
         ax.set_xlim(-0.2, radius)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return res
 
@@ -568,10 +572,7 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
                            y_cols=y_cols, y_labels=y_labels)
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         for sl, sc, sr in computed_triplets:
             key = '{}_{}_{}'.format(sl, sc, sr)
             if 'adf_{}'.format(key) not in res:
@@ -583,10 +584,7 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
         ax.set_ylabel('ADF (per center atom per frame per deg)')
         ax.legend()
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return res
 

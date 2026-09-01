@@ -85,14 +85,14 @@ def read_xsf(filename, fold_positions=False):
     volume_au = volume_ang / bohr_to_ang**3
 
     if fold_positions:
-        invcell = np.matrix(cell).T.I
         cell = np.array(cell)
+        invcell = np.linalg.inv(cell.T)
         for idx, pos in enumerate(positions):
             # point in crystal coordinates
-            points_in_crystal = np.dot(invcell, pos).tolist()[0]
+            points_in_crystal = invcell @ pos
             # point collapsed into unit cell
-            points_in_unit_cell = [i % 1 for i in points_in_crystal]
-            positions[idx] = np.dot(cell.T, points_in_unit_cell)
+            points_in_unit_cell = points_in_crystal % 1.0
+            positions[idx] = cell.T @ points_in_unit_cell
 
     return dict(
         data=rho_of_r, volume_ang=volume_ang, volume_au=volume_au,
@@ -101,9 +101,26 @@ def read_xsf(filename, fold_positions=False):
 
 
 def write_xsf(
-        atoms, positions, cell, data,
+        atoms, positions, cell, data=None,
         vals_per_line=6, outfilename=None,
         is_flattened=False, shape=None,):
+    """
+    Write a structure and, optionally, a 3D grid to an xsf file.
+
+    :param atoms: The chemical symbols, one per position
+    :param positions: The absolute positions in angstrom
+    :param cell: The 3x3 cell in angstrom
+    :param data:
+        The grid, of shape given by shape if is_flattened. Pass None to
+        write the header and grid dimensions only, leaving the datagrid
+        block open for a writer that appends to the same file (that is
+        what samos.lib.gaussian_density.make_gaussian_density does).
+        shape is required in that case.
+    :param int vals_per_line: Values written per line of the datagrid
+    :param str outfilename: The file to write to, sys.stdout if None
+    :param bool is_flattened: Whether data is a flat array
+    :param shape: The (xdim, ydim, zdim) of the grid
+    """
     if isinstance(outfilename, str):
         f = open(outfilename, 'w')
     elif outfilename is None:
@@ -113,13 +130,13 @@ def write_xsf(
             'outfilename must be a path or None, got {}'.format(
                 type(outfilename)))
 
-    if is_flattened:
+    if is_flattened or data is None:
         try:
             xdim, ydim, zdim = shape
         except (TypeError, ValueError):
-            raise Exception(
-                'if you pass a flattend array you '
-                'need to give the original shape')
+            raise ValueError(
+                'shape is required when data is flattened or None, '
+                'got {}'.format(shape))
     else:
         xdim, ydim, zdim = data.shape
         shape = data.shape
@@ -141,6 +158,11 @@ DATAGRID_3D_UNKNOWN
     for row in cell:
         f.write('    {}\n'.format('    '.join(
             ['{:.9f}'.format(r) for r in row])))
+    if data is None:
+        # A caller appends the grid and the END markers itself.
+        if f is not sys.stdout:
+            f.close()
+        return
     col = 1
     if is_flattened:
         for val in data:

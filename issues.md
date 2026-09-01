@@ -152,23 +152,6 @@ sites and remove the shim in `scripts/samos`.
 
 ---
 
-## 24. `write_xsf_header` duplicates `write_xsf`
-
-**Fix difficulty: 3**
-
-`samos/analysis/get_gaussian_density.py:11-61` versus
-`samos/io/xsf.py:102-164`
-
-Near-verbatim copies: same CRYSTAL/PRIMVEC header, same `PRIMCOORD`
-block, same `data[x % xdim, y % ydim, z % zdim]` wrap loop, same
-`if col:` no-op, and now the same guarded-close fix applied twice. The only real
-difference is that the copy can emit a header with no data block.
-
-**Fix:** give `samos.io.xsf.write_xsf` a `data=None` mode and delete the
-copy.
-
----
-
 ## 25. Two incompatible minimum-image implementations in one module
 
 **Fix difficulty: 6**
@@ -243,23 +226,6 @@ call it instead of its inline copy.
 
 ---
 
-## 32. `np.matrix` is deprecated and pending removal
-
-**Fix difficulty: 3**
-
-`samos/io/xsf.py:87`, `samos/analysis/get_gaussian_density.py:148-158`
-
-`np.matrix` has been discouraged since NumPy 1.15 and is slated for
-removal. The `get_gaussian_density` bounding-box derivation leans on
-`*` meaning matrix multiplication and on `.I`, so the translation to
-`ndarray` (`@`, `np.linalg.inv`) must be done carefully.
-
-**Fix:** convert to `ndarray` with `@` and `np.linalg.inv`; verify the
-resulting `b1, b2, b3` bounding box is unchanged for a triclinic cell
-before and after.
-
----
-
 ## 33. `AttributedArray.__init__` dispatch depends on keyword order
 
 **Fix difficulty: 7**
@@ -281,42 +247,20 @@ every constructor call site, hence the score.
 
 ---
 
-## 35. `scripts/samos` plotting boilerplate repeated five times
+## 35. `util_msd` / `util_rdf_and_plot` duplicate the `scripts/samos` CLI
 
 **Fix difficulty: 3**
 
-`scripts/samos:197-205, 285-294, 351-360, 425-434, 574-590`
-
-The same `GridSpec(...) / plt.figure(figsize=(4,3)) / add_subplot /
-savefig-or-show` block appears in `run_msd`, `run_vaf`, `run_vdos`,
-`run_rdf` and `run_adf`, and twice more in
 `samos/analysis/dynamics.py:util_msd` and
-`samos/analysis/rdf.py:util_rdf_and_plot`.
+`samos/analysis/rdf.py:util_rdf_and_plot`, plus the `__main__` argument
+parsers below them, now overlap almost entirely with the `msd` and `rdf`
+sub-commands of `scripts/samos`. The repeated figure/save/show
+boilerplate has been factored into `_make_axes` / `_finish_plot` inside
+`scripts/samos`, but the two `util_*` functions still carry their own
+copies.
 
-`util_msd` and `util_rdf_and_plot` (plus their `__main__` argument
-parsers) now overlap almost entirely with `scripts/samos`.
-
-**Fix:** one `_make_axes()` / `_finish(fig, plot, savefig)` pair in
-`scripts/samos`; then decide whether the `util_*` functions and the
-per-module `__main__` blocks should be deleted in favour of the single
-CLI (see also issue #14).
-
----
-
-## 37. `get_kinetic_energies` runs a Python triple-nested loop
-
-**Fix difficulty: 3**
-
-`samos/analysis/dynamics.py:1020-1080`
-
-Loops over steps x atoms x polarisations in pure Python; unusable for
-large trajectories.
-
-**Fix:** `np.einsum('i,sic,sic->s', masses, vel, vel)` and equivalents
-for the species/atom decompositions. Assert the vectorised result
-matches the current loop on a small trajectory before replacing it --
-`tests/test_dynamics.py::TestCenterOfMassAndKineticEnergies` covers
-the species decomposition.
-
----
+**Needs a decision:** whether the per-module `__main__` blocks should
+exist at all now that `scripts/samos` is the entry point. Deleting them
+removes `python -m samos.analysis.rdf ...` as a usage, which may be in
+someone's scripts. Ask before removing.
 

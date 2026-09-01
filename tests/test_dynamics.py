@@ -441,5 +441,74 @@ class TestPowerSpectrumSmoothing(unittest.TestCase):
         np.testing.assert_allclose(base[1], perturbed[1], rtol=1e-10)
 
 
+class TestKineticEnergiesVectorized(unittest.TestCase):
+    """get_kinetic_energies ran a Python loop over steps x atoms x
+    polarizations.  The einsum replacement must reproduce it exactly."""
+
+    def _analyzer(self, seed=23, nstep=40, stepsize=3):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2')
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(rng.random((nstep, 4, 3)))
+        t.set_velocities(rng.normal(0., 0.01, (nstep, 4, 3)))
+        self.stepsize = stepsize
+        self.traj = t
+        return DynamicsAnalyzer(trajectories=[t], verbosity=0)
+
+    def _reference(self, kind):
+        """The original triple-nested loop, kept here as the oracle."""
+        from samos.utils.constants import amu_kg, kB
+        prefactor = amu_kg * 1e10 / kB
+        masses = self.traj.atoms.get_masses()
+        vel_array = self.traj.get_velocities()
+        nstep, nat, _ = vel_array.shape
+        steps = list(range(0, nstep, self.stepsize))
+        if kind == 'system':
+            out = np.zeros(len(steps))
+            for i0, istep in enumerate(steps):
+                for iat in range(nat):
+                    for ipol in range(3):
+                        out[i0] += (prefactor * masses[iat]
+                                    * vel_array[istep, iat, ipol]**2)
+            out /= nat * 3
+            return out
+        out = np.zeros((len(steps), nat))
+        for i0, istep in enumerate(steps):
+            for iat in range(nat):
+                for ipol in range(3):
+                    out[i0, iat] += (prefactor * masses[iat]
+                                     * vel_array[istep, iat, ipol]**2 / 3.)
+        return out
+
+    def test_system_matches_the_loop(self):
+        d = self._analyzer()
+        ke = d.get_kinetic_energies(stepsize=self.stepsize)
+        np.testing.assert_allclose(
+            ke.get_array('system_kinetic_energy_0'),
+            self._reference('system'), rtol=1e-12)
+
+    def test_atoms_matches_the_loop(self):
+        d = self._analyzer()
+        ke = d.get_kinetic_energies(stepsize=self.stepsize,
+                                    decompose_system=False,
+                                    decompose_atoms=True)
+        np.testing.assert_allclose(
+            ke.get_array('atoms_kinetic_energy_0'),
+            self._reference('atoms'), rtol=1e-12)
+
+    def test_species_is_the_mean_over_its_atoms(self):
+        d = self._analyzer()
+        ke = d.get_kinetic_energies(stepsize=self.stepsize,
+                                    decompose_species=True)
+        per_atom = self._reference('atoms')
+        species = ke.get_array('species_kinetic_energy_0')
+        for ityp, sym in enumerate(ke.get_attr('species_of_interest')):
+            idx = self.traj.get_indices_of_species(sym, start=0)
+            np.testing.assert_allclose(
+                species[:, ityp], per_atom[:, idx].mean(axis=1),
+                rtol=1e-12)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -3,66 +3,8 @@
 
 import sys
 import numpy as np
+from samos.io.xsf import write_xsf
 from samos.utils.terminal import get_terminal_width
-
-
-def write_xsf_header(
-        atoms, positions, cell, data,
-        vals_per_line=6, outfilename=None, **kwargs):
-    if isinstance(outfilename, str):
-        f = open(outfilename, 'w')
-    elif outfilename is None:
-        f = sys.stdout
-    else:
-        raise TypeError(
-            'outfilename must be a path or None, got {}'.format(
-                type(outfilename)))
-    if data is not None:
-        xdim, ydim, zdim = data.shape
-    else:
-        xdim = kwargs.get('xdim')
-        ydim = kwargs.get('ydim')
-        zdim = kwargs.get('zdim')
-    f.write(' CRYSTAL\n PRIMVEC\n')
-    for row in cell:
-        f.write('    {}\n'.format('    '.join(
-            ['{:.9f}'.format(r) for r in row])))
-    f.write('PRIMCOORD\n       {}        1\n'.format(len(atoms)))
-    for atom, pos in zip(atoms, positions):
-        f.write('{:<3}     {}\n'.format(
-            atom, '   '.join(['{:.9f}'.format(v) for v in pos])))
-
-    f.write("""BEGIN_BLOCK_DATAGRID_3D
-3D_PWSCF
-DATAGRID_3D_UNKNOWN
-        {}         {}         {}
-  0.000000  0.000000  0.000000
-""".format(*[i+1 for i in (xdim, ydim, zdim)]))
-
-    for row in cell:
-        f.write('    {}\n'.format('    '.join(
-            ['{:.9f}'.format(item) for item in row])))
-
-    if data is not None:
-        col = 1
-        for z in range(zdim+1):
-            for y in range(ydim+1):
-                for x in range(xdim+1):
-                    f.write('  {:0.4E}'.format(
-                        data[x % xdim, y % ydim, z % zdim]))
-                    if col < vals_per_line:
-                        col += 1
-                    else:
-                        f.write('\n')
-                        col = 1
-        if col:
-            f.write('\n')
-        f.write('END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n')
-    # Close only what this function opened.  An unconditional
-    # close() here shut sys.stdout, which is what
-    # outfilename=None -- the documented default -- selects.
-    if f is not sys.stdout:
-        f.close()
 
 
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
@@ -146,24 +88,26 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     print(
         '(get_gaussian_density) We do not show these atoms in the xsf file: '
         f'{indices_exclude_from_plot}')
-    write_xsf_header(
+    # data=None writes the header and grid dimensions only;
+    # make_gaussian_density appends the grid itself below.
+    write_xsf(
         [s for i, s in enumerate(symbols, start=1)
          if i not in indices_exclude_from_plot],
         [p for i, p in enumerate(starting_pos, start=1)
          if i not in indices_exclude_from_plot],
-        cell, None, outfilename=outputfile, xdim=n1, ydim=n2, zdim=n3)
+        cell, data=None, outfilename=outputfile, shape=(n1, n2, n3))
 
-    S = np.matrix(np.diag([1, 1, 1, -(sigma*n_sigma/density)**2]))
+    S = np.diag([1., 1., 1., -(sigma*n_sigma/density)**2])
     cellT = cell.T
-    cellTI = np.matrix(cellT).I
+    cellTI = np.linalg.inv(cellT)
     #  I describe the move from atomic to crystal
     # coordinates with an affine transformation M:
-    M = np.matrix(np.r_[np.c_[np.matrix(cellTI), np.zeros(3)], [[0, 0, 0, 1]]])
+    M = np.r_[np.c_[cellTI, np.zeros(3)], [[0., 0., 0., 1.]]]
     # Q is a check, but not used. Check is orthogonality
     # Q is the sphere transformed by transformation M
-    # Q = M.I.T * S * M.I
+    # Q = M.I.T @ S @ M.I
     # Now, as defined in the source, I calculate R = Q^(-1)
-    R = M * S.I * M.T
+    R = M @ np.linalg.inv(S) @ M.T
     # The boundaries are given by:
     # ~ xmax = (R[0,3] - np.sqrt(R[0,3]**2 - R[0,0]*R[3,3])) / R[3,3]
     # ~ xmin = (R[0,3] + np.sqrt(R[0,3]**2 - R[0,0]*R[3,3])) / R[3,3]

@@ -1026,16 +1026,14 @@ class DynamicsAnalyzer:
             vel_array = t.get_velocities()
             nstep, nat, _ = vel_array.shape
             steps = list(range(0, nstep, stepsize))
+            # (nsteps, nat, 3), the same steps the loops used to visit
+            vel = vel_array[::stepsize]
 
             if decompose_system:
-
-                kinE = np.zeros(len(steps))
-                for istep0, istep in enumerate(steps):
-                    for iat in range(nat):
-                        for ipol in range(3):
-                            kinE[istep0] += (
-                                prefactor * masses[iat]
-                                * vel_array[istep, iat, ipol]**2)
+                # sum_i m_i * |v_i|^2 for every step, vectorized over
+                # atoms and polarizations
+                kinE = prefactor * np.einsum(
+                    'i,sic,sic->s', masses, vel, vel)
                 kinE[:] /= nat*3  # I divide by the degrees of freedom!
                 kinetic_energies_series.set_array(
                     'system_kinetic_energy_{}'.format(itraj), kinE)
@@ -1049,13 +1047,10 @@ class DynamicsAnalyzer:
                 for ityp, atomic_species in enumerate(species_of_interest):
                     indices_of_interest = t.get_indices_of_species(
                         atomic_species, start=0)
-                    for istep0, istep in enumerate(steps):
-                        for _, iat in enumerate(indices_of_interest):
-                            for ipol in range(3):
-                                kinE_species[istep0, ityp] += (
-                                    prefactor * masses[iat] *
-                                    vel_array[istep, iat, ipol]**2)
-
+                    vel_this = vel[:, indices_of_interest]
+                    kinE_species[:, ityp] = prefactor * np.einsum(
+                        'i,sic,sic->s', masses[indices_of_interest],
+                        vel_this, vel_this)
                     kinE_species[:, ityp] /= float(len(indices_of_interest)*3)
 
                 kinetic_energies_series.set_array(
@@ -1067,13 +1062,9 @@ class DynamicsAnalyzer:
                     kinE_species.mean(axis=0).tolist())
 
             if decompose_atoms:
-                kinE = np.zeros((len(steps), nat))
-                for istep0, istep in enumerate(steps):
-                    # ~ print istep0
-                    for iat in range(nat):
-                        for ipol in range(3):
-                            kinE[istep0, iat] += prefactor * masses[iat] * \
-                                vel_array[istep, iat, ipol]**2 / 3.
+                # per atom, so only the polarizations are summed
+                kinE = (prefactor / 3.) * masses[None, :] * np.einsum(
+                    'sic,sic->si', vel, vel)
 
                 kinetic_energies_series.set_array(
                     'atoms_kinetic_energy_{}'.format(itraj), kinE)

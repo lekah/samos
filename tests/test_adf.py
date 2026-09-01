@@ -724,5 +724,49 @@ class TestBaseAnalyzerWithoutTrajectory(unittest.TestCase):
             RDF(trajectory='not a trajectory')
 
 
+class TestWriteXsfHeaderOnly(unittest.TestCase):
+    """get_gaussian_density carried a near-verbatim copy of write_xsf
+    that could emit a header with no data block.  write_xsf now does
+    that itself with data=None."""
+
+    def _capture(self, **kwargs):
+        import io
+        import sys
+        import numpy as np
+        from samos.io.xsf import write_xsf
+        buf = io.StringIO()
+        real = sys.stdout
+        sys.stdout = buf
+        try:
+            write_xsf(['H'], [[0., 0., 0.]], np.eye(3), **kwargs)
+        finally:
+            sys.stdout = real
+        return buf.getvalue()
+
+    def test_header_only_leaves_the_datagrid_open(self):
+        out = self._capture(data=None, shape=(2, 2, 2))
+        self.assertIn('BEGIN_BLOCK_DATAGRID_3D', out)
+        self.assertIn('DATAGRID_3D_UNKNOWN', out)
+        # dimensions are written as npoints+1, as xsf wants
+        self.assertIn('3         3         3', out)
+        # a caller appends the grid and closes the block
+        self.assertNotIn('END_DATAGRID_3D', out)
+
+    def test_full_write_still_closes_the_block(self):
+        import numpy as np
+        out = self._capture(data=np.arange(8.).reshape(2, 2, 2))
+        self.assertIn('END_DATAGRID_3D', out)
+        self.assertIn('END_BLOCK_DATAGRID_3D', out)
+
+    def test_header_only_requires_shape(self):
+        with self.assertRaises(ValueError):
+            self._capture(data=None)
+
+    def test_gaussian_density_uses_the_shared_writer(self):
+        import samos.analysis.get_gaussian_density as g
+        self.assertFalse(hasattr(g, 'write_xsf_header'))
+        self.assertTrue(hasattr(g, 'write_xsf'))
+
+
 if __name__ == '__main__':
     unittest.main()
