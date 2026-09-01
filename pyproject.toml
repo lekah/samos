@@ -40,6 +40,8 @@ Homepage = "https://github.com/lekah/samos"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["samos*"]
+namespaces = false
 
 [tool.setuptools.package-data]
-"*" = ["*.f90", "*.cpp"]
+"samos.lib" = ["*.f90", "*.cpp"]
