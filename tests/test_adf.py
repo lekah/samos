@@ -702,5 +702,27 @@ class TestWritersLeaveStdoutOpen(unittest.TestCase):
             self.assertTrue(fh.read().strip())
 
 
+class TestBaseAnalyzerWithoutTrajectory(unittest.TestCase):
+    """BaseAnalyzer never initialised _trajectory, so calling run()
+    before set_trajectory() raised AttributeError from deep inside."""
+
+    def test_rdf_without_trajectory(self):
+        from samos.analysis.rdf import RDF
+        with self.assertRaises(ValueError) as cm:
+            RDF().run(radius=4.0)
+        self.assertIn('set_trajectory', str(cm.exception))
+
+    def test_adf_without_trajectory(self):
+        from samos.analysis.rdf import ADF
+        with self.assertRaises(ValueError) as cm:
+            ADF().run(bonds={'Si-O': (1.0, 2.0)})
+        self.assertIn('set_trajectory', str(cm.exception))
+
+    def test_set_trajectory_type_checked(self):
+        from samos.analysis.rdf import RDF
+        with self.assertRaises(TypeError):
+            RDF(trajectory='not a trajectory')
+
+
 if __name__ == '__main__':
     unittest.main()

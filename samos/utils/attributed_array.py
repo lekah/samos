@@ -5,7 +5,7 @@ import numpy as np
 import shutil
 
 
-class AttributedArray(object):
+class AttributedArray:
     _ATTRIBUTE_FILENAME = 'attributes.json'
 
     def __init__(self, **kwargs):
@@ -31,16 +31,15 @@ class AttributedArray(object):
             Check for an array of that name existing,
             and raise if it exists.
             Defaults to False.
-        :param book check_nstep:
+        :param bool check_nstep:
             Check if the number of steps, which is the first
             dimension of the array, is commensurate
             with other arrays stored. Defaults to False
-        :param bool check_nat:
+        :param check_nat:
+            The expected number of atoms, or False to skip the check.
             If the array is of rank 3 or higher, the second
-            dimension is interpreted as the number of atoms.
-            If this flag is True, I will check for arrays
-            with rank 3 or higher. Defaults  to True.
-            Requires that the atoms have been set
+            dimension is interpreted as the number of atoms and
+            compared against this value. Defaults to False.
         """
         # First, I call np.array to ensure it's a valid array
         array = np.array(array)
@@ -185,7 +184,7 @@ class AttributedArray(object):
         Given a filename, try to load the trajectories and
         return a new instance of the class.
         The filename should ideally be created with the
-        Trajectore.store method.
+        save method.
         If created by hand, it has to be a valid tar.gz
         compressed tar.
         """

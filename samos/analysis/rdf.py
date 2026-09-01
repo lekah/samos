@@ -11,19 +11,35 @@ from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 
 
-class BaseAnalyzer(object, metaclass=ABCMeta):
+class BaseAnalyzer(metaclass=ABCMeta):
     def __init__(self, **kwargs):
+        self._trajectory = None
         for key, val in list(kwargs.items()):
             getattr(self, 'set_{}'.format(key))(val)
 
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
             raise TypeError(
-                'You need ot pass a {} as trajectory'.format(Trajectory))
+                'You need to pass a {} as trajectory'.format(Trajectory))
         self._trajectory = trajectory
 
+    @property
+    def trajectory(self):
+        """
+        The trajectory set with :meth:`set_trajectory`.
+
+        :raises ValueError:
+            If none was set.  Reading ``self._trajectory`` directly used
+            to give an AttributeError from deep inside :meth:`run`.
+        """
+        if self._trajectory is None:
+            raise ValueError(
+                'No trajectory has been set. Use the set_trajectory '
+                'method, or pass trajectory=... to the constructor.')
+        return self._trajectory
+
     @abstractmethod
-    def run(*args, **kwargs):
+    def run(self, *args, **kwargs):
         pass
 
 
@@ -37,9 +53,9 @@ class RDF(BaseAnalyzer):
         if 1:
             raise NotImplementedError('This is not fully implemented')
         from samos.lib.rdf import calculate_rdf
-        atoms = self._trajectory.atoms
+        atoms = self.trajectory.atoms
         volume = atoms.get_volume()
-        positions = self._trajectory.get_positions()
+        positions = self.trajectory.get_positions()
         if istop is None:
             istop = len(positions)
         if species_pairs is None:
@@ -103,8 +119,8 @@ class RDF(BaseAnalyzer):
 
         def get_label(spec, ispec):
             """
-            Get a good label for scpecification spec. If none can befound
-            give on based on iteration counter ispec
+            Get a good label for specification spec. If none can be found
+            give one based on iteration counter ispec
             """
             if isinstance(spec, str):
                 return spec
@@ -113,13 +129,13 @@ class RDF(BaseAnalyzer):
             else:
                 print(type(spec))
 
-        positions = self._trajectory.get_positions()
-        types = self._trajectory.get_types()
-        cells = self._trajectory.get_cells()
+        positions = self.trajectory.get_positions()
+        types = self.trajectory.get_types()
+        cells = self.trajectory.get_cells()
         range_ = list(range(0, 2))
         if cells is None:
             fixed_cell = True
-            atoms = self._trajectory.atoms
+            atoms = self.trajectory.atoms
             volume = atoms.get_volume()
             try:
                 cell = atoms.cell.array
@@ -254,8 +270,8 @@ class AngularSpectrum(BaseAnalyzer):
         :param float radius: The radius for the calculation of the RDF
         """
         from samos.lib.rdf import calculate_angular_spec
-        atoms = self._trajectory.atoms
-        positions = self._trajectory.get_positions()
+        atoms = self.trajectory.atoms
+        positions = self.trajectory.get_positions()
         if istop is None:
             istop = len(positions)
         if species_pairs is None:
@@ -429,17 +445,17 @@ class BondAnalyzer(BaseAnalyzer):
         A set is used internally to deduplicate same-species pairs.
         """
         cutoffs_parsed = self._parse_cutoffs(cutoffs)
-        positions = self._trajectory.get_positions()[frame]
-        cells = self._trajectory.get_cells()
+        positions = self.trajectory.get_positions()[frame]
+        cells = self.trajectory.get_cells()
         if cells is not None:
             cell = cells[frame]
         else:
             try:
-                cell = self._trajectory.get_atoms().cell.array
+                cell = self.trajectory.get_atoms().cell.array
             except AttributeError:
-                cell = self._trajectory.get_atoms().cell.copy()
+                cell = self.trajectory.get_atoms().cell.copy()
         cellI = np.linalg.inv(cell)
-        types = self._trajectory.get_types()
+        types = self.trajectory.get_types()
 
         bond_set = set()
         for (sp1, sp2), (r_min, r_max) in cutoffs_parsed.items():
@@ -517,9 +533,9 @@ class ADF(BondAnalyzer):
             raise ValueError(
                 "Pass species_triplets or centers, not both.")
 
-        positions = self._trajectory.get_positions()
-        types = self._trajectory.get_types()
-        cells = self._trajectory.get_cells()
+        positions = self.trajectory.get_positions()
+        types = self.trajectory.get_types()
+        cells = self.trajectory.get_cells()
 
         if istop is None:
             istop = len(positions)
@@ -577,9 +593,9 @@ class ADF(BondAnalyzer):
         if cells is None:
             fixed_cell = True
             try:
-                cell = self._trajectory.get_atoms().cell.array
+                cell = self.trajectory.get_atoms().cell.array
             except AttributeError:
-                cell = self._trajectory.get_atoms().cell.copy()
+                cell = self.trajectory.get_atoms().cell.copy()
             cellI = np.linalg.inv(cell)
         else:
             fixed_cell = False

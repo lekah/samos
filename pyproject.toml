@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "samos"
 version = "0.9.0"
-description = "Package for Analysis and Tricks for MOlecular Simulations: a set of useful tools to analyze molecular dynamics trajectories"
+description = "Suite for Analysis of MOlecular Simulations: a set of useful tools to analyze molecular dynamics trajectories"
 license = {text = "MIT License"}
 authors = [{name = "Leonid Kahle", email = "leonid.kahle@epfl.ch"}]
 requires-python = ">=3.10"

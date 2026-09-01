@@ -260,40 +260,6 @@ call it instead of its inline copy.
 
 ---
 
-## 31. Documentation that contradicts the code
-
-**Fix difficulty: 1**
-
-* `samos/trajectory.py:139` -- `get_timestep` docstring says "or None if
-  not set"; it delegates to `get_attr`, which raises `KeyError`.
-* `samos/trajectory.py:15` -- `check_trajectory_compatibility` docstring
-  claims it checks "the same cell"; it checks array names, types and
-  timestep, never the cell.
-* `samos/analysis/get_gaussian_density.py:68-91` -- the docstring
-  documents a different function: `positionsf`, `pos_units`,
-  `with_symbols`, `cell`, `nat`, `recenter` are not parameters, while
-  `trajectory`, `stepsize`, `indices_i_care` and
-  `indices_exclude_from_plot` are undocumented.
-* `samos/utils/attributed_array.py:34` -- `:param book check_nstep:`;
-  `:42` -- `check_nat` "Defaults to True" (it defaults to `False`).
-* `samos/utils/attributed_array.py:169` -- refers to
-  "`Trajectore.store`"; the method is `save`.
-* `samos/trajectory.py:294, 312, 399` -- `check_exising`.
-* `samos/analysis/dynamics.py:1181` -- prints `block_length_ps = {}`
-  with a value in **fs**.
-* `samos/io/lammps.py:109, 115` -- `print('Element found at index
-  {element_idx}')` missing the `f` prefix; prints the literal braces.
-* Spelling in user-visible strings: `'You need ot pass'` (rdf.py:22),
-  `'scpecification'` / `'befound'` (rdf.py:106), `'frmo'`
-  (lammps.py:287), `'kwywods'` (lammps.py:361), `'keywrods'`
-  (lammps.py:531), `'not existen'` (trajectory.py:116), `'I devide'`
-  (dynamics.py:1035).
-* `README.md` expands SAMOS as "Suite for Analysis of Molecular
-  Simulations"; `pyproject.toml` says "Package for Analysis and Tricks
-  for MOlecular Simulations". Pick one.
-
----
-
 ## 32. `np.matrix` is deprecated and pending removal
 
 **Fix difficulty: 3**
@@ -371,20 +337,6 @@ CLI (see also issue #14).
 
 ---
 
-## 36. `util_msd` still uses the old unit-suffix parameter names
-
-**Fix difficulty: 1**
-
-`samos/analysis/dynamics.py:1238-1240`
-
-`util_msd(t_start_fit_ps=..., t_end_fit_ps=...)` keeps the pre-redesign
-naming in its own signature, even though its internal call to `get_msd`
-is already updated. Low priority -- `util_msd` is
-not part of the main public API and may be deleted entirely under
-issue #35.
-
----
-
 ## 37. `get_kinetic_energies` runs a Python triple-nested loop
 
 **Fix difficulty: 3**
@@ -402,30 +354,3 @@ the species decomposition.
 
 ---
 
-## 38. `class DynamicsAnalyzer(object)` and `def run(*args, **kwargs)` without `self`
-
-**Fix difficulty: 1**
-
-`samos/analysis/dynamics.py:167`, `samos/analysis/rdf.py:14, 25-27`
-
-Python-2 era `(object)` base, and `BaseAnalyzer.run`'s abstract signature
-omits `self`. `BaseAnalyzer` also never initialises `self._trajectory`,
-so calling `run()` before `set_trajectory()` gives `AttributeError`
-rather than a clear message.
-
-**Fix:** drop `(object)`, add `self`, initialise `self._trajectory =
-None` in `BaseAnalyzer.__init__` and raise a clear error when unset.
-
----
-
-## 39. Magic numbers in the diffusion prefactors lack a unit comment
-
-**Fix difficulty: 1**
-
-`samos/analysis/dynamics.py:777, 922`
-
-`1e-1 / dimensionality_factor` in `get_msd` and `0.1/3.` in `get_vaf`
-are A^2/fs -> cm^2/s conversions.
-
-**Fix:** name the constant (`ANG2_FS_TO_CM2_S = 1e-1`) in
-`samos/utils/constants.py` and reference it from both sites.

@@ -109,13 +109,13 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
         try:
             element_idx = header_list.index('element')
             if not quiet:
-                print('Element found at index {element_idx}')
+                print(f'Element found at index {element_idx}')
         except ValueError:
             element_idx = None
         try:
             type_idx = header_list.index('type')
             if not quiet:
-                print('type found at index {type_idx}')
+                print(f'type found at index {type_idx}')
         except ValueError:
             type_idx = None
         # Let the error propagate: this used to call sys.exit(1), which
@@ -285,7 +285,7 @@ def read_lammps_dump(filename, elements=None,
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
         elif element_idx is not None:
-            # readingin elements frmo body
+            # reading in elements from body
             symbols = np.array(body[:, element_idx])[sorting_key]
             # print(elements)
             # print(len(elements))
@@ -359,7 +359,7 @@ def read_lammps_dump(filename, elements=None,
 
     lidx = 0
     iframe = 0
-    # dealing with additional kwywods
+    # dealing with additional keywords
     additional_arrays = {kw: [] for kw in additional_keywords_dump}
 
     with open(filename) as f:
@@ -529,7 +529,7 @@ if __name__ == '__main__':
                               'without the xx/yy/xz..'))
     parser.add_argument('-tk', '--thermo-keywords',
                         nargs='*', default=[],
-                        help='The keywrods to read from the thermo file')
+                        help='The keywords to read from the thermo file')
     parser.add_argument('--save-extxyz',
                         action='store_true',
                         help='save extxyz instead of traj')

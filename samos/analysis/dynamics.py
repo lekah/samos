@@ -7,6 +7,7 @@ from scipy.stats import linregress
 from scipy.signal import convolve
 from samos.trajectory import check_trajectory_compatibility, Trajectory
 from samos.utils.attributed_array import AttributedArray
+from samos.utils.constants import ANG2_FS_TO_CM2_S
 from samos.utils.exceptions import InputError
 from samos.utils.time_units import parse_time
 
@@ -164,7 +165,7 @@ def _species_factors(trajectory, atomic_species):
     return factors, len(indices)
 
 
-class DynamicsAnalyzer(object):
+class DynamicsAnalyzer:
     """
     This class serves as the main analyzer
     for dynamic properties (MSD, VAF, etc)
@@ -774,16 +775,18 @@ class DynamicsAnalyzer(object):
                 dimensionality_factor = 2.
             else:
                 dimensionality_factor = 6.
-            results_dict[atomic_species]['diffusion_mean_cm2_s'] = 1e-1 / \
-                dimensionality_factor * \
-                results_dict[atomic_species]['slope_msd_mean']
+            # D = slope / dimensionality_factor, with the slope in
+            # A^2/fs and D reported in cm^2/s.
+            results_dict[atomic_species]['diffusion_mean_cm2_s'] = (
+                ANG2_FS_TO_CM2_S / dimensionality_factor
+                * results_dict[atomic_species]['slope_msd_mean'])
             if (len(msd_this_species) > 1):
-                results_dict[atomic_species]['diffusion_std_cm2_s'] = 1e-1 / \
-                    dimensionality_factor * \
-                    results_dict[atomic_species]['slope_msd_std']
-                results_dict[atomic_species]['diffusion_sem_cm2_s'] = 1e-1 / \
-                    dimensionality_factor * \
-                    results_dict[atomic_species]['slope_msd_sem']
+                results_dict[atomic_species]['diffusion_std_cm2_s'] = (
+                    ANG2_FS_TO_CM2_S / dimensionality_factor
+                    * results_dict[atomic_species]['slope_msd_std'])
+                results_dict[atomic_species]['diffusion_sem_cm2_s'] = (
+                    ANG2_FS_TO_CM2_S / dimensionality_factor
+                    * results_dict[atomic_species]['slope_msd_sem'])
             else:
                 results_dict[atomic_species]['diffusion_std_cm2_s'] = np.full(
                     results_dict[atomic_species]['diffusion_mean_cm2_s'].shape,
@@ -918,8 +921,9 @@ class DynamicsAnalyzer(object):
                     block_length_dt_this_traj,
                     timestep_fs * p.stepsize_t,
                     integration, nstep, nat, nat_of_interest)
-                # transforming A^2/fs -> cm^2 /s, dividing by three to get D
-                vaf_integral *= 0.1/3. * prefactor
+                # The integral is in A^2/fs; divide by the three
+                # Cartesian dimensions to get D in cm^2/s.
+                vaf_integral *= ANG2_FS_TO_CM2_S / 3. * prefactor
 
                 for iblock in range(nr_of_blocks_this_traj):
                     vaf_this_species.append(vaf[iblock])
@@ -1032,7 +1036,7 @@ class DynamicsAnalyzer(object):
                             kinE[istep0] += (
                                 prefactor * masses[iat]
                                 * vel_array[istep, iat, ipol]**2)
-                kinE[:] /= nat*3  # I devide by the degrees of freedom!
+                kinE[:] /= nat*3  # I divide by the degrees of freedom!
                 kinetic_energies_series.set_array(
                     'system_kinetic_energy_{}'.format(itraj), kinE)
                 kinetic_energies_series.set_attr(
@@ -1178,7 +1182,7 @@ class DynamicsAnalyzer(object):
                 nblocks = len(blocks)
                 if self._verbosity > 0:
                     print('nblocks = {}, blocks.shape = {},'
-                          ' block_length_ps = {}'.format(
+                          ' block_length_fs = {}'.format(
                               nblocks, blocks.shape,
                               blocks.shape[1]*timestep_fs))
 
@@ -1240,8 +1244,8 @@ class DynamicsAnalyzer(object):
 
 
 def util_msd(trajectory_path, stepsize=1, species=None,
-             plot=True, savefig=None, t_start_fit_ps=5,
-             t_end_fit_ps=10, timestep=None, nblocks=None):
+             plot=True, savefig=None, t_start_fit=5,
+             t_end_fit=10, t_unit='ps', timestep=None, nblocks=None):
     if trajectory_path.endswith('.extxyz'):
         from ase.io import read
         aselist = read(trajectory_path, format='extxyz', index=':')
@@ -1255,13 +1259,13 @@ def util_msd(trajectory_path, stepsize=1, species=None,
     if species is None:
         species = sorted(set(traj.atoms.get_chemical_symbols()))
     print(traj.get_timestep(), species)
-    print(t_start_fit_ps, t_end_fit_ps, timestep)
+    print(t_start_fit, t_end_fit, t_unit, timestep)
     msd = dyn.get_msd(stepsize_t=stepsize,
                       species_of_interest=species,
-                      t_end_fit=t_end_fit_ps,
-                      t_start_fit=t_start_fit_ps,
+                      t_end_fit=t_end_fit,
+                      t_start_fit=t_start_fit,
                       nr_of_blocks=nblocks,
-                      t_unit='ps')
+                      t_unit=t_unit)
     if plot or savefig:
         from samos.plotting.plot_dynamics import plot_msd_isotropic
         from matplotlib import pyplot as plt
@@ -1286,12 +1290,12 @@ if __name__ == '__main__':
     parser.add_argument('--species', nargs='+',)
     parser.add_argument('--plot', action='store_true',
                         help='Plot the MSD to screen')
-    parser.add_argument('-te', '--t-end-fit-ps',
-                        help='End of the fit in ps, defaults to 100',
-                        type=float, default=10)
-    parser.add_argument('-ts', '--t-start-fit-ps',
-                        help='End of the fit in ps, defaults to 50',
-                        type=float, default=5)
+    parser.add_argument('-te', '--t-end-fit', type=float, default=10,
+                        help='End of the fit, in --t-unit, defaults to 10')
+    parser.add_argument('-ts', '--t-start-fit', type=float, default=5,
+                        help='Start of the fit, in --t-unit, defaults to 5')
+    parser.add_argument('--t-unit', default='ps', choices=['fs', 'ps', 'dt'],
+                        help='Unit for -ts and -te, defaults to ps')
     parser.add_argument('--timestep', type=float,
                         help='Timestep in fs, defaults to 1',
                         default=1)

@@ -11,8 +11,9 @@ class IncompatibleTrajectoriesException(Exception):
 def check_trajectory_compatibility(trajectories):
     """
     Check whether the trajectories passed are compatible.
-    They are compatible if they have the same order of atoms,
-    and the same cell, and store the same arrays
+    They are compatible if they store the same arrays, the same
+    chemical symbols in the same order, and the same timestep.
+    The cells are not compared.
     """
 
     assert len(trajectories) >= 1, 'No trajectories passed'
@@ -66,7 +67,7 @@ class Trajectory(AttributedArray):
         Optional keyword-arguments are everything with a set-method.
         """
         self._atoms = None
-        super(Trajectory, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     @classmethod
     def from_atoms(cls, atoms_list, timestep_fs=None, add_arrays=None):
@@ -113,7 +114,7 @@ class Trajectory(AttributedArray):
             if (velocities**2).sum() > 1e-12:
                 new.set_velocities(velocities)
         except TypeError:
-            pass  # velocities are returned as none if not existen
+            pass  # velocities are returned as None if not existent
         if forces is not None and (forces**2).sum() > 1e-12:
             new.set_forces(forces)
         if (cells.std(axis=0).sum()) > 1e-12:
@@ -144,7 +145,11 @@ class Trajectory(AttributedArray):
             files_in_tar.remove(self._ATOMS_FILENAME)
 
     def get_timestep(self):
-        """Return the MD timestep in femtoseconds, or None if not set."""
+        """
+        Return the MD timestep in femtoseconds.
+
+        :raises KeyError: If the timestep has not been set.
+        """
         return self.get_attr(self._TIMESTEP_KEY)
 
     def set_timestep(self, timestep_fs):
@@ -299,7 +304,7 @@ class Trajectory(AttributedArray):
         :param array:
             A numpy array with the positions in absolute
             values in units of angstrom
-        :param bool check_exising:
+        :param bool check_existing:
             Check if the positions have been set, and
             raise in such case. Defaults to False.
         """
@@ -317,7 +322,7 @@ class Trajectory(AttributedArray):
         :param array:
             A numpy array with the velocites in absolute
             values in units of angstrom/femtoseconds
-        :param bool check_exising:
+        :param bool check_existing:
             Check if the velocities have been set, and
             raise in such case. Defaults to False.
         """
@@ -404,7 +409,7 @@ class Trajectory(AttributedArray):
         :param array:
             A numpy array with the forces in absolute
             values in units of eV/angstrom
-        :param bool check_exising:
+        :param bool check_existing:
             Check if the forces have been set, and raise in
             such case. Defaults to False.
         """

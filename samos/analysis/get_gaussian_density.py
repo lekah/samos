@@ -72,28 +72,32 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
                          istart=1, istop=None, stepsize=1,
                          indices_i_care=None, indices_exclude_from_plot=None):
     """
-    :param str positionsf: Where to read the positions from.
-    :param str pos_units:
-        The units of the positions (implemented so far: angstrom, bohr).
-    :param str outputfile: The xsf outputfile
-    :param bool with_symbols:
-        Whether symbols are printed in front
-        of positions (will be ignored)
-    :param list cell: the 3x3 cell,
+    Write the gaussian-broadened probability density of an atomic
+    species to an xsf file.
+
+    :param trajectory:
+        The :class:`~samos.trajectory.Trajectory` to read positions and
+        the cell from. Requires an ase.Atoms to be set.
     :param str element:
-        The to calculate the density for,
-        has to be present in symbols
-    :param int nat:
-        The number of atoms written in the positionsfile
-        per atomic step
-    :param float sigma: The gaussian broadening to apply
+        The species to calculate the density for, has to be present in
+        the chemical symbols. Ignored if indices_i_care is given.
+    :param str outputfile:
+        The xsf outputfile, '.xsf' is appended if missing.
+    :param float sigma: The gaussian broadening to apply, in angstrom
     :param float n_sigma:
         the multiple of sigma for which to
         create the bounding box.
-    :param float density: The density for the grid
+    :param float density: The grid spacing in angstrom
     :param int istart: Index to start reading positions
     :param int istop: Index to stop reading positions
-    :param bool recenter: Whether to recenter
+    :param int stepsize: Take every stepsize-th step of the trajectory
+    :param indices_i_care:
+        The atom indices to accumulate the density over, 1-based for
+        fortran. Defaults to all atoms of element, or to all atoms.
+    :param indices_exclude_from_plot:
+        The atom indices not written to the xsf file, 1-based.
+        Defaults to indices_i_care, so that the mobile species is not
+        drawn on top of its own density.
     """
     from samos.lib.gaussian_density import make_gaussian_density
 
