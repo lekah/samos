@@ -333,9 +333,7 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         Number of blocks to split the trajectory into (default 1).
     :param int smoothing:
         Smoothing kernel width in frequency bins (default 1, no
-        smoothing). Passed as ``smothening`` to
-        :meth:`DynamicsAnalyzer.get_power_spectrum` to work around the
-        typo in the underlying API.
+        smoothing).
     :param str write:
         If given, write the mean power spectrum for each species to this
         CSV file.  Columns: ``frequency_THz``, then one column per
@@ -345,12 +343,10 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         species = sorted(set(traj.atoms.get_chemical_symbols()))
 
     dyn = DynamicsAnalyzer(trajectories=[traj])
-    # 'smothening' is the misspelled kwarg in get_power_spectrum;
-    # we expose a correctly-spelled parameter and translate it here.
     vdos = dyn.get_power_spectrum(
         species_of_interest=species,
         nr_of_blocks=nblocks,
-        smothening=smoothing,
+        smoothing=smoothing,
         remove_angular_momentum=remove_angular_momentum,
     )
 

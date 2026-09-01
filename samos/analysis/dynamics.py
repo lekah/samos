@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections import namedtuple
+from warnings import warn
 
 import numpy as np
 from scipy.stats import linregress
@@ -1078,7 +1079,7 @@ class DynamicsAnalyzer:
                            remove_angular_momentum=False,
                            t_unit='ps',
                            species_of_interest=None,
-                           smothening=1,
+                           smoothing=1,
                            block_length=None,
                            nr_of_blocks=None,
                            **kwargs):
@@ -1097,10 +1098,11 @@ class DynamicsAnalyzer:
             ``'dt'``; default ``'ps'``).
         :param list species_of_interest:
             Species to analyse.  Defaults to all species present.
-        :param int smothening:
+        :param int smoothing:
             Smooth the power spectrum by convolving with a uniform
             kernel of this width in frequency bins (default 1, no
-            smoothing).
+            smoothing).  The old misspelling ``smothening`` still works
+            but raises a DeprecationWarning.
         :param float block_length:
             Length of each trajectory block expressed in *t_unit*.
             Mutually exclusive with *nr_of_blocks*.
@@ -1111,6 +1113,10 @@ class DynamicsAnalyzer:
 
         from scipy import signal
 
+        if 'smothening' in kwargs:
+            warn("'smothening' is a misspelling and is deprecated, use "
+                 "'smoothing' instead", DeprecationWarning, stacklevel=2)
+            smoothing = kwargs.pop('smothening')
         _check_deprecated_time_kwargs(kwargs)
 
         timestep_fs, trajectories = self._require_trajectories()
@@ -1132,7 +1138,7 @@ class DynamicsAnalyzer:
 
         if species_of_interest is None:
             species_of_interest = self.get_species_of_interest()
-        smothening = int(smothening)
+        smoothing = int(smoothing)
 
         power_spectrum = TimeSeries()
 
@@ -1151,6 +1157,9 @@ class DynamicsAnalyzer:
                                                              start=0), :]
                 nstep, _, _ = vel_array.shape
 
+                # Unlike get_msd/get_vaf this layout ignores t_end_dt:
+                # a periodogram has no lag window, so every step of a
+                # block is usable and the blocks tile the trajectory.
                 if nr_of_blocks:
                     nr_of_blocks_this_traj = nr_of_blocks
                     # Use the number of blocks specified by user
@@ -1163,6 +1172,12 @@ class DynamicsAnalyzer:
                     raise RuntimeError(
                         'Neither nr_of_blocks nor block_length_dt '
                         'is specified')
+                if split_number < 1 or nr_of_blocks_this_traj < 1:
+                    raise InputError(
+                        'Cannot fit {} block(s) of {} step(s) into a '
+                        'trajectory of {} steps. Use fewer blocks or a '
+                        'shorter block_length.'.format(
+                            nr_of_blocks_this_traj, split_number, nstep))
 
                 # I need to have blocks of equal length, and use the
                 # split method I need the length of the array to be
@@ -1185,13 +1200,13 @@ class DynamicsAnalyzer:
                 # direction resolved periodogram?
                 pd_this_species_this_traj = pd.mean(axis=(2, 3))
                 # Smothening the array:
-                if smothening > 1:
+                if smoothing > 1:
                     # Running mean over frequency bins.  The kernel must
-                    # be one row high: a (nblocks, smothening) kernel
+                    # be one row high: a (nblocks, smoothing) kernel
                     # convolves over the block axis as well, so every
                     # block's spectrum picked up its neighbours' and the
                     # std/sem computed from them were meaningless.
-                    kernel = np.ones((1, smothening)) / smothening
+                    kernel = np.ones((1, smoothing)) / smoothing
                     pd_this_species_this_traj = convolve(
                         pd_this_species_this_traj,
                         kernel, mode='same')

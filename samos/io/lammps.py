@@ -5,12 +5,14 @@ import re
 from ase import Atoms
 from ase.data import atomic_masses, chemical_symbols
 from samos.trajectory import Trajectory
+from samos.utils.units import UNIT_SYSTEMS as _LAMMPS_UNITS
 
 #  only matches positive integers
 integer_regex = re.compile(r'(?P<int>\d+)')  # noqa: W605
-float_regex = re.compile(r'(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
-
-from samos.utils.units import UNIT_SYSTEMS as _LAMMPS_UNITS
+# Accepts 0, 0.0, .5, 1e3, -1.0E+01, 2.5d0 -- LAMMPS writes box
+# bounds in several of these forms depending on how it was built.
+float_regex = re.compile(
+    r'(?P<float>[+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)')
 
 
 def get_indices(header_list, prefix='', postfix=''):
@@ -62,6 +64,10 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     except Exception as e:
         print('Could not read number of atoms')
         raise e
+    # Only the box lengths are kept, the origin (xlo/ylo/zlo) is
+    # dropped. Everything downstream works on displacements, where the
+    # origin cancels; scaled coordinates are converted with pos.dot(cell)
+    # and so end up relative to the origin as well.
     cell = np.zeros((3, 3))
     if lines[4].startswith('ITEM: BOX BOUNDS pp pp pp'):
         try:
@@ -153,6 +159,38 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
                 posids, has_vel, velids, has_frc, frcids, additional_ids)
     else:
         return nat, timestep, cell
+
+
+def read_body(f, nat, lidx=0):
+    """
+    Read *nat* atom lines from *f* and return them as a string array.
+
+    :param f: The open dump file, positioned at the first atom line
+    :param int nat: The number of atom lines to read
+    :param int lidx: Lines consumed so far, used for the error message
+    :returns: A (nat, ncolumns) array of strings
+    :raises ValueError:
+        If the file ends early or a line has a different number of
+        columns than the first. numpy would otherwise report this as an
+        inhomogeneous-shape error naming neither the frame nor the line.
+    """
+    rows = []
+    ncol = None
+    for iat in range(nat):
+        line = f.readline()
+        if not line:
+            raise ValueError(
+                'File ended after {} of {} atom lines (line {})'.format(
+                    iat, nat, lidx + iat + 1))
+        row = line.split()
+        if ncol is None:
+            ncol = len(row)
+        elif len(row) != ncol:
+            raise ValueError(
+                'Line {} has {} columns, the frame started with {}'.format(
+                    lidx + iat + 1, len(row), ncol))
+        rows.append(row)
+    return np.array(rows)
 
 
 def pos_2_absolute(cell, pos, postype):
@@ -271,7 +309,7 @@ def read_lammps_dump(filename, elements=None,
         if ignore_velocities:
             has_vel = False
         # these are read as strings
-        body = np.array([f.readline().split() for _ in range(nat_must)])
+        body = read_body(f, nat_must, lidx=9)
         atomids = np.array(body[:, atomid_idx], dtype=int)
         sorting_key = atomids.argsort()
         # figuring out elements of structure
@@ -377,7 +415,7 @@ def read_lammps_dump(filename, elements=None,
                 break
 
             # these are read as strings
-            body = np.array([f.readline().split() for _ in range(nat_must)])
+            body = read_body(f, nat_must, lidx=lidx)
             lidx += nat_must
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()

@@ -85,30 +85,6 @@ CLI -- see issue #21.
 
 ---
 
-## 17. Unvalidated / fragile LAMMPS dump parsing
-
-**Fix difficulty: 4**
-
-`samos/io/lammps.py:12` (`float_regex`), `:273` and `:379` (body read)
-
-* `float_regex = r'[\-]?\d+\.\d+(e[+\-]\d+)?'` demands a literal decimal
-  point and a lowercase `e`. Box bounds written as `0 10`, `1e+01` or
-  `-1.0E+00` produce the wrong number of matches and an opaque unpack
-  error.
-* `np.array([f.readline().split() for _ in range(nat_must)])` on a
-  truncated file builds a ragged list -> numpy "inhomogeneous shape"
-  error rather than "file ended early at frame N".
-* The `xlo`/`ylo`/`zlo` origin is discarded (`cell[i,i] = d2 - d1`).
-  Harmless for displacement-based analysis, but scaled coordinates are
-  converted with `pos.dot(cell)` and never re-offset -- document the
-  assumption or apply the origin.
-
-**Fix:** widen the float regex (or use `float()` on `split()` tokens and
-catch `ValueError`); check the line count while reading the body and
-raise a message naming the frame and line.
-
----
-
 ## 21. `s_conv` is 1.0 for every unit system while the API claims otherwise
 
 **Fix difficulty: 4**
@@ -131,24 +107,6 @@ fill in the table, and add it to the module docstring -- or, if stress
 conversion is deliberately out of scope, document `s_conv` as a no-op
 placeholder and say so in the `--units` help. This needs a physics
 decision, not just code.
-
----
-
-## 22. `smothening` typo in the public API
-
-**Fix difficulty: 3**
-
-`samos/analysis/dynamics.py:1086, 1105, 1140, 1193, 1195`
-
-Worth noting how far the cost has spread: `scripts/samos`
-carries a translation shim and an apologetic comment
-(`scripts/samos:302, 319-321, 333, 338`), `tests/test_dynamics.py:156`
-uses the typo, and `examples/ex2-compute-VAF-from-extxyz/compute-vaf.py`
-propagates it.
-
-**Fix:** rename to `smoothing`, accept `smothening` as a deprecated
-alias for one release (emit `DeprecationWarning`), update all four call
-sites and remove the shim in `scripts/samos`.
 
 ---
 
@@ -177,37 +135,27 @@ verify against a reference RDF before switching.
 
 ---
 
-## 26. Block-length dispatch written three times; `get_power_spectrum` bypasses `_get_running_params`
+## 26. `get_power_spectrum` bypasses `_get_running_params`
 
 **Fix difficulty: 5**
 
-`samos/analysis/dynamics.py:1125-1171` (`get_power_spectrum`)
+`samos/analysis/dynamics.py:1125-1180`
 
-`get_msd` and `get_vaf` now share `_resolve_blocks`, but
-`get_power_spectrum` still re-implements the `block_length` /
-`nr_of_blocks` parsing from `_get_running_params` inline rather than
-calling it, with a *different* formula (`nstep // nr_of_blocks`, with no
-`t_end_dt` term) and no validation at all:
+`get_msd` and `get_vaf` share `_resolve_blocks`; `get_power_spectrum`
+still parses `block_length` / `nr_of_blocks` inline rather than calling
+`_get_running_params`, and computes its own layout with a different
+formula (`nstep // nr_of_blocks`, no `t_end_dt` term). That formula is
+correct for a periodogram, which has no lag window, and it now validates
+its result -- but the parsing is still duplicated and will drift.
 
-```
-get_power_spectrum(nr_of_blocks=500) on a 300-step trajectory
--> periodogram of shape (500, 0), silently, no error
-```
+The `do_com` branches of `get_msd` and `get_vaf` also still mirror each
+other, though they share the `_get_masses` / `_species_factors` helpers,
+so only the call sequence is repeated.
 
-That is 500 empty spectra presented as a result.
-
-The `do_com` branches of `get_msd` and `get_vaf` still mirror each
-other, though they now share the `_get_masses` /
-`_species_factors` helpers, so only the call sequence is repeated.
-
-**Fix:** have `get_power_spectrum` call `_get_running_params` and
-`_resolve_blocks` like its siblings -- decide first whether its
-block layout should keep ignoring `t_end_dt` (it has no lag window, so
-it probably should) and give `_resolve_blocks` a flag for that. A
-`_com_positions(trajectory, array)` helper would fold the two remaining
-`do_com` branches together.
-
----
+**Fix:** give `_resolve_blocks` a flag for whether to reserve `t_end_dt`
+steps, and have `get_power_spectrum` call `_get_running_params` like its
+siblings. A `_com_positions(trajectory, array)` helper would fold the
+two remaining `do_com` branches together.
 
 ## 28. `AngularSpectrum` / `ADF` result formats are incompatible, and `ADF` has no plotter
 

@@ -153,7 +153,7 @@ class TestDynamics(unittest.TestCase):
 
         d.set_trajectories(t)
 
-        pws = d.get_power_spectrum(smothening=1, nr_of_blocks=6)
+        pws = d.get_power_spectrum(smoothing=1, nr_of_blocks=6)
 
         vaf = d.get_vaf(t_start_fit=2., t_end_fit=4., t_unit='ps',
                         stepsize_tau=20,
@@ -398,7 +398,7 @@ class TestPowerSpectrumSmoothing(unittest.TestCase):
     """Regression: the smoothing kernel was np.ones((nblocks, N)), a 2-D
     kernel that also convolved over the block axis, so each block's
     spectrum absorbed its neighbours' and the std/sem were meaningless.
-    The existing reference test uses smothening=1 and cannot see this."""
+    The existing reference test uses smoothing=1 and cannot see this."""
 
     def _analyzer(self, seed=17, nstep=600, nat=4):
         import numpy as np
@@ -415,8 +415,8 @@ class TestPowerSpectrumSmoothing(unittest.TestCase):
         """A running mean over frequency bins must not move weight
         between blocks."""
         d = self._analyzer()
-        raw = d.get_power_spectrum(nr_of_blocks=4, smothening=1)
-        smooth = d.get_power_spectrum(nr_of_blocks=4, smothening=5)
+        raw = d.get_power_spectrum(nr_of_blocks=4, smoothing=1)
+        smooth = d.get_power_spectrum(nr_of_blocks=4, smoothing=5)
         a = raw.get_array('periodogram_H_0')
         b = smooth.get_array('periodogram_H_0')
         self.assertEqual(a.shape, b.shape)
@@ -428,14 +428,14 @@ class TestPowerSpectrumSmoothing(unittest.TestCase):
         spectrum of the other blocks."""
         d = self._analyzer()
         base = d.get_power_spectrum(
-            nr_of_blocks=2, smothening=5).get_array('periodogram_H_0')
+            nr_of_blocks=2, smoothing=5).get_array('periodogram_H_0')
 
         traj = d._trajectories[0]
         vel = traj.get_velocities().copy()
         vel[:len(vel) // 2] *= 10.0          # perturb block 0 only
         traj.set_velocities(vel)
         perturbed = d.get_power_spectrum(
-            nr_of_blocks=2, smothening=5).get_array('periodogram_H_0')
+            nr_of_blocks=2, smoothing=5).get_array('periodogram_H_0')
 
         self.assertFalse(np.allclose(base[0], perturbed[0]))
         np.testing.assert_allclose(base[1], perturbed[1], rtol=1e-10)
@@ -508,6 +508,36 @@ class TestKineticEnergiesVectorized(unittest.TestCase):
             np.testing.assert_allclose(
                 species[:, ityp], per_atom[:, idx].mean(axis=1),
                 rtol=1e-12)
+
+
+class TestSmoothingRename(unittest.TestCase):
+    """'smothening' was the public spelling; 'smoothing' replaces it and
+    the old name is accepted with a DeprecationWarning."""
+
+    def _analyzer(self):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(31)
+        t = Trajectory(atoms=Atoms('H2O2'), timestep=1.)
+        t.set_positions(np.cumsum(rng.normal(0., .1, (200, 4, 3)), axis=0))
+        t.calculate_velocities_from_positions()
+        return DynamicsAnalyzer(trajectories=[t], verbosity=0)
+
+    def test_old_spelling_warns_but_works(self):
+        import warnings
+        d = self._analyzer()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            old = d.get_power_spectrum(nr_of_blocks=2, smothening=5)
+        self.assertTrue(any(issubclass(w.category, DeprecationWarning)
+                            for w in caught))
+        new = d.get_power_spectrum(nr_of_blocks=2, smoothing=5)
+        np.testing.assert_allclose(new.get_array('periodogram_H_0'),
+                                   old.get_array('periodogram_H_0'))
+
+    def test_too_many_blocks_rejected(self):
+        from samos.utils.exceptions import InputError
+        with self.assertRaises(InputError):
+            self._analyzer().get_power_spectrum(nr_of_blocks=500)
 
 
 if __name__ == '__main__':

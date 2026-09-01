@@ -186,5 +186,58 @@ class TestDumpErrorPaths(unittest.TestCase):
         self.assertAlmostEqual(cell[2, 1], 3.0)   # yz
 
 
+class TestDumpParsingRobustness(unittest.TestCase):
+    """The float pattern demanded a decimal point and a lowercase e, and
+    a truncated file surfaced as numpy's inhomogeneous-shape error."""
+
+    def _write(self, text):
+        import tempfile
+        fh = tempfile.NamedTemporaryFile('w', suffix='.lammpstrj',
+                                         delete=False)
+        fh.write(text)
+        fh.close()
+        self.addCleanup(os.unlink, fh.name)
+        return fh.name
+
+    def _dump(self, box, body='1 1 0.0 0.0 0.0\n2 1 1.0 1.0 1.0\n'):
+        return self._write('ITEM: TIMESTEP\n0\n'
+                           'ITEM: NUMBER OF ATOMS\n2\n'
+                           + box
+                           + 'ITEM: ATOMS id type xu yu zu\n' + body)
+
+    def test_integer_box_bounds(self):
+        """LAMMPS can write bounds with no decimal point at all."""
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0 10\n0 10\n0 10\n')
+        traj = read_lammps_dump(path, types=['H'], quiet=True)
+        np.testing.assert_allclose(np.diag(traj.get_cells()[0]),
+                                   [10., 10., 10.])
+
+    def test_uppercase_exponent_box_bounds(self):
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0.0E+00 1.0E+01\n'
+                          '0.0E+00 1.0E+01\n'
+                          '0.0E+00 1.0E+01\n')
+        traj = read_lammps_dump(path, types=['H'], quiet=True)
+        np.testing.assert_allclose(np.diag(traj.get_cells()[0]),
+                                   [10., 10., 10.])
+
+    def test_truncated_frame_names_the_line(self):
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0.0 10.0\n0.0 10.0\n0.0 10.0\n',
+                          body='1 1 0.0 0.0 0.0\n')   # second atom missing
+        with self.assertRaises(ValueError) as cm:
+            read_lammps_dump(path, types=['H'], quiet=True)
+        self.assertIn('atom lines', str(cm.exception))
+
+    def test_ragged_frame_names_the_line(self):
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0.0 10.0\n0.0 10.0\n0.0 10.0\n',
+                          body='1 1 0.0 0.0 0.0\n2 1 1.0 1.0\n')
+        with self.assertRaises(ValueError) as cm:
+            read_lammps_dump(path, types=['H'], quiet=True)
+        self.assertIn('columns', str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()
