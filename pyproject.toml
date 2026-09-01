@@ -12,7 +12,9 @@ license = {text = "MIT License"}
 authors = [{name = "Leonid Kahle", email = "leonid.kahle@epfl.ch"}]
 requires-python = ">=3.10"
 dependencies = [
-    "numpy>=1.14.0",
+    # 1.21.3 is the first release supporting Python 3.10, which is
+    # this package's minimum (requires-python above).
+    "numpy>=1.21.3",
     "ase>=3.17.0",
     "scipy>=1.0.0",
     "matplotlib>=2.1.2",

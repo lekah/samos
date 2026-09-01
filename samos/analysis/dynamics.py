@@ -658,8 +658,8 @@ class DynamicsAnalyzer(object):
                 msd_std = np.std(msd_this_species, axis=0)
                 msd_sem = msd_std / np.sqrt(len(msd_this_species) - 1)
             else:
-                msd_std = np.full(msd_mean.shape, np.NaN)
-                msd_sem = np.full(msd_mean.shape, np.NaN)
+                msd_std = np.full(msd_mean.shape, np.nan)
+                msd_sem = np.full(msd_mean.shape, np.nan)
             msd.set_array('msd_{}_{}_mean'.format(
                 'decomposed' if decomposed else 'isotropic',
                 atomic_species),
@@ -685,10 +685,10 @@ class DynamicsAnalyzer(object):
             else:
                 results_dict[atomic_species]['slope_msd_std'] = np.full(
                     results_dict[atomic_species]['slope_msd_mean'].shape,
-                    np.NaN)
+                    np.nan)
                 results_dict[atomic_species]['slope_msd_sem'] = np.full(
                     results_dict[atomic_species]['slope_msd_mean'].shape,
-                    np.NaN)
+                    np.nan)
 
             if decomposed:
                 dimensionality_factor = 2.
@@ -707,10 +707,10 @@ class DynamicsAnalyzer(object):
             else:
                 results_dict[atomic_species]['diffusion_std_cm2_s'] = np.full(
                     results_dict[atomic_species]['diffusion_mean_cm2_s'].shape,
-                    np.NaN)
+                    np.nan)
                 results_dict[atomic_species]['diffusion_sem_cm2_s'] = np.full(
                     results_dict[atomic_species]['diffusion_mean_cm2_s'].shape,
-                    np.NaN)
+                    np.nan)
 
             # I need to transform to lists, numpy are not json serializable:
             for k in ('slope_msd_mean', 'slope_msd_std', 'slope_msd_sem',

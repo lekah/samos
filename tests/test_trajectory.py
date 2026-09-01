@@ -86,6 +86,39 @@ class TestTrajectory(unittest.TestCase):
         with self.assertRaises(IncompatibleTrajectoriesException):
             self.assertTrue(check_trajectory_compatibility([t3, t4]))
 
+    def test_store_and_reload_preserves_array_names(self):
+        """Regression: load_file used rstrip('.npy'), which strips a
+        character set rather than a suffix, so 'potential_energy.npy'
+        came back as 'potential_energ'."""
+        import numpy as np
+        import tempfile
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        t = Trajectory()
+        t.set_atoms(Atoms('H'*4))
+        t.set_positions(np.random.random((10, 4, 3)))
+        t.set_pot_energies(np.arange(10.0))
+        # names ending in any of '.npy' are the ones rstrip mangles
+        t.set_array('energy', np.arange(10.0))
+        t.set_array('nanny', np.arange(10.0))
+        with tempfile.NamedTemporaryFile() as f:
+            t.save(f.name)
+            tnew = Trajectory.load_file(f.name)
+
+        self.assertEqual(t.get_arraynames(), tnew.get_arraynames())
+        self.assertTrue(np.array_equal(
+            t.get_array(t._POT_ENER_KEY), tnew.get_array(t._POT_ENER_KEY)))
+
+    def test_set_array_check_existing_raises_valueerror(self):
+        """Regression: the duplicate-name branch called '...'.formamt(),
+        so it raised AttributeError instead of ValueError."""
+        import numpy as np
+        from samos.utils.attributed_array import AttributedArray
+        a = AttributedArray()
+        a.set_array('x', np.arange(5))
+        with self.assertRaises(ValueError):
+            a.set_array('x', np.arange(5), check_existing=True)
+
 
 if __name__ == '__main__':
     unittest.main()

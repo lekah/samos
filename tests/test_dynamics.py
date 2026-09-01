@@ -219,5 +219,36 @@ class TestDynamics(unittest.TestCase):
                             rtol=1e-12)
 
 
+class TestMSDSingleBlock(unittest.TestCase):
+    """A species with a single block has no spread to report, so the
+    std/sem arrays are filled with NaN.  Regression: that path used
+    np.NaN, which NumPy 2.0 removed, so any single-block MSD raised
+    AttributeError.  Every other test here uses several blocks."""
+
+    def _make_trajectory(self, seed=7, nstep=200, nat=4):
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2')
+        pos = np.cumsum(rng.normal(0., 0.1, (nstep, nat, 3)), axis=0)
+        return Trajectory(atoms=atoms, positions=pos, timestep=1.)
+
+    def test_single_block_msd_fills_nan(self):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        d = DynamicsAnalyzer(trajectories=[self._make_trajectory()],
+                             verbosity=0)
+        msd = d.get_msd(t_end_fit=100, t_unit='dt', nr_of_blocks=1)
+
+        for species in ('H', 'O'):
+            std = msd.get_array('msd_isotropic_{}_std'.format(species))
+            sem = msd.get_array('msd_isotropic_{}_sem'.format(species))
+            self.assertTrue(np.all(np.isnan(std)))
+            self.assertTrue(np.all(np.isnan(sem)))
+            mean = msd.get_array('msd_isotropic_{}_mean'.format(species))
+            self.assertTrue(np.all(np.isfinite(mean)))
+            attrs = msd.get_attr(species)
+            self.assertTrue(np.isfinite(attrs['diffusion_mean_cm2_s']))
+            self.assertTrue(np.isnan(attrs['diffusion_std_cm2_s']))
+            self.assertTrue(np.isnan(attrs['diffusion_sem_cm2_s']))
+
+
 if __name__ == '__main__':
     unittest.main()

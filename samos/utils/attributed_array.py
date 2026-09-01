@@ -48,7 +48,7 @@ class AttributedArray(object):
             raise TypeError('Name has to be a string')
         if check_existing:
             if name in list(self._arrays.keys()):
-                raise ValueError('Name {} already exists'.formamt(name))
+                raise ValueError('Name {} already exists'.format(name))
         if wanted_shape_len:
             if len(array.shape) != wanted_shape_len:
                 raise TypeError(
@@ -180,7 +180,15 @@ class AttributedArray(object):
         try:
             with tarfile.open(filename, 'r:gz',
                               format=tarfile.PAX_FORMAT) as tar:
-                tar.extractall(temp_folder)
+                # filter='data' refuses members with absolute paths or
+                # paths escaping temp_folder.  It became the default in
+                # Python 3.14; tarfile.data_filter is present exactly
+                # when the argument is supported (3.12, backported to
+                # 3.10.12 and 3.11.4).
+                if hasattr(tarfile, 'data_filter'):
+                    tar.extractall(temp_folder, filter='data')
+                else:
+                    tar.extractall(temp_folder)
 
             files_in_tar = set(os.listdir(temp_folder))
 
@@ -201,7 +209,7 @@ class AttributedArray(object):
                     raise Exception(
                         'Unrecognized file in trajectory export: {}'
                         ''.format(array_file))
-                new.set_array(array_file.rstrip('.npy'), np.load(
+                new.set_array(array_file.removesuffix('.npy'), np.load(
                     join(temp_folder, array_file), mmap_mode='r'))
         except Exception as e:
             shutil.rmtree(temp_folder)
