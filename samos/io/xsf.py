@@ -249,9 +249,11 @@ if __name__ == '__main__':
     elif pa.max:
         print(r['data'].max())
     elif pa.format == 'grid':
-        write_grid(outfilename=pa.output, **r)
+        write_grid(r['data'], outfilename=pa.output)
     elif pa.format == 'xsf':
-        write_xsf(outfilename=pa.output, **r)
+        # read_xsf also returns volumes, which the writer does not take
+        write_xsf(r['atoms'], r['positions'], r['cell'], r['data'],
+                  outfilename=pa.output)
     elif pa.format == 'none':
         pass
     else:

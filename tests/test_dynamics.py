@@ -540,5 +540,50 @@ class TestSmoothingRename(unittest.TestCase):
             self._analyzer().get_power_spectrum(nr_of_blocks=500)
 
 
+class TestMSDPlottingFitWindows(unittest.TestCase):
+    """get_msd accepts list-valued t_start_fit/t_end_fit, but the
+    plotters divided those lists by stepsize (TypeError) and indexed the
+    window axis of slopes_intercepts_* as if it were the block axis."""
+
+    def _msd(self, decomposed=False, **fit):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(41)
+        t = Trajectory(atoms=Atoms('H2O2'), timestep=1.)
+        t.set_positions(np.cumsum(rng.normal(0., .1, (400, 4, 3)), axis=0))
+        d = DynamicsAnalyzer(trajectories=[t], verbosity=0)
+        return d.get_msd(t_unit='dt', nr_of_blocks=3,
+                         decomposed=decomposed, **fit)
+
+    def _axes(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib import pyplot as plt
+        fig = plt.figure()
+        self.addCleanup(plt.close, fig)
+        return fig.add_subplot(1, 1, 1)
+
+    def test_single_window_still_plots(self):
+        from samos.plotting.plot_dynamics import plot_msd_isotropic
+        msd = self._msd(t_start_fit=10, t_end_fit=100)
+        self.assertFalse(msd.get_attr('multiple_params_fit'))
+        plot_msd_isotropic(msd, ax=self._axes())
+
+    def test_multiple_windows_plot(self):
+        from samos.plotting.plot_dynamics import plot_msd_isotropic
+        msd = self._msd(t_start_fit=[10, 50], t_end_fit=[100, 150])
+        self.assertTrue(msd.get_attr('multiple_params_fit'))
+        ax = self._axes()
+        plot_msd_isotropic(msd, ax=ax)
+        # one dashed fit line per (window, block) per species
+        dashed = [ln for ln in ax.get_lines() if ln.get_linestyle() == '--']
+        self.assertEqual(len(dashed), 2 * 3 * 2)
+
+    def test_multiple_windows_plot_decomposed(self):
+        from samos.plotting.plot_dynamics import plot_msd_anisotropic
+        msd = self._msd(decomposed=True,
+                        t_start_fit=[10, 50], t_end_fit=[100, 150])
+        plot_msd_anisotropic(msd, ax=self._axes(), diagonal_only=True)
+
+
 if __name__ == '__main__':
     unittest.main()

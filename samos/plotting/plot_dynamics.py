@@ -35,6 +35,27 @@ def format_mean_err(mean, err, decimals=2):
                           prec=decimals))
 
 
+def _fit_windows(attrs, stepsize, timestep_fs):
+    """
+    Return the fit windows stored in *attrs* as a list of time axes in ps.
+
+    get_msd accepts list-valued t_start_fit/t_end_fit and then stores
+    those attributes as lists, with a leading window axis on
+    slopes_intercepts_*.  Reading them as scalars raised a TypeError on
+    the floor division below, so multi-window fits could not be plotted
+    at all.
+
+    :returns: One array of times (ps) per fit window, in storage order.
+    """
+    starts = attrs.get('t_start_fit_dt')
+    ends = attrs.get('t_end_fit_dt')
+    if not attrs.get('multiple_params_fit', False):
+        starts, ends = [starts], [ends]
+    return [timestep_fs / 1000.0 * stepsize
+            * np.arange(start // stepsize, end // stepsize)
+            for start, end in zip(starts, ends)]
+
+
 def plot_msd_isotropic(msd,
                        ax=None, no_legend=False, species_of_interest=None,
                        show=False, label=None, no_label=False,
@@ -64,10 +85,7 @@ def plot_msd_isotropic(msd,
     times_msd = msd.get_array('t_list_fs') / 1e3
 
     if not no_block_fits:
-        times_fit = timestep_fs / 1000.0 * stepsize * np.arange(
-            attrs.get('t_start_fit_dt') // stepsize,
-            attrs.get('t_end_fit_dt') // stepsize
-        )
+        times_fit_list = _fit_windows(attrs, stepsize, timestep_fs)
     if species_of_interest is None:
         species_of_interest = attrs['species_of_interest']
     for index_of_species, atomic_species in enumerate(species_of_interest):
@@ -120,13 +138,20 @@ def plot_msd_isotropic(msd,
                     times_msd, msd_this_traj[iblock], color=color,
                     alpha=alpha_block, lw=linewidth_block)
                 if not no_block_fits:
-                    slope_this_block, intercept_this_block = (
-                        slopes_intercepts_this_traj[iblock])
-                    ax.plot(times_fit,
-                            [1000.*slope_this_block*x+intercept_this_block
-                             for x in times_fit],
-                            color=color, linestyle='--',
-                            lw=linewidth_fit, alpha=alpha_fit)
+                    for iwin, times_fit in enumerate(times_fit_list):
+                        # (nwindows, nblocks, 2) when several fit
+                        # windows were requested, (nblocks, 2) otherwise
+                        if multiple_params_fit:
+                            slope, intercept = (
+                                slopes_intercepts_this_traj[iwin, iblock])
+                        else:
+                            slope, intercept = (
+                                slopes_intercepts_this_traj[iblock])
+                        # the slope is in A^2/fs, times_fit in ps
+                        ax.plot(times_fit,
+                                1000. * slope * times_fit + intercept,
+                                color=color, linestyle='--',
+                                lw=linewidth_fit, alpha=alpha_fit)
             if plot_long:
                 times_long = msd.get_array('t_list_long_fs')[itraj] / 1e3
                 ax.plot(times_long, msd.get_array('msd_long_{}_{}'.format(
@@ -169,10 +194,7 @@ def plot_msd_anisotropic(
     times_msd = msd.get_array('t_list_fs') / 1e3
 
     if not no_block_fits:
-        times_fit = timestep_fs / 1000.0 * stepsize * np.arange(
-            attrs.get('t_start_fit_dt') // stepsize,
-            attrs.get('t_end_fit_dt') // stepsize
-        )
+        times_fit_list = _fit_windows(attrs, stepsize, timestep_fs)
     if species_of_interest is None:
         species_of_interest = attrs['species_of_interest']
 
@@ -231,14 +253,20 @@ def plot_msd_anisotropic(
                                 color=color, alpha=alpha_block, lw=0.5,
                                 zorder=1)
                         if not no_block_fits:
-                            slope_this_block, intercept_this_block = (
-                                slopes_intercepts_this_traj[iblock][i][j])
-                            ax.plot(
-                                times_fit,
-                                [1000.*slope_this_block*x+intercept_this_block
-                                 for x in times_fit],
-                                color=color, linestyle='--', alpha=alpha_fit,
-                                zorder=2, lw=1.0)
+                            for iwin, times_fit in enumerate(times_fit_list):
+                                if multiple_params_fit:
+                                    slope, intercept = (
+                                        slopes_intercepts_this_traj[
+                                            iwin, iblock, i, j])
+                                else:
+                                    slope, intercept = (
+                                        slopes_intercepts_this_traj[
+                                            iblock][i][j])
+                                ax.plot(
+                                    times_fit,
+                                    1000. * slope * times_fit + intercept,
+                                    color=color, linestyle='--',
+                                    alpha=alpha_fit, zorder=2, lw=1.0)
     if not (no_legend):
         leg = ax.legend(loc=2)
         leg.get_frame().set_alpha(0.)

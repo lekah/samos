@@ -768,5 +768,49 @@ class TestWriteXsfHeaderOnly(unittest.TestCase):
         self.assertTrue(hasattr(g, 'write_xsf'))
 
 
+class TestADFPlotting(unittest.TestCase):
+    """ADF results had no plotter: plot_angular_spec read the
+    'species_pairs' attribute that AngularSpectrum wrote for triplets,
+    and scripts/samos carried its own inline copy."""
+
+    def _result(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        from samos.analysis.rdf import ADF
+        atoms = Atoms('OSiO', cell=np.eye(3) * 10., pbc=True)
+        pos = np.tile(np.array([[0., 0., 0.],
+                                [1.6, 0., 0.],
+                                [3.2, 0., 0.]]), (3, 1, 1))
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(pos)
+        return ADF(trajectory=t).run(species_triplets=[('O', 'Si', 'O')],
+                                     bonds={'Si-O': (1.0, 2.0)}, nbins=180)
+
+    def _axes(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib import pyplot as plt
+        fig = plt.figure()
+        self.addCleanup(plt.close, fig)
+        return fig.add_subplot(1, 1, 1)
+
+    def test_plot_adf_draws_each_triplet(self):
+        from samos.plotting.plot_rdf import plot_adf
+        res = self._result()
+        handles = plot_adf(res, ax=self._axes())
+        self.assertEqual(len(handles), 1)
+        self.assertEqual(handles[0].get_label(), 'O-Si-O')
+
+    def test_angular_spectrum_uses_the_triplet_key(self):
+        """AngularSpectrum and ADF must agree on the attribute name so
+        one plotting function can serve both."""
+        import inspect
+        from samos.analysis.rdf import AngularSpectrum
+        src = inspect.getsource(AngularSpectrum.run)
+        self.assertIn("set_attr('species_triplets'", src)
+        self.assertNotIn("set_attr('species_pairs'", src)
+
+
 if __name__ == '__main__':
     unittest.main()

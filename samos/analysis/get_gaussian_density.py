@@ -149,7 +149,6 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     from ase.io import read
     from samos.trajectory import Trajectory
-    from samos.io.ase_io import read_positions_with_ase
     ap = ArgumentParser()
 
     ap.add_argument('cif', help='Cif file with structure')
@@ -175,6 +174,9 @@ if __name__ == '__main__':
 
     t = Trajectory()
     t.set_atoms(read(parsed_args.pop('cif')))
-    t.set_array(t._POSITIONS_KEY, read_positions_with_ase(
-        parsed_args.pop('positions')), check_nat=False)
+    # Any format ase can read as a list of frames
+    atoms_list = read(parsed_args.pop('positions'), index=':')
+    t.set_array(t._POSITIONS_KEY,
+                np.array([a.get_positions() for a in atoms_list]),
+                check_nat=False)
     get_gaussian_density(t, **parsed_args)

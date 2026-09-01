@@ -281,7 +281,10 @@ class AngularSpectrum(BaseAnalyzer):
         cellI = np.linalg.inv(cell)
         chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
         rdf_res = AttributedArray()
-        rdf_res.set_attr('species_pairs', species_pairs)
+        # These are triplets, not pairs; the attribute used to be called
+        # 'species_pairs', which no plotting function could tell apart
+        # from an RDF result.
+        rdf_res.set_attr('species_triplets', species_pairs)
         for spec1,  spec2, spec3 in species_pairs:
             ind1 = np.where(chem_sym == spec1)[
                 0] + 1  # +1 for fortran indexing

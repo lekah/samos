@@ -78,6 +78,46 @@ def plot_rdf(
     return handles
 
 
+def plot_adf(adf_res, ax=None, show=False, no_label=False,
+             plot_params={}, **kwargs):
+    """
+    Plot the angular distribution functions in *adf_res*.
+
+    :param adf_res:
+        The AttributedArray returned by
+        :meth:`~samos.analysis.rdf.ADF.run`.
+    :param ax: The axes to draw into, a new figure is made if None
+    :param bool show: Whether to call plt.show() at the end
+    :param bool no_label: Suppress the legend labels
+    :param dict plot_params: Passed on to ax.plot for every triplet
+    :returns: The list of line handles, one per plotted triplet
+    """
+    if ax is None:
+        fig = plt.figure(**kwargs)
+        ax = fig.add_subplot(1, 1, 1)
+
+    handles = []
+    for sl, sc, sr in adf_res.get_attr('species_triplets'):
+        key = '{}_{}_{}'.format(sl, sc, sr)
+        if 'adf_{}'.format(key) not in adf_res:
+            # a triplet whose centre species is absent is not computed
+            continue
+        params = deepcopy(plot_params)
+        if 'label' not in params and not no_label:
+            params['label'] = '{}-{}-{}'.format(sl, sc, sr)
+        l, = ax.plot(adf_res.get_array('angles_{}'.format(key)),
+                     adf_res.get_array('adf_{}'.format(key)), **params)
+        handles.append(l)
+
+    ax.set_xlabel(r'angle $\left(\mathrm{deg}\right)$')
+    ax.set_ylabel('ADF (per center atom per frame per deg)')
+    if not no_label:
+        ax.legend()
+    if show:
+        plt.show()
+    return handles
+
+
 def plot_angular_spec(angspec_res,
                       ax=None,  # no_legend=False, species_of_interest=None,
                       show=False,  # label=None,
@@ -91,7 +131,7 @@ def plot_angular_spec(angspec_res,
         ax = fig.add_subplot(1, 1, 1)
     attrs = angspec_res.get_attrs()
     handles = []
-    for spec1, spec2, spec3 in attrs['species_pairs']:
+    for spec1, spec2, spec3 in attrs['species_triplets']:
         angular_spec = angspec_res.get_array(
             'aspec_{}_{}_{}'.format(spec1, spec2, spec3))
         angles = angspec_res.get_array(
