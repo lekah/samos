@@ -1191,8 +1191,12 @@ class DynamicsAnalyzer(object):
                 pd_this_species_this_traj = pd.mean(axis=(2, 3))
                 # Smothening the array:
                 if smothening > 1:
-                    # Applying a simple convolution to get the mean
-                    kernel = np.ones((nblocks, smothening)) / smothening
+                    # Running mean over frequency bins.  The kernel must
+                    # be one row high: a (nblocks, smothening) kernel
+                    # convolves over the block axis as well, so every
+                    # block's spectrum picked up its neighbours' and the
+                    # std/sem computed from them were meaningless.
+                    kernel = np.ones((1, smothening)) / smothening
                     pd_this_species_this_traj = convolve(
                         pd_this_species_this_traj,
                         kernel, mode='same')

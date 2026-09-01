@@ -156,5 +156,53 @@ class TestArrayShapeGuards(unittest.TestCase):
         self.assertIn('3', str(cm.exception))
 
 
+class TestAttributedArrayRoundTrip(unittest.TestCase):
+    """Regression: load_file read cls._ATOMS_FILENAME, which only exists
+    on Trajectory, so no plain AttributedArray or TimeSeries result
+    could ever be reloaded.  Atoms handling now lives in a Trajectory
+    _load_extra hook mirroring _save_atoms."""
+
+    def _round_trip(self, obj):
+        import tempfile
+        with tempfile.NamedTemporaryFile() as f:
+            obj.save(f.name)
+            return type(obj).load_file(f.name)
+
+    def test_attributed_array_round_trip(self):
+        import numpy as np
+        from samos.utils.attributed_array import AttributedArray
+        a = AttributedArray()
+        a.set_array('x', np.arange(5.))
+        a.set_attr('note', 'hello')
+        b = self._round_trip(a)
+        self.assertTrue(np.array_equal(a.get_array('x'), b.get_array('x')))
+        self.assertEqual(b.get_attr('note'), 'hello')
+
+    def test_time_series_round_trip(self):
+        import numpy as np
+        from samos.analysis.dynamics import TimeSeries
+        ts = TimeSeries()
+        ts.set_array('msd_isotropic_H_mean', np.linspace(0., 1., 7))
+        ts.set_attr('timestep_fs', 1.0)
+        back = self._round_trip(ts)
+        self.assertTrue(np.array_equal(
+            ts.get_array('msd_isotropic_H_mean'),
+            back.get_array('msd_isotropic_H_mean')))
+        self.assertEqual(back.get_attr('timestep_fs'), 1.0)
+
+    def test_trajectory_still_restores_atoms(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        t = Trajectory()
+        t.set_atoms(Atoms('H2O2'))
+        t.set_positions(np.random.random((6, 4, 3)))
+        back = self._round_trip(t)
+        self.assertIsNotNone(back.get_atoms())
+        self.assertEqual(list(back.get_types()), list(t.get_types()))
+        self.assertTrue(np.array_equal(
+            t.get_positions(), back.get_positions()))
+
+
 if __name__ == '__main__':
     unittest.main()

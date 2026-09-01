@@ -135,6 +135,14 @@ class Trajectory(AttributedArray):
             from ase.io import write
             write(join(folder_name, self._ATOMS_FILENAME), self._atoms)
 
+    def _load_extra(self, folder_name, files_in_tar):
+        """Restore the ase.Atoms written by :meth:`_save_atoms`."""
+        from os.path import join
+        if self._ATOMS_FILENAME in files_in_tar:
+            from ase.io import read
+            self.set_atoms(read(join(folder_name, self._ATOMS_FILENAME)))
+            files_in_tar.remove(self._ATOMS_FILENAME)
+
     def get_timestep(self):
         """Return the MD timestep in femtoseconds, or None if not set."""
         return self.get_attr(self._TIMESTEP_KEY)

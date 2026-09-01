@@ -154,6 +154,19 @@ class AttributedArray(object):
         for arrayname, array in list(self._arrays.items()):
             np.save(join(folder_name, '{}.npy'.format(arrayname)), array)
 
+    def _load_extra(self, folder_name, files_in_tar):
+        """
+        Hook for subclasses to restore members that are not arrays or
+        attributes, mirroring their ``_save_*`` methods.
+
+        Implementations must discard the names they consumed from
+        *files_in_tar*; whatever remains is loaded as a ``.npy`` array.
+
+        :param str folder_name: The unpacked archive directory.
+        :param set files_in_tar: Names still to be accounted for.
+        """
+        pass
+
     def remove_array(self, arrayname):
         if arrayname not in self._arrays:
             raise KeyError(f'{arrayname} is not one of arrays')
@@ -205,10 +218,7 @@ class AttributedArray(object):
             for k, v in list(attributes.items()):
                 new.set_attr(k, v)
 
-            if cls._ATOMS_FILENAME in files_in_tar:
-                from ase.io import read
-                new.set_atoms(read(join(temp_folder, cls._ATOMS_FILENAME)))
-                files_in_tar.remove(cls._ATOMS_FILENAME)
+            new._load_extra(temp_folder, files_in_tar)
 
             for array_file in files_in_tar:
                 if not array_file.endswith('.npy'):

@@ -23,55 +23,6 @@ labels, not an ordering contract.
 
 ---
 
-## 4. Power-spectrum smoothing convolves across blocks
-
-**Fix difficulty: 2**
-
-`samos/analysis/dynamics.py:1193-1197`
-
-The kernel is `np.ones((nblocks, smothening)) / smothening`, so
-`convolve(pd, kernel, mode='same')` is a 2-D convolution that also sums
-over the block axis. With 3 blocks whose spectra integrate to 1, 10, 100:
-
-```
-row sums in : [  1.  10. 100.]
-row sums out: [ 11. 111. 110.]
-```
-
-Block 0's "smoothed" spectrum is dominated by blocks 1 and 2. The
-per-block curves and the `std`/`sem` computed from them are meaningless
-whenever `nblocks > 1 and smothening > 1`. Silently wrong numbers, not a
-crash.
-
-**Fix:** smooth along the frequency axis only --
-`kernel = np.ones((1, smothening)) / smothening`, or apply
-`np.convolve` row-wise. Existing test uses `smothening=1` and cannot
-catch this; add a test asserting per-block integral is preserved.
-
----
-
-## 5. `AttributedArray.load_file` is broken for the base class
-
-**Fix difficulty: 2**
-
-`samos/utils/attributed_array.py:203-206`
-
-References `cls._ATOMS_FILENAME` and `new.set_atoms(...)`, both defined
-only on `Trajectory`:
-
-```
-AttributedArray.load_file('aa.tar.gz')
--> AttributeError: type object 'AttributedArray' has no attribute '_ATOMS_FILENAME'
-```
-
-No `TimeSeries` or plain `AttributedArray` result can ever be reloaded.
-
-**Fix:** move the atoms handling into a `Trajectory.load_file` override,
-or guard with `getattr(cls, '_ATOMS_FILENAME', None)`. Add a round-trip
-test for `AttributedArray` and `TimeSeries`.
-
----
-
 ## 11. RDF normalises variable-cell trajectories with the last frame's volume
 
 **Fix difficulty: 3**
@@ -468,7 +419,9 @@ makes the temp-directory cleanup safe, so the copy cannot simply be
 removed).
 
 **Fix:** drop `mmap_mode`, or add a documented lazy path that keeps the
-extracted files alive. Decide and comment which.
+extracted files alive. Decide and comment which. Note `load_file` now
+delegates non-array members to the `_load_extra` hook, so the array
+loop is the only remaining caller of `np.load` here.
 
 ---
 

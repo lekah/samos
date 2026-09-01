@@ -394,5 +394,52 @@ class TestBlockLayoutAndSingleBlockStatistics(unittest.TestCase):
             self.assertTrue(np.isnan(attrs['diffusion_sem_cm2_s']))
 
 
+class TestPowerSpectrumSmoothing(unittest.TestCase):
+    """Regression: the smoothing kernel was np.ones((nblocks, N)), a 2-D
+    kernel that also convolved over the block axis, so each block's
+    spectrum absorbed its neighbours' and the std/sem were meaningless.
+    The existing reference test uses smothening=1 and cannot see this."""
+
+    def _analyzer(self, seed=17, nstep=600, nat=4):
+        import numpy as np
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2')
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(np.cumsum(rng.normal(0., .1, (nstep, nat, 3)),
+                                  axis=0))
+        t.calculate_velocities_from_positions()
+        return DynamicsAnalyzer(trajectories=[t], verbosity=0)
+
+    def test_smoothing_preserves_each_block_integral(self):
+        """A running mean over frequency bins must not move weight
+        between blocks."""
+        d = self._analyzer()
+        raw = d.get_power_spectrum(nr_of_blocks=4, smothening=1)
+        smooth = d.get_power_spectrum(nr_of_blocks=4, smothening=5)
+        a = raw.get_array('periodogram_H_0')
+        b = smooth.get_array('periodogram_H_0')
+        self.assertEqual(a.shape, b.shape)
+        # per-block sums survive smoothing up to the zero-padded edges
+        np.testing.assert_allclose(a.sum(axis=1), b.sum(axis=1), rtol=5e-2)
+
+    def test_blocks_stay_independent(self):
+        """Scaling one block's velocities must not change the smoothed
+        spectrum of the other blocks."""
+        d = self._analyzer()
+        base = d.get_power_spectrum(
+            nr_of_blocks=2, smothening=5).get_array('periodogram_H_0')
+
+        traj = d._trajectories[0]
+        vel = traj.get_velocities().copy()
+        vel[:len(vel) // 2] *= 10.0          # perturb block 0 only
+        traj.set_velocities(vel)
+        perturbed = d.get_power_spectrum(
+            nr_of_blocks=2, smothening=5).get_array('periodogram_H_0')
+
+        self.assertFalse(np.allclose(base[0], perturbed[0]))
+        np.testing.assert_allclose(base[1], perturbed[1], rtol=1e-10)
+
+
 if __name__ == '__main__':
     unittest.main()
