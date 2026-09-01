@@ -12,10 +12,19 @@ Each issue carries a **Fix difficulty** score from 1 to 10:
 * **10** -- large cross-cutting refactor; if the fix is wrong the damage
   is silent, numerically subtle, and hard to trace back.
 
-This file supersedes the old `TODO.md`: its open items were folded
-in here (issues #22, #33, #36, #37, #38, #39), and its two open
-bugs -- the `get_kinetic_energies` species array and the `get_vaf`
-single-block division -- have since been fixed.
+This file supersedes the old `TODO.md`, whose open items were folded in
+here.
+
+**Everything that could be fixed without a decision has been.** The six
+entries left over need something this file cannot supply:
+
+* **A physics decision** -- #11 (which density definition an NPT RDF
+  should use), #21 (what samos's internal stress unit is), #25 (which
+  minimum-image convention wins, given that switching changes published
+  numbers for non-orthogonal cells).
+* **A scope decision** -- #35 (whether the per-module `__main__` blocks
+  should still exist now that `scripts/samos` is the entry point).
+* **A large refactor with silent failure modes** -- #26, #33.
 
 **When an issue is fixed and verified, delete its entry from this file.**
 Renumbering the remaining entries is not required -- the numbers are
