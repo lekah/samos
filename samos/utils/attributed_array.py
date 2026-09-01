@@ -224,8 +224,12 @@ class AttributedArray:
                     raise Exception(
                         'Unrecognized file in trajectory export: {}'
                         ''.format(array_file))
-                new.set_array(array_file.removesuffix('.npy'), np.load(
-                    join(temp_folder, array_file), mmap_mode='r'))
+                # No mmap_mode here: set_array calls np.array() on
+                # whatever it is given, so the mapping was copied into
+                # memory immediately anyway.  Loading eagerly also means
+                # nothing references temp_folder once it is removed.
+                new.set_array(array_file.removesuffix('.npy'),
+                              np.load(join(temp_folder, array_file)))
         except Exception as e:
             shutil.rmtree(temp_folder)
             raise e

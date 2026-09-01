@@ -5,8 +5,6 @@ import sys
 import numpy as np
 from samos.utils.terminal import get_terminal_width
 
-bohr_to_ang = 0.52917720859
-
 
 def write_xsf_header(
         atoms, positions, cell, data,

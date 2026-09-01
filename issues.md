@@ -152,23 +152,6 @@ sites and remove the shim in `scripts/samos`.
 
 ---
 
-## 23. `bohr_to_ang` defined four times, with two different values
-
-**Fix difficulty: 2**
-
-* `samos/io/xsf.py:6` -- `0.52917720859`
-* `samos/plotting/plot_xsf.py:18` -- `0.52917720859`
-* `samos/analysis/get_gaussian_density.py:8` -- `0.52917720859`
-* `samos/utils/constants.py:8` -- `0.52917721092`  <- the module meant
-  to hold it, imported by none of the above
-* `samos/utils/units.py` -- a third truncation, `0.529177`, inline in
-  the `electron` entry
-
-**Fix:** import from `samos.utils.constants` everywhere, pick one value
-(CODATA 2018: `0.529177210903`), and cite the source in `constants.py`.
-
----
-
 ## 24. `write_xsf_header` duplicates `write_xsf`
 
 **Fix difficulty: 3**
@@ -295,23 +278,6 @@ rather than a useful message.
 **Fix:** explicit keyword arguments with a defined application order,
 or an ordered whitelist of setters applied in dependency order. Touches
 every constructor call site, hence the score.
-
----
-
-## 34. `mmap_mode='r'` in `load_file` is defeated by `set_array`
-
-**Fix difficulty: 2**
-
-`samos/utils/attributed_array.py:204-205` loads with `mmap_mode='r'`,
-but `set_array` immediately does `array = np.array(array)`, which
-copies. The mmap buys nothing and the intent is misleading (it also
-makes the temp-directory cleanup safe, so the copy cannot simply be
-removed).
-
-**Fix:** drop `mmap_mode`, or add a documented lazy path that keeps the
-extracted files alive. Decide and comment which. Note `load_file` now
-delegates non-array members to the `_load_extra` hook, so the array
-loop is the only remaining caller of `np.load` here.
 
 ---
 

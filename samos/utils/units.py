@@ -21,11 +21,13 @@ Physical constants used
 -----------------------
   1 eV  = 23.0609 kcal/mol  (NIST 2018)
   1 eV  = 27.2114 Ha
-  1 Bohr = 0.529177 A
+  1 Bohr = 0.52917721092 A  (samos.utils.constants.bohr_to_ang)
   1 atu  = 0.0241888 fs  (Hartree atomic time unit)
 
 Sources: https://docs.lammps.org/units.html
 """
+
+from samos.utils.constants import bohr_to_ang
 
 UNIT_SYSTEMS = {
     # real: distance A, time fs, energy kcal/mol, velocity A/fs
@@ -62,9 +64,9 @@ UNIT_SYSTEMS = {
     },
     # electron: distance Bohr, time atu, energy Ha, velocity Bohr/atu
     'electron': {
-        'l_conv': 0.529177,                  # Bohr -> A
-        'v_conv': 0.529177 / 0.0241888,      # Bohr/atu -> A/fs ~ 21.877
-        'f_conv': 27.2114 / 0.529177,        # Ha/Bohr -> eV/A ~ 51.42
+        'l_conv': bohr_to_ang,               # Bohr -> A
+        'v_conv': bohr_to_ang / 0.0241888,   # Bohr/atu -> A/fs ~ 21.877
+        'f_conv': 27.2114 / bohr_to_ang,     # Ha/Bohr -> eV/A ~ 51.42
         'e_conv': 27.2114,                   # Ha -> eV
         's_conv': 1.0,
     },

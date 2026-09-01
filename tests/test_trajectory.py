@@ -204,5 +204,36 @@ class TestAttributedArrayRoundTrip(unittest.TestCase):
             t.get_positions(), back.get_positions()))
 
 
+class TestSingleBohrConstant(unittest.TestCase):
+    """bohr_to_ang was defined in four modules with two different
+    values; samos.utils.constants is now the only definition."""
+
+    def test_all_modules_agree(self):
+        from samos.utils.constants import bohr_to_ang
+        from samos.io.xsf import bohr_to_ang as xsf_value
+        from samos.utils.units import UNIT_SYSTEMS
+        self.assertEqual(xsf_value, bohr_to_ang)
+        self.assertEqual(UNIT_SYSTEMS['electron']['l_conv'], bohr_to_ang)
+
+    def test_no_module_redefines_it(self):
+        import os
+        import re
+        root = os.path.join(os.path.dirname(__file__), '..', 'samos')
+        offenders = []
+        for dirpath, _, filenames in os.walk(root):
+            for fn in filenames:
+                if not fn.endswith('.py'):
+                    continue
+                path = os.path.join(dirpath, fn)
+                if os.path.samefile(
+                        path, os.path.join(root, 'utils', 'constants.py')):
+                    continue
+                with open(path) as fh:
+                    for line in fh:
+                        if re.match(r'\s*bohr_to_ang\s*=', line):
+                            offenders.append(path)
+        self.assertEqual(offenders, [])
+
+
 if __name__ == '__main__':
     unittest.main()

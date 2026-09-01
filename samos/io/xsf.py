@@ -3,7 +3,8 @@
 
 import sys
 import numpy as np
-bohr_to_ang = 0.52917720859
+
+from samos.utils.constants import bohr_to_ang
 
 
 def read_xsf(filename, fold_positions=False):
