@@ -16,7 +16,9 @@ def write_xsf_header(
     elif outfilename is None:
         f = sys.stdout
     else:
-        raise Exception('No file')
+        raise TypeError(
+            'outfilename must be a path or None, got {}'.format(
+                type(outfilename)))
     if data is not None:
         xdim, ydim, zdim = data.shape
     else:
@@ -58,7 +60,11 @@ DATAGRID_3D_UNKNOWN
         if col:
             f.write('\n')
         f.write('END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n')
-    f.close()
+    # Close only what this function opened.  An unconditional
+    # close() here shut sys.stdout, which is what
+    # outfilename=None -- the documented default -- selects.
+    if f is not sys.stdout:
+        f.close()
 
 
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',

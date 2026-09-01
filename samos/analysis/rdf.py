@@ -64,7 +64,7 @@ class RDF(BaseAnalyzer):
             rdf_res.set_array('radii_{}_{}'.format(spec1, spec2), radii)
         return rdf_res
 
-    def run(self, radius=None, species_pairs=None,
+    def run(self, radius, species_pairs=None,
             istart=0, istop=None, stepsize=1, nbins=100):
         """
         Calculate a RDF, also searching periodic images.
@@ -134,9 +134,9 @@ class RDF(BaseAnalyzer):
 
         if istop is None:
             istop = len(positions)
-        elif istop >= len(positions):
-            raise ValueError('Istop ({}) is higher than (or equal to) '
-                             'number of positions ({})'.format(
+        elif istop > len(positions):
+            raise ValueError('Istop ({}) is higher than the number of '
+                             'positions ({})'.format(
                                  istop, len(positions)))
         if species_pairs is None:
             species_pairs = sorted(list(
@@ -165,6 +165,7 @@ class RDF(BaseAnalyzer):
         # wrapping the positions:
         shortest_distance_all = np.inf
         for label, (ind1, ind2) in zip(labels, indices_pairs):
+            shortest_distance_this_pair = np.inf
             if ind1 == ind2:
                 # lists are equal, I will therefore not double calculate
                 pairs_of_atoms = [(i, j) for i in ind1
@@ -174,7 +175,14 @@ class RDF(BaseAnalyzer):
                 pairs_of_atoms = [(i, j) for i in ind1
                                   for j in ind2 if i != j]
                 pair_factor = 1.0
-            # It can happen that pairs_of_atoms
+            if not pairs_of_atoms:
+                # e.g. a species that is absent from the trajectory.
+                # Skipping keeps the remaining pairs computable; the
+                # unpacking below would raise an opaque
+                # 'not enough values to unpack' instead.
+                print('Warning: no atom pairs for {}, skipping'
+                      ''.format(label))
+                continue
             ind_pair1, ind_pair2 = list(zip(*pairs_of_atoms))
 
             # doinng a loop in time to avoid memory explosion
@@ -206,8 +214,8 @@ class RDF(BaseAnalyzer):
                 #  into periodic cell
                 shortest_distances = cdist(
                     diff_real_wrapped, corners).min(axis=1)
-                shortest_distance_all = min([shortest_distance_all,
-                                             shortest_distances.min()])
+                shortest_distance_this_pair = min(
+                    shortest_distance_this_pair, shortest_distances.min())
                 hist += prefactor * \
                     (np.histogram(shortest_distances, bins=nbins,
                      range=(0, radius))[0]).astype(float)
@@ -228,8 +236,14 @@ class RDF(BaseAnalyzer):
             rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
             rdf_res.set_attr('n_data_{}'.format(label),
                              len(pairs_of_atoms) * ((istop-istart)//stepsize))
-            rdf_res.set_attr('shortest_distance',
-                             shortest_distance_all)
+            rdf_res.set_attr('shortest_distance_{}'.format(label),
+                             float(shortest_distance_this_pair))
+            shortest_distance_all = min(shortest_distance_all,
+                                        shortest_distance_this_pair)
+        # One global value, after every pair has contributed.  This used
+        # to be written inside the loop, so it held the running minimum
+        # over the pairs seen so far under a name that reads per-pair.
+        rdf_res.set_attr('shortest_distance', float(shortest_distance_all))
         return rdf_res
 
 
@@ -652,6 +666,26 @@ class TorsionAnalyzer(BondAnalyzer):
             "TorsionAnalyzer is not yet implemented.")
 
 
+def pairs_with_other_species(trajectory, species):
+    """
+    Build the ``(requested, other)`` species pairs for an RDF.
+
+    Every entry of *species* is paired with every distinct species
+    present in *trajectory* that was not itself requested.
+
+    Deduplicating matters: both call sites used to iterate the per-atom
+    symbol list rather than the set of species, so a hundred-atom cell
+    produced a hundred identical copies of each pair, every one of them
+    computed from scratch.
+
+    :param trajectory: :class:`~samos.trajectory.Trajectory` to inspect.
+    :param list species: Chemical symbols of interest.
+    :returns: List of ``(spec, other)`` tuples, deterministically ordered.
+    """
+    others = sorted(set(trajectory.get_types()) - set(species))
+    return [(spec, other) for spec in species for other in others]
+
+
 def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
                       species_pairs=None, species=None, savefig=None,
                       plot=False, printrdf=False, no_int=False, index=':'):
@@ -667,12 +701,7 @@ def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
         for spec in species_pairs:
             species_pairs_.append(spec.split('-'))
     elif species:
-        species_pairs_ = []
-        other_species = [s for s in traj.get_atoms().get_chemical_symbols()
-                         if s not in species]
-        for thisspec in species:
-            for otherspec in other_species:
-                species_pairs_.append((thisspec, otherspec))
+        species_pairs_ = pairs_with_other_species(traj, species)
     else:
         species_pairs_ = None
     rdf = RDF(trajectory=traj)

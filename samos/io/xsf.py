@@ -108,7 +108,9 @@ def write_xsf(
     elif outfilename is None:
         f = sys.stdout
     else:
-        raise Exception('No file')
+        raise TypeError(
+            'outfilename must be a path or None, got {}'.format(
+                type(outfilename)))
 
     if is_flattened:
         try:
@@ -161,7 +163,11 @@ DATAGRID_3D_UNKNOWN
     if col:
         f.write('\n')
     f.write('END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n')
-    f.close()
+    # Close only what this function opened.  An unconditional
+    # close() here shut sys.stdout, which is what
+    # outfilename=None -- the documented default -- selects.
+    if f is not sys.stdout:
+        f.close()
 
 
 def write_grid(data, outfilename=None, vals_per_line=5,):
@@ -171,7 +177,9 @@ def write_grid(data, outfilename=None, vals_per_line=5,):
     elif outfilename is None:
         f = sys.stdout
     else:
-        raise Exception('No file')
+        raise TypeError(
+            'outfilename must be a path or None, got {}'.format(
+                type(outfilename)))
 
     xdim, ydim, zdim = data.shape
     f.write('3         {}         {}         {}\n'.format(
@@ -188,7 +196,11 @@ def write_grid(data, outfilename=None, vals_per_line=5,):
                     col = 0
     if col:
         f.write('\n')
-    f.close()
+    # Close only what this function opened.  An unconditional
+    # close() here shut sys.stdout, which is what
+    # outfilename=None -- the documented default -- selects.
+    if f is not sys.stdout:
+        f.close()
 
 
 if __name__ == '__main__':

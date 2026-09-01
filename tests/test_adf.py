@@ -567,5 +567,140 @@ class TestPlotRDFColors(unittest.TestCase):
         self.assertEqual(int_line.get_color(), rdf_line.get_color())
 
 
+class TestRDFValidationAndAttributes(unittest.TestCase):
+    """RDF.run had an impossible default (radius=None), rejected the
+    istop its own default resolves to, crashed opaquely on a species
+    that is absent, and wrote a cross-pair running minimum under a
+    per-pair-looking attribute name."""
+
+    def _trajectory(self, seed=3, nstep=8):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2', cell=np.eye(3) * 10., pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(rng.random((nstep, 4, 3)) * 10.)
+        return t
+
+    def _rdf(self):
+        from samos.analysis.rdf import RDF
+        return RDF(trajectory=self._trajectory())
+
+    def test_radius_is_required(self):
+        with self.assertRaises(TypeError):
+            self._rdf().run()
+
+    def test_istop_equal_to_length_is_accepted(self):
+        """len(positions) is exactly what istop=None resolves to, so it
+        must not be rejected."""
+        res = self._rdf().run(radius=4.0, istop=8)
+        self.assertIn('rdf_H_H', res.get_arraynames())
+
+    def test_istop_beyond_length_still_rejected(self):
+        with self.assertRaises(ValueError):
+            self._rdf().run(radius=4.0, istop=9)
+
+    def test_absent_species_is_skipped_not_crashed(self):
+        res = self._rdf().run(radius=4.0, species_pairs=[('H', 'N'),
+                                                         ('H', 'O')])
+        # the impossible pair is dropped, the valid one survives
+        self.assertNotIn('rdf_H_N', res.get_arraynames())
+        self.assertIn('rdf_H_O', res.get_arraynames())
+
+    def test_shortest_distance_is_per_pair_and_global(self):
+        import numpy as np
+        res = self._rdf().run(radius=4.0)
+        per_pair = [res.get_attr('shortest_distance_{}'.format(lbl))
+                    for lbl in ('H_H', 'H_O', 'O_O')]
+        self.assertTrue(all(np.isfinite(d) for d in per_pair))
+        # the global value is the minimum over every pair, not the
+        # running minimum at whichever pair happened to be last
+        self.assertAlmostEqual(res.get_attr('shortest_distance'),
+                               min(per_pair))
+
+
+class TestSpeciesPairHelper(unittest.TestCase):
+    """Both call sites built these pairs from the per-atom symbol list,
+    so each pair appeared once per atom."""
+
+    def _trajectory(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        # 6 atoms but only 3 species
+        atoms = Atoms('H3OFe2', cell=np.eye(3) * 10., pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(np.zeros((2, 6, 3)))
+        return t
+
+    def test_pairs_are_deduplicated(self):
+        from samos.analysis.rdf import pairs_with_other_species
+        pairs = pairs_with_other_species(self._trajectory(), ['H'])
+        self.assertEqual(pairs, [('H', 'Fe'), ('H', 'O')])
+
+    def test_requested_species_excluded_from_others(self):
+        from samos.analysis.rdf import pairs_with_other_species
+        pairs = pairs_with_other_species(self._trajectory(), ['H', 'O'])
+        self.assertEqual(sorted(pairs),
+                         [('H', 'Fe'), ('O', 'Fe')])
+
+
+class TestWritersLeaveStdoutOpen(unittest.TestCase):
+    """write_xsf / write_grid / write_xsf_header default to
+    outfilename=None, i.e. sys.stdout, and then closed it."""
+
+    def _capture(self, func, *args, **kwargs):
+        import io
+        import sys
+        buf = io.StringIO()
+        real = sys.stdout
+        sys.stdout = buf
+        try:
+            func(*args, **kwargs)
+        finally:
+            closed = sys.stdout.closed
+            sys.stdout = real
+        return buf, closed
+
+    def _grid(self):
+        import numpy as np
+        return np.arange(8.).reshape(2, 2, 2)
+
+    def test_write_xsf_leaves_stdout_open(self):
+        import numpy as np
+        from samos.io.xsf import write_xsf
+        buf, closed = self._capture(
+            write_xsf, ['H'], [[0., 0., 0.]], np.eye(3), self._grid())
+        self.assertFalse(closed)
+        self.assertIn('BEGIN_BLOCK_DATAGRID_3D', buf.getvalue())
+        # the embedded header literal must stay flush left
+        self.assertIn('\n3D_PWSCF\n', buf.getvalue())
+
+    def test_write_grid_leaves_stdout_open(self):
+        from samos.io.xsf import write_grid
+        _, closed = self._capture(write_grid, self._grid())
+        self.assertFalse(closed)
+
+    def test_bad_outfilename_type_rejected(self):
+        import numpy as np
+        from samos.io.xsf import write_xsf
+        with self.assertRaises(TypeError):
+            write_xsf(['H'], [[0., 0., 0.]], np.eye(3), self._grid(),
+                      outfilename=42)
+
+    def test_named_file_is_closed(self):
+        import numpy as np
+        import tempfile
+        import os
+        from samos.io.xsf import write_grid
+        fd, path = tempfile.mkstemp(suffix='.xsf')
+        os.close(fd)
+        self.addCleanup(os.unlink, path)
+        write_grid(self._grid(), outfilename=path)
+        with open(path) as fh:
+            self.assertTrue(fh.read().strip())
+
+
 if __name__ == '__main__':
     unittest.main()

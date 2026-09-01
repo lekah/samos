@@ -65,30 +65,6 @@ duplicated special case in `get_msd`.
 
 ---
 
-## 13. RDF input validation
-
-**Fix difficulty: 2**
-
-`samos/analysis/rdf.py:67` (`radius=None` default), `:137` (istop),
-`:178` (empty pair list)
-
-| Input | Current result |
-|---|---|
-| `radius=None` -- the signature default | `TypeError: float() argument must be a string or a real number` at line 163 |
-| species pair naming an absent species | `ValueError: not enough values to unpack (expected 2, got 0)` at line 178 |
-| `istop=len(positions)` | rejected as "higher than (or equal to)", yet that is exactly what the default resolves to -- the check should be `>` |
-
-The empty-pair guard above line 178 only covers the single-atom
-same-species case; a species absent from the trajectory falls straight
-through.
-
-**Fix:** make `radius` a required argument (or validate it with a clear
-message); change `>=` to `>` at line 137; skip pairs with an empty
-`pairs_of_atoms` the same way the single-atom case is skipped, and
-report which pairs were dropped.
-
----
-
 ## 14. Dead entry points
 
 **Fix difficulty: 3**
@@ -106,23 +82,6 @@ report which pairs were dropped.
 result dict down to the keys the writers accept. Decide whether these
 `__main__` blocks should exist at all now that `scripts/samos` is the
 CLI -- see issue #21.
-
----
-
-## 15. `f.close()` closes `sys.stdout`
-
-**Fix difficulty: 2**
-
-`samos/io/xsf.py:164`, `samos/io/xsf.py:191`,
-`samos/analysis/get_gaussian_density.py:61`
-
-All three writers do `f = sys.stdout` when `outfilename is None` -- the
-documented default -- and then unconditionally `f.close()` at the end.
-Anything printed afterwards in the same process fails.
-
-**Fix:** `contextlib.ExitStack` / a small helper that only closes what it
-opened; wrap the write in `try/finally` so an exception does not leak
-the handle either.
 
 ---
 
@@ -219,7 +178,7 @@ sites and remove the shim in `scripts/samos`.
 
 Near-verbatim copies: same CRYSTAL/PRIMVEC header, same `PRIMCOORD`
 block, same `data[x % xdim, y % ydim, z % zdim]` wrap loop, same
-`if col:` no-op, same `f.close()` bug (issue #15). The only real
+`if col:` no-op, and now the same guarded-close fix applied twice. The only real
 difference is that the copy can emit a header with no data block.
 
 **Fix:** give `samos.io.xsf.write_xsf` a `data=None` mode and delete the
@@ -284,23 +243,6 @@ it probably should) and give `_resolve_blocks` a flag for that. A
 
 ---
 
-## 27. Species-pair expansion duplicated, with the same bug in both copies
-
-**Fix difficulty: 2**
-
-`samos/analysis/rdf.py:666-667` and `scripts/samos:416-417`
-
-```python
-other = [s for s in traj.get_atoms().get_chemical_symbols() if s not in species]
-```
-
-Iterates the per-atom symbol list rather than the set of species, so a
-100-atom cell yields ~100 duplicate pairs, each recomputed from scratch.
-
-**Fix:** `sorted(set(...))` in one shared helper; call it from both.
-
----
-
 ## 28. `AngularSpectrum` / `ADF` result formats are incompatible, and `ADF` has no plotter
 
 **Fix difficulty: 4**
@@ -315,24 +257,6 @@ in `samos.plotting`.
 **Fix:** rename `AngularSpectrum`'s attribute to `species_triplets`,
 add `plot_adf` to `samos/plotting/plot_rdf.py`, and have `scripts/samos`
 call it instead of its inline copy.
-
----
-
-## 30. `shortest_distance` is a cross-pair running minimum stored per pair
-
-**Fix difficulty: 2**
-
-`samos/analysis/rdf.py:166, 209-210, 231-232`
-
-`shortest_distance_all` is initialised once outside the pair loop and
-`set_attr('shortest_distance', ...)` is called inside it, so the stored
-value is the minimum over all pairs processed *so far* -- the name and
-the placement both suggest a per-pair quantity.
-
-`scripts/samos` and `util_rdf_and_plot` print it as if it were global.
-
-**Fix:** store `shortest_distance_{label}` per pair and a single global
-`shortest_distance` after the loop.
 
 ---
 
