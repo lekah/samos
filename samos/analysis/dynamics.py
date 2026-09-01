@@ -97,6 +97,54 @@ def _get_masses(trajectory):
     return atoms.get_masses()
 
 
+def _resolve_blocks(nstep, params):
+    """
+    Resolve the block layout for one trajectory of *nstep* steps.
+
+    Blocks are cut from the first ``nstep - t_end_dt`` steps, so that
+    every block start still has ``t_end_dt`` steps of trajectory ahead
+    of it for the longest lag.
+
+    Exactly one of ``params.nr_of_blocks`` / ``params.block_length_dt``
+    is set by :meth:`DynamicsAnalyzer._get_running_params`.
+
+    :returns: ``(block_length_dt, nr_of_blocks)`` for this trajectory.
+    :raises InputError:
+        If the requested layout does not fit in the trajectory.  A zero
+        block length or count used to pass the old ``< 0`` test and
+        reach the Fortran/C++ kernels, which index without bounds
+        checking.
+    """
+    usable = nstep - params.t_end_dt
+    if params.nr_of_blocks is not None:
+        nr_of_blocks = params.nr_of_blocks
+        if nr_of_blocks < 1:
+            raise InputError(
+                'nr_of_blocks must be at least 1, got {}.'.format(
+                    nr_of_blocks))
+        block_length_dt = usable // nr_of_blocks
+    elif params.block_length_dt is not None:
+        block_length_dt = params.block_length_dt
+        if block_length_dt < 1:
+            raise InputError(
+                'block_length must be at least one timestep, got {} '
+                'dt.'.format(block_length_dt))
+        nr_of_blocks = usable // block_length_dt
+    else:  # pragma: no cover -- _get_running_params always sets one
+        raise RuntimeError(
+            'Neither nr_of_blocks nor block_length_dt was specified')
+
+    if block_length_dt < 1 or nr_of_blocks < 1:
+        raise InputError(
+            'Cannot fit {} block(s) of {} step(s) into a trajectory of '
+            '{} steps: only {} step(s) are available as block starts '
+            '(nstep - t_end_dt, with t_end_dt={}). Use fewer blocks, a '
+            'shorter block_length, or a smaller t_end/t_end_fit.'.format(
+                nr_of_blocks, block_length_dt, nstep, usable,
+                params.t_end_dt))
+    return block_length_dt, nr_of_blocks
+
+
 def _species_factors(trajectory, atomic_species):
     """
     Return the 0/1 selector array that restricts a centre-of-mass
@@ -494,24 +542,8 @@ class DynamicsAnalyzer(object):
 
                 # make blocks
                 nstep, nat, _ = positions.shape
-                if p.nr_of_blocks:
-                    block_length_dt_this_traj = (
-                        nstep - p.t_end_dt) // p.nr_of_blocks
-                    nr_of_blocks_this_traj = p.nr_of_blocks
-                elif p.block_length_dt is not None and p.block_length_dt > 0:
-                    block_length_dt_this_traj = p.block_length_dt
-                    nr_of_blocks_this_traj = (
-                        nstep - p.t_end_dt) // p.block_length_dt
-                else:
-                    raise RuntimeError(
-                        'Neither nr_of_blocks nor block_length_dt '
-                        'was specified')
-                if (
-                    (nr_of_blocks_this_traj < 0)
-                        or (block_length_dt_this_traj < 0)):
-                    raise RuntimeError(
-                        't_end_dt (or t_end_fit_dt) is bigger'
-                        ' than the trajectory length')
+                block_length_dt_this_traj, nr_of_blocks_this_traj = (
+                    _resolve_blocks(nstep, p))
 
                 nat_of_interest = len(indices_of_interest)
 
@@ -863,19 +895,8 @@ class DynamicsAnalyzer(object):
                     prefactor = 1
 
                 nstep, nat, _ = velocities.shape
-                if p.nr_of_blocks:
-                    block_length_dt_this_traj = (
-                        nstep - p.t_end_dt) // p.nr_of_blocks
-                    nr_of_blocks_this_traj = p.nr_of_blocks
-                elif (p.block_length_dt is not None
-                        and p.block_length_dt > 0):
-                    block_length_dt_this_traj = p.block_length_dt
-                    nr_of_blocks_this_traj = (
-                        nstep - p.t_end_dt) // p.block_length_dt
-                else:
-                    raise RuntimeError(
-                        'Neither nr_of_blocks nor block_length_dt is '
-                        'specified')
+                block_length_dt_this_traj, nr_of_blocks_this_traj = (
+                    _resolve_blocks(nstep, p))
 
                 nat_of_interest = len(indices_of_interest)
 
@@ -923,8 +944,15 @@ class DynamicsAnalyzer(object):
                 arr = np.array(arr)
 
                 arr_mean = np.mean(arr, axis=0)
-                arr_std = np.std(arr, axis=0)
-                arr_sem = arr_std / np.sqrt(arr.shape[0] - 1)
+                if arr.shape[0] > 1:
+                    arr_std = np.std(arr, axis=0)
+                    arr_sem = arr_std / np.sqrt(arr.shape[0] - 1)
+                else:
+                    # A single block carries no spread; reporting 0/0
+                    # here produced a RuntimeWarning and a silent NaN.
+                    # get_msd fills NaN in the same situation.
+                    arr_std = np.full(arr_mean.shape, np.nan)
+                    arr_sem = np.full(arr_mean.shape, np.nan)
                 vaf_time_series.set_array(
                     '{}_{}_mean'.format(name, atomic_species),
                     arr_mean)
@@ -937,12 +965,16 @@ class DynamicsAnalyzer(object):
 
             fitted_means_of_integral = np.array(fitted_means_of_integral)
             results_dict[atomic_species] = dict(
-                diffusion_mean_cm2_s=fitted_means_of_integral.mean(),
-                diffusion_std_cm2_s=fitted_means_of_integral.std())
-
-            results_dict[atomic_species]['diffusion_sem_cm2_s'] = (
-                results_dict[atomic_species]['diffusion_std_cm2_s']
-                / np.sqrt(len(fitted_means_of_integral) - 1))
+                diffusion_mean_cm2_s=fitted_means_of_integral.mean())
+            if len(fitted_means_of_integral) > 1:
+                results_dict[atomic_species]['diffusion_std_cm2_s'] = (
+                    fitted_means_of_integral.std())
+                results_dict[atomic_species]['diffusion_sem_cm2_s'] = (
+                    results_dict[atomic_species]['diffusion_std_cm2_s']
+                    / np.sqrt(len(fitted_means_of_integral) - 1))
+            else:
+                results_dict[atomic_species]['diffusion_std_cm2_s'] = np.nan
+                results_dict[atomic_species]['diffusion_sem_cm2_s'] = np.nan
 
             if self._verbosity > 1:
                 print(

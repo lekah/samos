@@ -326,5 +326,73 @@ class TestCenterOfMassAndKineticEnergies(unittest.TestCase):
         self.assertIn('set_trajectories', str(cm.exception))
 
 
+class TestBlockLayoutAndSingleBlockStatistics(unittest.TestCase):
+    """Block layouts that do not fit used to reach the compute kernels
+    with a zero block length (the guard only tested `< 0`), and the VAF
+    divided by `nblocks - 1` without a guard."""
+
+    def _make_trajectory(self, seed=13, nstep=300, nat=4):
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2')
+        pos = np.cumsum(rng.normal(0., 0.1, (nstep, nat, 3)), axis=0)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(pos)
+        t.calculate_velocities_from_positions()
+        return t
+
+    def _analyzer(self):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        return DynamicsAnalyzer(trajectories=[self._make_trajectory()],
+                                verbosity=0)
+
+    def test_too_many_blocks_msd_raises(self):
+        from samos.utils.exceptions import InputError
+        d = self._analyzer()
+        # 300 steps, t_end_dt = 100 -> 200 usable, so 500 blocks of
+        # length 0.  This used to be handed to the kernel as-is.
+        with self.assertRaises(InputError) as cm:
+            d.get_msd(t_end_fit=100, t_unit='dt', nr_of_blocks=500)
+        self.assertIn('block', str(cm.exception).lower())
+
+    def test_too_many_blocks_vaf_raises(self):
+        from samos.utils.exceptions import InputError
+        d = self._analyzer()
+        with self.assertRaises(InputError):
+            d.get_vaf(t_end_fit=50, t_end=100, t_unit='dt',
+                      nr_of_blocks=500)
+
+    def test_block_length_longer_than_trajectory_raises(self):
+        from samos.utils.exceptions import InputError
+        d = self._analyzer()
+        with self.assertRaises(InputError):
+            d.get_msd(t_end_fit=100, t_unit='dt', block_length=1000)
+
+    def test_nr_of_blocks_zero_raises(self):
+        from samos.utils.exceptions import InputError
+        d = self._analyzer()
+        with self.assertRaises(InputError):
+            d.get_msd(t_end_fit=100, t_unit='dt', nr_of_blocks=0)
+
+    def test_single_block_vaf_fills_nan_without_warning(self):
+        import warnings
+        d = self._analyzer()
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', RuntimeWarning)
+            vaf = d.get_vaf(t_end_fit=50, t_end=100, t_unit='dt',
+                            nr_of_blocks=1)
+
+        for species in ('H', 'O'):
+            mean = vaf.get_array('vaf_isotropic_{}_mean'.format(species))
+            std = vaf.get_array('vaf_isotropic_{}_std'.format(species))
+            sem = vaf.get_array('vaf_isotropic_{}_sem'.format(species))
+            self.assertTrue(np.all(np.isfinite(mean)))
+            self.assertTrue(np.all(np.isnan(std)))
+            self.assertTrue(np.all(np.isnan(sem)))
+            attrs = vaf.get_attr(species)
+            self.assertTrue(np.isfinite(attrs['diffusion_mean_cm2_s']))
+            self.assertTrue(np.isnan(attrs['diffusion_std_cm2_s']))
+            self.assertTrue(np.isnan(attrs['diffusion_sem_cm2_s']))
+
+
 if __name__ == '__main__':
     unittest.main()
