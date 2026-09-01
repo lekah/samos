@@ -250,5 +250,81 @@ class TestMSDSingleBlock(unittest.TestCase):
             self.assertTrue(np.isnan(attrs['diffusion_sem_cm2_s']))
 
 
+class TestCenterOfMassAndKineticEnergies(unittest.TestCase):
+    """Regression: DynamicsAnalyzer read self._atoms, which
+    set_trajectories never assigns, so do_com and get_kinetic_energies
+    both raised AttributeError -- reported as 'please call
+    set_trajectories', which the caller had already done."""
+
+    def _make_trajectory(self, seed=11, nstep=400):
+        rng = np.random.default_rng(seed)
+        # 2 H (light, fast) and 2 O (heavy, slow)
+        atoms = Atoms('H2O2')
+        steps = rng.normal(0., 1., (nstep, 4, 3))
+        steps[:, :2, :] *= 0.20   # H
+        steps[:, 2:, :] *= 0.05   # O
+        pos = np.cumsum(steps, axis=0)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(pos)
+        t.calculate_velocities_from_positions()
+        return t
+
+    def _analyzer(self, **kwargs):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        return DynamicsAnalyzer(trajectories=[self._make_trajectory()],
+                                verbosity=0, **kwargs)
+
+    def test_do_com_msd_runs(self):
+        d = self._analyzer()
+        msd = d.get_msd(t_end_fit=100, t_unit='dt', nr_of_blocks=4,
+                        do_com=True)
+        for species in ('H', 'O'):
+            mean = msd.get_array('msd_isotropic_{}_mean'.format(species))
+            self.assertTrue(np.all(np.isfinite(mean)))
+
+    def test_do_com_msd_is_species_resolved(self):
+        """The COM must be built from the species being analysed.  With
+        factors=[1]*nat it was the COM of the whole system, so every
+        species differed only by a constant prefactor."""
+        d = self._analyzer()
+        msd = d.get_msd(t_end_fit=100, t_unit='dt', nr_of_blocks=4,
+                        do_com=True)
+        h = msd.get_array('msd_isotropic_H_mean')
+        o = msd.get_array('msd_isotropic_O_mean')
+        # Same atom count, so a whole-system COM would make these two
+        # curves identical.  H diffuses faster here by construction.
+        self.assertFalse(np.allclose(h, o))
+        self.assertGreater(h[-1], o[-1])
+
+    def test_do_com_vaf_runs(self):
+        d = self._analyzer()
+        vaf = d.get_vaf(t_end_fit=50, t_end=100, t_unit='dt',
+                        nr_of_blocks=4, do_com=True)
+        for species in ('H', 'O'):
+            mean = vaf.get_array('vaf_isotropic_{}_mean'.format(species))
+            self.assertTrue(np.all(np.isfinite(mean)))
+
+    def test_kinetic_energies_species_decomposition(self):
+        """Regression: the species branch stored the system-level kinE
+        array under 'species_kinetic_energy_*'."""
+        d = self._analyzer()
+        ke = d.get_kinetic_energies(stepsize=10, decompose_species=True)
+        system = ke.get_array('system_kinetic_energy_0')
+        species = ke.get_array('species_kinetic_energy_0')
+        self.assertEqual(species.ndim, 2)
+        self.assertEqual(species.shape, (len(system), 2))
+        self.assertTrue(np.all(np.isfinite(species)))
+        # each column is a distinct species, not a copy of the system array
+        self.assertFalse(np.allclose(species[:, 0], species[:, 1]))
+
+    def test_missing_trajectories_message(self):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        from samos.utils.exceptions import InputError
+        d = DynamicsAnalyzer(verbosity=0)
+        with self.assertRaises(InputError) as cm:
+            d.get_msd(t_end_fit=100, t_unit='dt')
+        self.assertIn('set_trajectories', str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

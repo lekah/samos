@@ -80,6 +80,42 @@ class TimeSeries(AttributedArray):
     pass
 
 
+def _get_masses(trajectory):
+    """
+    Return the atomic masses (amu) of *trajectory*.
+
+    :raises InputError:
+        If no :class:`ase.Atoms` has been attached, in which case masses
+        are unknown -- ``set_types`` alone is not enough.
+    """
+    atoms = trajectory.atoms
+    if atoms is None:
+        raise InputError(
+            'Mass-weighted analysis needs atomic masses, but this '
+            'trajectory has no ase.Atoms attached. Call '
+            'Trajectory.set_atoms() before running it.')
+    return atoms.get_masses()
+
+
+def _species_factors(trajectory, atomic_species):
+    """
+    Return the 0/1 selector array that restricts a centre-of-mass
+    calculation to *atomic_species*.
+
+    The Fortran/C++ ``get_com_positions`` and ``get_com_velocities``
+    kernels weight atom *i* by ``factors[i] * masses[i]``, so passing
+    all ones would yield the centre of mass of the entire system -- the
+    same near-constant quantity for every species, and identically zero
+    for a recentered trajectory.
+
+    :returns: ``(factors, nat_of_species)``
+    """
+    indices = trajectory.get_indices_of_species(atomic_species, start=0)
+    factors = np.zeros(len(trajectory.types), dtype=int)
+    factors[indices] = 1
+    return factors, len(indices)
+
+
 class DynamicsAnalyzer(object):
     """
     This class serves as the main analyzer
@@ -134,6 +170,25 @@ class DynamicsAnalyzer(object):
             return sorted(set(types))
         else:
             return self._species_of_interest
+
+    def _require_trajectories(self):
+        """
+        Return ``(timestep_fs, trajectories)`` set by
+        :meth:`set_trajectories`.
+
+        Deliberately limited to those two attributes: this used to be a
+        ``try/except AttributeError`` wrapped around much more code, so
+        an unrelated AttributeError raised inside an analysis was
+        reported to the user as "please call set_trajectories".
+
+        :raises InputError: If :meth:`set_trajectories` was never called.
+        """
+        if not hasattr(self, '_trajectories'):
+            raise InputError(
+                'No trajectories have been set. Use the set_trajectories '
+                'method, or pass trajectories=... to the constructor, '
+                'before running an analysis.')
+        return self._timestep_fs, self._trajectories
 
     def _get_running_params(self, timestep_fs, t_unit='ps',
                             species_of_interest=None,
@@ -385,15 +440,7 @@ class DynamicsAnalyzer(object):
                 get_com_positions)
         else:
             raise ValueError("backend must be 'cpp' or 'fortran'")
-        try:
-            timestep_fs = self._timestep_fs
-            trajectories = self._trajectories
-        except AttributeError as e:
-            raise Exception(
-                '\n\n\n'
-                'Please use the set_trajectories method to set trajectories'
-                '\n{}\n'.format(e)
-            )
+        timestep_fs, trajectories = self._require_trajectories()
 
         p = self._get_running_params(
             timestep_fs, t_unit=t_unit,
@@ -428,14 +475,15 @@ class DynamicsAnalyzer(object):
             for itraj, trajectory in enumerate(trajectories):
                 positions = trajectory.get_positions()
                 if p.do_com:
-                    # I replace the array positions with the COM!
-                    # Getting the massesfor recentering
-                    masses = self._atoms.get_masses()
-                    factors = [1]*len(masses)
+                    # Collective (charge) diffusion: replace the
+                    # per-atom positions by the centre of mass of this
+                    # species, and rescale by the number of atoms that
+                    # went into it.
+                    masses = _get_masses(trajectory)
+                    factors, prefactor = _species_factors(
+                        trajectory, atomic_species)
                     positions = get_com_positions(positions, masses, factors)
                     indices_of_interest = [1]
-                    prefactor = len(trajectory.get_indices_of_species(
-                        atomic_species, start=0))
                 else:
                     indices_of_interest = trajectory.get_indices_of_species(
                         atomic_species, start=1)
@@ -768,16 +816,7 @@ class DynamicsAnalyzer(object):
         from samos.lib.mdutils import (
             calculate_vaf_specific_atoms,
             get_com_velocities)
-        try:
-            timestep_fs = self._timestep_fs
-            trajectories = self._trajectories
-        except AttributeError as e:
-            raise Exception(
-                '\n\n\n'
-                'Please use the set_trajectories '
-                'method to set trajectories'
-                '\n{}\n'.format(e)
-            )
+        timestep_fs, trajectories = self._require_trajectories()
 
         p = self._get_running_params(
             timestep_fs, t_unit=t_unit,
@@ -808,15 +847,16 @@ class DynamicsAnalyzer(object):
                     velocities = trajectory.get_velocities(
                         remove_angular_momentum=remove_angular_momentum)
                 if p.do_com:
-                    # I replace the array positions with the COM!
-                    # Getting the masses for recentering:
-                    masses = self._atoms.get_masses()
-                    factors = [1]*len(masses)
+                    # Collective (charge) diffusion: replace the
+                    # per-atom velocities by the centre-of-mass velocity
+                    # of this species, and rescale by the number of
+                    # atoms that went into it.
+                    masses = _get_masses(trajectory)
+                    factors, prefactor = _species_factors(
+                        trajectory, atomic_species)
                     velocities = get_com_velocities(
                         velocities, masses, factors)
                     indices_of_interest = [1]
-                    prefactor = len(trajectory.get_indices_of_species(
-                        atomic_species, start=0))
                 else:
                     indices_of_interest = trajectory.get_indices_of_species(
                         atomic_species, start=1)
@@ -933,17 +973,7 @@ class DynamicsAnalyzer(object):
                              decompose_species=False):
         from samos.utils.constants import amu_kg, kB
 
-        try:
-            timestep_fs = self._timestep_fs
-            atoms = self._atoms
-            masses = atoms.get_masses()
-            trajectories = self._trajectories
-        except AttributeError as e:
-            raise Exception(
-                '\n\n\n'
-                'Please use the set_trajectories method to set trajectories'
-                '\n{}\n'.format(e)
-            )
+        timestep_fs, trajectories = self._require_trajectories()
 
         prefactor = amu_kg * 1e10 / kB
         # * 1.06657254018667
@@ -956,6 +986,7 @@ class DynamicsAnalyzer(object):
         kinetic_energies_series.set_attr('timestep_fs', timestep_fs)
 
         for itraj, t in enumerate(trajectories):
+            masses = _get_masses(t)
             vel_array = t.get_velocities()
             nstep, nat, _ = vel_array.shape
             steps = list(range(0, nstep, stepsize))
@@ -992,7 +1023,7 @@ class DynamicsAnalyzer(object):
                     kinE_species[:, ityp] /= float(len(indices_of_interest)*3)
 
                 kinetic_energies_series.set_array(
-                    'species_kinetic_energy_{}'.format(itraj), kinE)
+                    'species_kinetic_energy_{}'.format(itraj), kinE_species)
                 kinetic_energies_series.set_attr(
                     'species_of_interest', species_of_interest)
                 kinetic_energies_series.set_attr(
@@ -1055,18 +1086,9 @@ class DynamicsAnalyzer(object):
 
         _check_deprecated_time_kwargs(kwargs)
 
-        try:
-            trajectories = self._trajectories
-            timestep_fs = self._timestep_fs
-            # Calculating the sampling frequency of the
-            # trajectory in THz (the inverse of a picosecond)
-            sampling_frequency_THz = 1e3 / timestep_fs
-        except AttributeError as e:
-            raise Exception(
-                '\n\n\n'
-                'Please use the set_trajectories method to set trajectories'
-                '\n{}\n'.format(e)
-            )
+        timestep_fs, trajectories = self._require_trajectories()
+        # Sampling frequency of the trajectory in THz (inverse ps)
+        sampling_frequency_THz = 1e3 / timestep_fs
 
         if block_length is not None and nr_of_blocks is not None:
             raise InputError(
