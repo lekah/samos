@@ -49,21 +49,27 @@ class AttributedArray(object):
         if check_existing:
             if name in list(self._arrays.keys()):
                 raise ValueError('Name {} already exists'.format(name))
-        if wanted_shape_len:
+        if wanted_shape_len is not None:
             if len(array.shape) != wanted_shape_len:
                 raise TypeError(
                     f'array {name} is of wrong type, has to be of '
-                    f'dimension {wanted_shape_len}')
-        if wanted_shape_1:
-            if array.shape[1] != wanted_shape_1:
+                    f'dimension {wanted_shape_len}, got '
+                    f'{len(array.shape)}')
+        # Check the rank before indexing into shape, so that a rank-1
+        # array reports what is wrong instead of raising a bare
+        # IndexError from the guard itself.
+        for idim, wanted in ((1, wanted_shape_1), (2, wanted_shape_2)):
+            if wanted is None:
+                continue
+            if len(array.shape) <= idim:
                 raise IndexError(
-                    f'1st dimension of array {name} has to '
-                    f'be {wanted_shape_1}')
-        if wanted_shape_2:
-            if array.shape[2] != wanted_shape_2:
+                    f'array {name} has {len(array.shape)} dimension(s), '
+                    f'so dimension {idim} cannot be checked '
+                    f'against {wanted}')
+            if array.shape[idim] != wanted:
                 raise IndexError(
-                    f'2nd dimension of array {name} has '
-                    f'to be {wanted_shape_2}')
+                    f'{idim}. dimension of array {name} has to '
+                    f'be {wanted}, got {array.shape[idim]}')
         if check_nstep:
             if self._nstep is None:
                 self._nstep = array.shape[0]

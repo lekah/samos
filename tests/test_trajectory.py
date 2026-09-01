@@ -120,5 +120,41 @@ class TestTrajectory(unittest.TestCase):
             a.set_array('x', np.arange(5), check_existing=True)
 
 
+class TestArrayShapeGuards(unittest.TestCase):
+    """The wanted_shape_1 / wanted_shape_2 guards indexed into
+    array.shape before confirming the rank, so a too-flat array raised a
+    bare IndexError from the guard rather than a message saying what was
+    wrong."""
+
+    def setUp(self):
+        from samos.utils.attributed_array import AttributedArray
+        self.a = AttributedArray()
+
+    def test_rank_too_low_reports_the_rank(self):
+        import numpy as np
+        with self.assertRaises(IndexError) as cm:
+            self.a.set_array('x', np.arange(5), wanted_shape_1=3)
+        msg = str(cm.exception)
+        self.assertIn('dimension', msg)
+        self.assertIn('1', msg)
+
+    def test_wrong_size_still_rejected(self):
+        import numpy as np
+        with self.assertRaises(IndexError):
+            self.a.set_array('x', np.zeros((4, 2)), wanted_shape_1=3)
+
+    def test_correct_shape_accepted(self):
+        import numpy as np
+        self.a.set_array('x', np.zeros((4, 3, 3)), wanted_shape_len=3,
+                         wanted_shape_1=3, wanted_shape_2=3)
+        self.assertIn('x', self.a.get_arraynames())
+
+    def test_wrong_rank_reports_both_ranks(self):
+        import numpy as np
+        with self.assertRaises(TypeError) as cm:
+            self.a.set_array('x', np.zeros((4, 3)), wanted_shape_len=3)
+        self.assertIn('3', str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

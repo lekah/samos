@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import sys
 
 import re
 from ase import Atoms
@@ -38,7 +37,10 @@ def get_position_indices(header_list):
         raise NotImplementedError('Do not support scaled'
                                   ' unwrapped coordinates')
 
-    raise TypeError('No position indices found')
+    raise TypeError(
+        'No position columns found in the dump header ({}). Expected '
+        'x/y/z (wrapped), xs/ys/zs (scaled) or xu/yu/zu '
+        '(unwrapped).'.format(header_list))
 
 
 def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
@@ -87,7 +89,8 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             cell[2, 0] = xz
             cell[2, 1] = yz
         except Exception as e:
-            print(f'Could not read cell dimension {idim}')
+            print('Could not read triclinic cell bounds from:\n{}'.format(
+                ''.join(lines[5:8])))
             raise e
     else:
         raise ValueError('unsupported lammps dump file, '
@@ -98,7 +101,7 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             print(f'Read starting cell as:\n{cell}')
         if not lines[8].startswith('ITEM: ATOMS'):
             raise Exception('Not a supported format, expected ITEM: ATOMS')
-        header_list = lines[8].lstrip('ITEM: ATOMS').split()
+        header_list = lines[8].removeprefix('ITEM: ATOMS').split()
 
         atomid_idx = header_list.index('id')
         if not quiet:
@@ -115,11 +118,9 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
                 print('type found at index {type_idx}')
         except ValueError:
             type_idx = None
-        try:
-            postype, posids = get_position_indices(header_list)
-        except Exception:
-            print('Abandoning because positions are not given')
-            sys.exit(1)
+        # Let the error propagate: this used to call sys.exit(1), which
+        # kills the interpreter of any program importing this module.
+        postype, posids = get_position_indices(header_list)
         if not quiet:
             print('Positions are given as: {}'.format(
                 {'u': 'unwrapped', 's': 'Scaled (wrapped)',

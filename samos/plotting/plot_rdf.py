@@ -59,7 +59,7 @@ def plot_rdf(
         handles.append(l)
         if 'color' in plot_params2_:
             pass
-        if 'colordict' in plot_params2_:
+        elif 'colordict' in plot_params2_:
             plot_params2_['color'] = plot_params2_.pop(
                 'colordict')['{}_{}'.format(spec1, spec2)]
         else:

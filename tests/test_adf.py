@@ -497,5 +497,75 @@ class TestADFExplicitBonds(unittest.TestCase):
             res.get_array('adf_O_Si_O').sum(), 0.0)
 
 
+class TestADFEmptyFrameSelection(unittest.TestCase):
+    """An empty frame selection used to reach frames[0] (IndexError) with
+    static_bonds, and to divide by n_frames=0 without it."""
+
+    def _analyzer(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        from samos.analysis.rdf import ADF
+        atoms = Atoms('OSiO', cell=np.eye(3) * 10., pbc=True)
+        pos = np.tile(np.array([[0., 0., 0.],
+                                [1.6, 0., 0.],
+                                [3.2, 0., 0.]]), (5, 1, 1))
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(pos)
+        return ADF(trajectory=t)
+
+    def test_empty_frame_range_raises(self):
+        adf = self._analyzer()
+        with self.assertRaises(ValueError) as cm:
+            adf.run(istart=5, istop=5, bonds={'Si-O': (1.0, 2.0)})
+        self.assertIn('No frames selected', str(cm.exception))
+
+    def test_empty_frame_range_raises_with_static_bonds(self):
+        adf = self._analyzer()
+        with self.assertRaises(ValueError):
+            adf.run(istart=10, istop=None, bonds={'Si-O': (1.0, 2.0)},
+                    static_bonds=True)
+
+
+class TestPlotRDFColors(unittest.TestCase):
+    """plot_rdf's second-axis colour selection had `if 'color': pass`
+    followed by an independent `if/else`, so an explicitly supplied
+    colour was overwritten by the g(r) line's colour."""
+
+    def _result(self):
+        import numpy as np
+        from samos.utils.attributed_array import AttributedArray
+        res = AttributedArray()
+        res.set_attr('species_pairs', [('Li', 'O')])
+        res.set_array('rdf_Li_O', np.linspace(0., 2., 10))
+        res.set_array('int_Li_O', np.linspace(0., 5., 10))
+        res.set_array('radii_Li_O', np.linspace(0., 5., 10))
+        return res
+
+    def _axes(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib import pyplot as plt
+        fig = plt.figure()
+        self.addCleanup(plt.close, fig)
+        return fig.add_subplot(1, 1, 1)
+
+    def test_explicit_integral_color_is_kept(self):
+        from samos.plotting.plot_rdf import plot_rdf
+        handles = plot_rdf(self._result(), ax=self._axes(),
+                           plot_params={'color': 'red'},
+                           plot_params2={'color': 'black'})
+        rdf_line, int_line = handles
+        self.assertEqual(rdf_line.get_color(), 'red')
+        self.assertEqual(int_line.get_color(), 'black')
+
+    def test_integral_defaults_to_the_rdf_color(self):
+        from samos.plotting.plot_rdf import plot_rdf
+        handles = plot_rdf(self._result(), ax=self._axes(),
+                           plot_params={'color': 'red'})
+        rdf_line, int_line = handles
+        self.assertEqual(int_line.get_color(), rdf_line.get_color())
+
+
 if __name__ == '__main__':
     unittest.main()

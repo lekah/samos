@@ -510,6 +510,11 @@ class ADF(BondAnalyzer):
         if istop is None:
             istop = len(positions)
         frames = np.arange(istart, istop, stepsize)
+        if not len(frames):
+            raise ValueError(
+                'No frames selected: istart={}, istop={}, stepsize={} '
+                'over a trajectory of {} step(s).'.format(
+                    istart, istop, stepsize, len(positions)))
 
         # One-time detection: freeze topology from the first sampled frame.
         if static_bonds and bonds is not None and self._bonds is None:
