@@ -235,5 +235,74 @@ class TestSingleBohrConstant(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class TestSliceSteps(unittest.TestCase):
+    """Trajectory.slice_steps, which backs the CLI's --index option."""
+
+    def _traj(self, nstep=12, nat=6):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        rng = np.random.default_rng(7)
+        t = Trajectory(atoms=Atoms('H' * nat), timestep=2.0)
+        t.set_positions(rng.random((nstep, nat, 3)))
+        t.set_velocities(rng.random((nstep, nat, 3)))
+        return t
+
+    def test_arrays_are_sliced(self):
+        import numpy as np
+        t = self._traj()
+        sliced = t.slice_steps(slice(2, 10, 3))
+        np.testing.assert_array_equal(
+            sliced.get_positions(), t.get_positions()[2:10:3])
+        np.testing.assert_array_equal(
+            sliced.get_velocities(), t.get_velocities()[2:10:3])
+        self.assertEqual(sliced.nstep, 3)
+
+    def test_types_are_per_atom_and_not_sliced(self):
+        # nstep equals nat here, so a blanket slice over every array
+        # would go unnoticed on shape alone.
+        t = self._traj(nstep=6, nat=6)
+        t.set_types(['H', 'H', 'H', 'Li', 'Li', 'Li'])
+        sliced = t.slice_steps(slice(None, None, 2))
+        self.assertEqual(len(sliced.get_types()), 6)
+        self.assertEqual(list(sliced.get_types()), list(t.get_types()))
+        self.assertEqual(sliced.nstep, 3)
+
+    def test_stride_scales_the_timestep(self):
+        t = self._traj()
+        self.assertEqual(t.slice_steps(slice(None, None, 4)).get_timestep(),
+                         8.0)
+        # A negative stride keeps the spacing, only the order changes.
+        self.assertEqual(t.slice_steps(slice(None, None, -2)).get_timestep(),
+                         4.0)
+
+    def test_contiguous_slice_keeps_the_timestep(self):
+        t = self._traj()
+        self.assertEqual(t.slice_steps(slice(3, 9)).get_timestep(), 2.0)
+
+    def test_original_is_unchanged(self):
+        t = self._traj()
+        t.slice_steps(slice(None, None, 2))
+        self.assertEqual(t.nstep, 12)
+        self.assertEqual(t.get_timestep(), 2.0)
+
+    def test_atoms_are_carried_over(self):
+        t = self._traj()
+        sliced = t.slice_steps(slice(0, 4))
+        self.assertEqual(len(sliced.atoms), len(t.atoms))
+        self.assertEqual(sliced.atoms.get_chemical_symbols(),
+                         t.atoms.get_chemical_symbols())
+
+    def test_empty_slice_raises(self):
+        t = self._traj()
+        with self.assertRaises(ValueError):
+            t.slice_steps(slice(100, 200))
+
+    def test_non_slice_raises(self):
+        t = self._traj()
+        with self.assertRaises(TypeError):
+            t.slice_steps(3)
+
+
 if __name__ == '__main__':
     unittest.main()

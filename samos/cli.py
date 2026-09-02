@@ -18,7 +18,7 @@ Commands: msd, vaf, vdos, rdf, adf.
 """
 
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 
 import numpy as np
 from ase.io import read
@@ -58,6 +58,40 @@ def _expand_elements(values):
         from ase.formula import Formula
         return list(Formula(values[0]))
     return values
+
+
+def _parse_index(text):
+    """
+    Parse the ``--index`` slice expression into a :class:`slice`.
+
+    Accepts the Python slice forms without the brackets, e.g. ``:1000``,
+    ``::10``, ``500:1500:2`` or ``-1000:``.  A bare frame number is
+    rejected: every analysis here needs a range, and silently reducing
+    the trajectory to one frame would be worse than an error.
+
+    :param str text: The raw argument value.
+    :returns: :class:`slice`
+    :raises argparse.ArgumentTypeError: If *text* is not a slice.
+    """
+    if ':' not in text:
+        raise ArgumentTypeError(
+            "--index takes a slice such as ':1000', '::10' or "
+            "'500:1500:2', got '{}'.".format(text))
+    parts = text.split(':')
+    if len(parts) > 3:
+        raise ArgumentTypeError(
+            "--index takes at most start:stop:step, got '{}'.".format(text))
+    try:
+        bounds = [int(part) if part.strip() else None for part in parts]
+    except ValueError:
+        raise ArgumentTypeError(
+            "--index bounds have to be integers, got '{}'.".format(text))
+    if len(bounds) == 2:
+        bounds.append(None)
+    start, stop, step = bounds
+    if step == 0:
+        raise ArgumentTypeError('--index step cannot be zero.')
+    return slice(start, stop, step)
 
 
 def _write_csv(filename, x_col, x_label, y_cols, y_labels):
@@ -656,6 +690,13 @@ def _traj_parser():
              'For LAMMPS dumps conversion is applied during reading; '
              'for all other formats it is applied after loading. '
              'Choices: ' + ', '.join(sorted(UNIT_SYSTEMS)) + '.')
+    p.add_argument(
+        '-i', '--index', type=_parse_index, default=None, metavar='SLICE',
+        help='Analyse only these frames, given as a Python slice: '
+             "':1000' for the first 1000, '::10' for every 10th, "
+             "'500:1500:2' for every 2nd between 500 and 1500. A stride "
+             'multiplies the timestep by the same factor, so time axes '
+             'stay correct.')
 
     plot_group = p.add_mutually_exclusive_group()
     plot_group.add_argument(
@@ -863,6 +904,17 @@ def _prepare(args):
                            lammps_elements=lammps_elements,
                            lammps=args.lammps,
                            units=args.units)
+
+    if args.index is not None:
+        stride = abs(args.index.step or 1)
+        if stride > 1 and args.compute_velocities:
+            print(
+                'Warning: --index keeps every {}th frame, so '
+                '--compute-velocities differences positions across that '
+                'wider spacing. The velocities are correct for the '
+                'sliced trajectory but a coarser estimate than those '
+                'from every frame.'.format(stride))
+        traj = traj.slice_steps(args.index)
 
     if args.transform_species:
         traj.transform_species(args.transform_species)

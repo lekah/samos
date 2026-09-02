@@ -585,5 +585,47 @@ class TestMSDPlottingFitWindows(unittest.TestCase):
         plot_msd_anisotropic(msd, ax=self._axes(), diagonal_only=True)
 
 
+class TestSlicedTrajectoryTimeAxis(unittest.TestCase):
+    """
+    Striding a trajectory has to carry through to the analysis: the MSD
+    builds its time axis from timestep_fs alone, so if slice_steps did
+    not scale the timestep, every lag of a strided trajectory would be
+    reported at a fraction of its real value.
+    """
+
+    def _traj(self, nstep=200, nat=4):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        rng = np.random.default_rng(11)
+        walk = np.cumsum(rng.normal(scale=0.1, size=(nstep, nat, 3)), axis=0)
+        t = Trajectory(atoms=Atoms('H' * nat), timestep=1.0)
+        t.set_positions(walk)
+        return t
+
+    def _t_list(self, traj):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        dyn = DynamicsAnalyzer(trajectories=[traj])
+        msd = dyn.get_msd(t_start_fit=10., t_end_fit=50., t_unit='fs',
+                          nr_of_blocks=1)
+        return msd.get_array('t_list_fs')
+
+    def test_stride_widens_the_lag_spacing(self):
+        import numpy as np
+        full = self._traj()
+        sliced = full.slice_steps(slice(None, None, 2))
+        self.assertEqual(sliced.get_timestep(), 2.0)
+
+        t_full = self._t_list(full)
+        t_sliced = self._t_list(sliced)
+        # Lags are twice as far apart, and both axes are in the same
+        # femtoseconds and start at the same place.
+        self.assertAlmostEqual(np.diff(t_sliced)[0],
+                               2.0 * np.diff(t_full)[0])
+        self.assertAlmostEqual(t_sliced[0], t_full[0])
+        # Every lag of the strided run coincides with one of the full run.
+        np.testing.assert_allclose(t_sliced, t_full[::2][:len(t_sliced)])
+
+
 if __name__ == '__main__':
     unittest.main()

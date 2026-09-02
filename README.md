@@ -131,6 +131,7 @@ Time values are plain floats; the unit is set with `--t-unit`
 | `--lammps-types SYM ...` | Read as LAMMPS dump; map integer types to symbols in order |
 | `--lammps-elements SYM...\|FORMULA` | Read as LAMMPS dump; assign symbols per atom or via formula |
 | `--units SYSTEM` | Convert arrays from a named unit system to samos internal units |
+| `-i/--index SLICE` | Analyse only these frames, e.g. `::10` or `500:1500:2` |
 | `--species SYM ...` | Restrict analysis to these chemical symbols |
 | `--recenter` | Subtract centre-of-mass motion before analysis |
 | `--compute-velocities` | Derive velocities from positions (Verlet formula) |
@@ -171,6 +172,31 @@ samos-msd traj.extxyz --recenter
 # trajectory does not store them)
 samos-vaf traj.extxyz --compute-velocities
 ```
+
+### Selecting frames
+
+`-i/--index` takes a Python slice and restricts the analysis to those
+frames:
+
+```bash
+# First 1000 frames
+samos-msd traj.extxyz --index :1000
+
+# Every 10th frame
+samos-rdf traj.extxyz --index ::10 --radius 6
+
+# Every 2nd frame between 500 and 1500
+samos-msd traj.extxyz --index 500:1500:2
+```
+
+A stride multiplies the timestep by the same factor, so time axes stay
+in real femtoseconds: `--index ::10` on a 2 fs trajectory yields lags
+spaced 20 fs apart, not 2 fs.
+
+Combining a stride with `--compute-velocities` derives velocities from
+the retained frames only, across the wider spacing.  That is consistent
+but coarser than differencing every frame, and the commands warn when
+you do it.
 
 ### MSD
 

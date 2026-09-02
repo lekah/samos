@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 import numpy as np
+from argparse import ArgumentTypeError
 from ase import Atoms
 from ase.io import write as ase_write
 
@@ -224,6 +225,85 @@ class TestCommands(CLITestCase):
         with self.assertRaises(ValueError):
             cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
                           '--species', 'Li', '--species-pairs', 'Li-O'])
+
+
+class TestIndex(CLITestCase):
+    """The -i/--index option and the slice parsing behind it."""
+
+    def test_valid_slices(self):
+        cases = {
+            ':': slice(None, None, None),
+            '::10': slice(None, None, 10),
+            ':1000': slice(None, 1000, None),
+            '100:': slice(100, None, None),
+            '100:500': slice(100, 500, None),
+            '500:1500:2': slice(500, 1500, 2),
+            '-1000:': slice(-1000, None, None),
+            ' 10 : 20 ': slice(10, 20, None),
+        }
+        for text, expected in cases.items():
+            self.assertEqual(cli._parse_index(text), expected, text)
+
+    def test_rejected_slices(self):
+        # A bare frame number is refused rather than silently reducing
+        # the trajectory to a single frame.
+        for text in ('5', '1:2:3:4', 'a:b', '::0', '1.5:3'):
+            with self.assertRaises(ArgumentTypeError, msg=text):
+                cli._parse_index(text)
+
+    def test_parser_converts_the_slice(self):
+        args = cli._parser_rdf().parse_args(
+            [self.traj_path, '-i', '10:90:2'])
+        self.assertEqual(args.index, slice(10, 90, 2))
+        self.assertIsNone(
+            cli._parser_rdf().parse_args([self.traj_path]).index)
+
+    def test_stride_widens_the_written_time_axis(self):
+        # 120 frames at 1 fs; every second frame is 2 fs apart.
+        for index, spacing, name in ((None, 1.0, 'full.csv'),
+                                     ('::2', 2.0, 'strided.csv')):
+            argv = [self.traj_path, '--timestep', '1', '--t-unit', 'dt',
+                    '-ts', '5', '-te', '20', '--write', self.out(name)]
+            if index is not None:
+                argv += ['-i', index]
+            cli.main_msd(argv)
+            t = np.loadtxt(self.out(name), delimiter=',', skiprows=1)[:, 0]
+            self.assertAlmostEqual(t[1] - t[0], spacing)
+
+    def test_slice_changes_the_result(self):
+        # Averaging over a third of the frames gives a different RDF;
+        # identical output would mean --index never reached the analysis.
+        common = ['--timestep', '1', '-r', '4', '-b', '20',
+                  '--species-pairs', 'Li-O']
+        cli.main_rdf([self.traj_path] + common
+                     + ['--write', self.out('all.csv')])
+        cli.main_rdf([self.traj_path, '-i', '0:40'] + common
+                     + ['--write', self.out('part.csv')])
+        full = np.loadtxt(self.out('all.csv'), delimiter=',', skiprows=1)
+        part = np.loadtxt(self.out('part.csv'), delimiter=',', skiprows=1)
+        np.testing.assert_allclose(full[:, 0], part[:, 0])
+        self.assertFalse(np.allclose(full[:, 1], part[:, 1]))
+
+    def test_warns_when_striding_and_deriving_velocities(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli.main_vdos([self.traj_path, '--timestep', '1',
+                           '--compute-velocities', '-i', '::3',
+                           '--write', self.out('vdos.csv')])
+        self.assertIn('Warning', buf.getvalue())
+        self.assertIn('every 3th frame', buf.getvalue())
+
+    def test_no_warning_without_a_stride(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli.main_vdos([self.traj_path, '--timestep', '1',
+                           '--compute-velocities', '-i', '0:100',
+                           '--write', self.out('vdos.csv')])
+        self.assertNotIn('Warning', buf.getvalue())
 
 
 if __name__ == '__main__':

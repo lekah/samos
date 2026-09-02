@@ -532,6 +532,52 @@ class Trajectory(AttributedArray):
 
         return atoms
 
+    def slice_steps(self, index):
+        """
+        Return a new trajectory holding only the steps selected by
+        *index*.  The instance this is called on is left unchanged.
+
+        Every per-step array is sliced.  The ``types`` override is
+        per-atom rather than per-step and is carried over untouched, as
+        is the reference atoms object.
+
+        A stride of n multiplies the timestep by n.  The analyzers build
+        their time axis from ``timestep_fs`` alone (see the
+        ``timestep_fs * stepsize_t`` factor in
+        :meth:`~samos.analysis.dynamics.DynamicsAnalyzer.get_msd`), so
+        without that factor every time axis derived from a strided
+        trajectory would come out short by exactly the stride.
+
+        :param slice index: The steps to keep, e.g. ``slice(0, 500, 2)``.
+        :returns: A new :class:`Trajectory`.
+        :raises TypeError: If *index* is not a slice.
+        :raises ValueError: If the slice selects no steps.
+        """
+        if not isinstance(index, slice):
+            raise TypeError(
+                'index has to be a slice, got {}'.format(type(index)))
+        new = self.__class__()
+        if self._atoms is not None:
+            new.set_atoms(self._atoms.copy())
+        for name, array in self._arrays.items():
+            if name == self._TYPES_KEY:
+                new.set_array(name, array)
+                continue
+            sliced = array[index]
+            if not len(sliced):
+                raise ValueError(
+                    'Slicing {} steps with {} leaves nothing to '
+                    'analyse'.format(len(array), index))
+            new.set_array(name, sliced, check_nstep=True)
+        for key, value in self._attrs.items():
+            new.set_attr(key, value)
+        if (index.step is not None and abs(index.step) != 1
+                and self._TIMESTEP_KEY in self._attrs):
+            # A trajectory with no timestep has no time axis to get
+            # wrong, so there is nothing to rescale in that case.
+            new.set_timestep(self.get_timestep() * abs(index.step))
+        return new
+
     def get_ase_trajectory(self, start=0, end=None, stepsize=1):
         """
         :param int stepsize: A step size, defaults to 1
