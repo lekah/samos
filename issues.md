@@ -58,8 +58,8 @@ decision, not just code.
 
 **Fix difficulty: 6**
 
-`samos/analysis/rdf.py:220-232` (`RDF.run`, 8-corner `cdist` scheme)
-versus `samos/analysis/rdf.py:433-445` (`BondAnalyzer._pbc_wrap`,
+`samos/analysis/rdf.py:255-270` (`RDF.run`, 8-corner `cdist` scheme)
+versus `samos/analysis/rdf.py:473-482` (`BondAnalyzer._pbc_wrap`,
 fractional wrapping)
 
 The two disagree for acute cells, and only `RDF.run` carries the
@@ -69,7 +69,7 @@ a bond present in the ADF is a bond visible in the RDF.
 
 Related duplication in the same file: the
 `try: cell.array / except AttributeError: cell.copy()` idiom appears at
-`:124`, `:423` and `:560`, and the fixed/variable-cell setup block is
+`:161`, `:498` and `:640`, and the fixed/variable-cell setup block is
 written twice.
 
 **Fix:** one `minimum_image(diff, cell, cellI)` helper plus one
