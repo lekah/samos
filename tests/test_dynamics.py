@@ -7,8 +7,12 @@ from samos.trajectory import Trajectory
 
 
 class TestRecenter(unittest.TestCase):
-    """Tests for Trajectory.recenter(), which replaced the Fortran
-    recenter_positions / recenter_velocities routines."""
+    """Tests for Trajectory.recenter().
+
+    It replaced the Fortran recenter_positions / recenter_velocities,
+    which have since been deleted.  The cross-check against them went
+    too; what is left states the property directly, which is the
+    stronger test anyway: the centre of mass must come out at zero."""
 
     def _make_trajectory(self, seed=42):
         rng = np.random.default_rng(seed)
@@ -59,32 +63,6 @@ class TestRecenter(unittest.TestCase):
 
         com_pos = self._weighted_com(t.get_positions(), rel_masses)
         np.testing.assert_allclose(com_pos, 0.0, atol=1e-12)
-
-    def test_recenter_matches_fortran(self):
-        """Cross-check numpy result against the original Fortran routines.
-        Skipped automatically if the Fortran extension is not compiled."""
-        try:
-            from samos.lib.mdutils import (
-                recenter_positions, recenter_velocities)
-        except ImportError:
-            self.skipTest("Fortran mdutils extension not available")
-
-        t = self._make_trajectory()
-        masses = t.atoms.get_masses().astype(float)
-        factors = np.ones(len(t.atoms), dtype=int)
-
-        pos = t.get_positions()
-        vel = t.get_velocities()
-
-        pos_fortran = recenter_positions(pos, masses, factors)
-        vel_fortran = recenter_velocities(vel, masses, factors)
-
-        t.recenter()
-
-        np.testing.assert_allclose(t.get_positions(),
-                                   pos_fortran, atol=1e-12)
-        np.testing.assert_allclose(t.get_velocities(),
-                                   vel_fortran, atol=1e-12)
 
 
 class TestDynamics(unittest.TestCase):
