@@ -16,37 +16,16 @@ This file supersedes the old `TODO.md`, whose open items were folded in
 here.
 
 **Everything that could be fixed without a decision has been.** The
-five entries left over need something this file cannot supply:
+four entries left over need something this file cannot supply:
 
-* **A physics decision** -- #11 (which density definition an NPT RDF
-  should use), #21 (what samos's internal stress unit is), #25 (which
-  minimum-image convention wins, given that switching changes published
-  numbers for non-orthogonal cells).
+* **A physics decision** -- #21 (what samos's internal stress unit is),
+  #25 (which minimum-image convention wins, given that switching
+  changes published numbers for non-orthogonal cells).
 * **A large refactor with silent failure modes** -- #26, #33.
 
 **When an issue is fixed and verified, delete its entry from this file.**
 Renumbering the remaining entries is not required -- the numbers are
 labels, not an ordering contract.
-
----
-
-## 11. RDF normalises variable-cell trajectories with the last frame's volume
-
-**Fix difficulty: 3**
-
-`samos/analysis/rdf.py:217-218`
-
-In the `fixed_cell=False` branch `volume` is reassigned every frame
-inside the sampling loop, but only the final value survives to the
-normalisation `hist / (4 pi r^2 dr) / (len(ind2) / volume)`. For NPT
-trajectories the density prefactor is wrong by the ratio of the last
-frame's volume to the mean. Fixed-cell runs are unaffected, which is why
-it goes unnoticed.
-
-**Fix:** accumulate the volume over sampled frames and normalise with the
-mean (or normalise each frame's histogram contribution by that frame's
-volume -- decide which definition you want and document it). Needs a
-test with a deliberately varying cell.
 
 ---
 

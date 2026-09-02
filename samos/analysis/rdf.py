@@ -84,6 +84,26 @@ class RDF(BaseAnalyzer):
             istart=0, istop=None, stepsize=1, nbins=100):
         """
         Calculate a RDF, also searching periodic images.
+
+        Each sampled frame is normalised by its own number density and
+        the results are averaged, so g(r) is the mean of the per-frame
+        g(r).  For a fixed cell this is the same as normalising the
+        summed histogram once; for a variable cell it is not, and the
+        alternatives (normalising by the mean volume, or by the mean
+        density) differ from this one by the covariance between the
+        pair count and the volume.
+
+        The ideal-gas reference an atom is compared against excludes
+        the atom itself, so a species paired with itself is normalised
+        by N-1 rather than N.  Without that, g(r) of a like pair tends
+        to (N-1)/N at large r instead of 1.
+
+        The ``int_*`` arrays are running neighbour counts and carry no
+        volume factor, so they are unaffected by either of the above.
+        Each entry sums whole bins, so it is the count inside the outer
+        edge of that bin, half a binsize beyond the matching entry of
+        ``radii_*``, which holds bin centres.
+
         TODO:
             Improve algorithm because it can actually fail in
             very acute cell systems
@@ -205,12 +225,30 @@ class RDF(BaseAnalyzer):
             # this also makes it easier to deal with cell changes
             hist, bin_edges = np.histogram([], bins=nbins, range=(0, radius))
             hist = hist.astype(float)
+            # Second accumulator, weighted by each frame's volume, so
+            # that the g(r) below is the mean of the per-frame g(r)
+            # rather than one histogram divided by a single volume.
+            # hist itself stays a plain neighbour count, which is what
+            # the running integral reports.
+            hist_by_density = np.zeros(nbins, dtype=float)
             # normalize the histogram, by the number of steps taken,
             # and the number of species1
             prefactor = (
                 pair_factor
                 / float(len(np.arange(istart, istop, stepsize)))
                 / float(len(ind1)))
+            # An atom of species 1 that is itself one of the species-2
+            # atoms is not its own neighbour, so the ideal-gas count it
+            # is compared against is len(ind2) minus the chance of that
+            # coincidence.  For a pair of a species with itself this is
+            # the familiar N-1; for disjoint species it is len(ind2).
+            n_neighbours_ideal = (
+                len(ind2)
+                - len(set(ind1) & set(ind2)) / float(len(ind1)))
+            if n_neighbours_ideal <= 0:
+                print('Warning: no ideal-gas reference for {}, skipping'
+                      ''.format(label))
+                continue
             for index in np.arange(istart, istop, stepsize):
                 if not fixed_cell:
                     cell = cells[index]
@@ -232,14 +270,17 @@ class RDF(BaseAnalyzer):
                     diff_real_wrapped, corners).min(axis=1)
                 shortest_distance_this_pair = min(
                     shortest_distance_this_pair, shortest_distances.min())
-                hist += prefactor * \
-                    (np.histogram(shortest_distances, bins=nbins,
-                     range=(0, radius))[0]).astype(float)
+                counts = prefactor * (
+                    np.histogram(shortest_distances, bins=nbins,
+                                 range=(0, radius))[0]).astype(float)
+                hist += counts
+                hist_by_density += counts * volume
 
             radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
 
-            rdf = hist / (4.0 * np.pi * radii**2 * binsize) / \
-                (len(ind2)/volume)
+            rdf = (hist_by_density
+                   / (4.0 * np.pi * radii**2 * binsize)
+                   / n_neighbours_ideal)
             integral = np.empty(len(rdf))
             sum_ = 0.0
             for i in range(len(integral)):

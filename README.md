@@ -377,6 +377,22 @@ d.get_vaf(t_end=5., t_unit='ps', nr_of_blocks=12)
 Passing an old-style suffix kwarg (e.g. `t_end_fit_ps`) now raises an
 `InputError` with an explicit migration message.
 
+### RDF normalisation
+
+`RDF.run` now normalises each sampled frame by its own number density
+and averages the result, so `g(r)` is the mean of the per-frame `g(r)`.
+It previously divided the summed histogram by whichever frame happened
+to be sampled last, which left the RDF of a variable-cell (NPT)
+trajectory dependent on the frame order.  Fixed-cell results are
+unchanged by this.
+
+The ideal-gas reference now excludes the centre atom, so a species
+paired with itself is normalised by `N-1` instead of `N`.  Like-pair
+RDFs therefore rise by a factor `N/(N-1)` -- 1 % for 100 atoms of a
+species, 11 % for 10 -- and now tend to 1 at large `r` rather than to
+`(N-1)/N`.  Unlike-pair RDFs and all `int_*` running integrals are
+unaffected.
+
 ### CLI structure
 
 The single `samos TRAJECTORY [global options] COMMAND [command options]`
