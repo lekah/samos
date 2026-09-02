@@ -23,8 +23,6 @@ cannot supply:
   should use), #21 (what samos's internal stress unit is), #25 (which
   minimum-image convention wins, given that switching changes published
   numbers for non-orthogonal cells).
-* **A scope decision** -- #35 (whether the per-module `__main__` blocks
-  should still exist now that `scripts/samos` is the entry point).
 * **A large refactor with silent failure modes** -- #26, #33.
 
 One later finding, #40, is not in that list: it is a two-line fix that
@@ -85,8 +83,8 @@ decision, not just code.
 
 **Fix difficulty: 6**
 
-`samos/analysis/rdf.py:196-203` (`RDF.run`, 8-corner `cdist` scheme)
-versus `samos/analysis/rdf.py:400-408` (`BondAnalyzer._pbc_wrap`,
+`samos/analysis/rdf.py:220-232` (`RDF.run`, 8-corner `cdist` scheme)
+versus `samos/analysis/rdf.py:433-445` (`BondAnalyzer._pbc_wrap`,
 fractional wrapping)
 
 The two disagree for acute cells, and only `RDF.run` carries the
@@ -132,13 +130,13 @@ two remaining `do_com` branches together.
 
 **Fix difficulty: 7**
 
-`samos/utils/attributed_array.py:12-16`, `samos/analysis/rdf.py:15-17`,
-`samos/analysis/dynamics.py:173-176`
+`samos/utils/attributed_array.py:16-17`, `samos/analysis/rdf.py:17-18`,
+`samos/analysis/dynamics.py:178-179`
 
 `for key, val in kwargs.items(): getattr(self, 'set_{}'.format(key))(val)`
 makes correctness depend on `**kwargs` insertion order:
 `Trajectory(atoms=..., positions=...)` works, the reverse raises,
-because `set_positions` needs `self.nat`. `samos/io/lammps.py:411`
+because `set_positions` needs `self.nat`. `samos/io/lammps.py:450-453`
 already relies on that ordering. Bad keyword names produce
 `AttributeError: 'Trajectory' object has no attribute 'set_typo'`
 rather than a useful message.
@@ -146,25 +144,6 @@ rather than a useful message.
 **Fix:** explicit keyword arguments with a defined application order,
 or an ordered whitelist of setters applied in dependency order. Touches
 every constructor call site, hence the score.
-
----
-
-## 35. `util_msd` / `util_rdf_and_plot` duplicate the `scripts/samos` CLI
-
-**Fix difficulty: 3**
-
-`samos/analysis/dynamics.py:util_msd` and
-`samos/analysis/rdf.py:util_rdf_and_plot`, plus the `__main__` argument
-parsers below them, now overlap almost entirely with the `msd` and `rdf`
-sub-commands of `scripts/samos`. The repeated figure/save/show
-boilerplate has been factored into `_make_axes` / `_finish_plot` inside
-`scripts/samos`, but the two `util_*` functions still carry their own
-copies.
-
-**Needs a decision:** whether the per-module `__main__` blocks should
-exist at all now that `scripts/samos` is the entry point. Deleting them
-removes `python -m samos.analysis.rdf ...` as a usage, which may be in
-someone's scripts. Ask before removing.
 
 ---
 
