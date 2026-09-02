@@ -21,7 +21,8 @@ four entries left over need something this file cannot supply:
 * **A physics decision** -- #21 (what samos's internal stress unit is),
   #25 (which minimum-image convention wins, given that switching
   changes published numbers for non-orthogonal cells).
-* **A large refactor with silent failure modes** -- #26, #33.
+* **A large refactor with silent failure modes** -- #33.
+  #26 is now a small, optional tidy-up.
 
 **When an issue is fixed and verified, delete its entry from this file.**
 Renumbering the remaining entries is not required -- the numbers are
@@ -79,27 +80,26 @@ verify against a reference RDF before switching.
 
 ---
 
-## 26. `get_power_spectrum` bypasses `_get_running_params`
+## 26. `get_msd` and `get_vaf` repeat the `do_com` call sequence
 
-**Fix difficulty: 5**
+**Fix difficulty: 3**
 
-`samos/analysis/dynamics.py:1125-1180`
+`samos/analysis/dynamics.py:564-577` and `:923-937`
 
-`get_msd` and `get_vaf` share `_resolve_blocks`; `get_power_spectrum`
-still parses `block_length` / `nr_of_blocks` inline rather than calling
-`_get_running_params`, and computes its own layout with a different
-formula (`nstep // nr_of_blocks`, no `t_end_dt` term). That formula is
-correct for a periodogram, which has no lag window, and it now validates
-its result -- but the parsing is still duplicated and will drift.
+The block-parameter half of this issue is fixed: `get_power_spectrum`
+now goes through `_get_running_params(require_fitting=False)` and
+`_resolve_blocks` like its siblings, so there is one copy of the
+argument parsing and one copy of the layout arithmetic.
 
-The `do_com` branches of `get_msd` and `get_vaf` also still mirror each
-other, though they share the `_get_masses` / `_species_factors` helpers,
-so only the call sequence is repeated.
+What is left is that the `do_com` branches of `get_msd` and `get_vaf`
+still mirror each other. They already share the `_get_masses` /
+`_species_factors` helpers, so only the call sequence is repeated --
+fetch masses, get species factors, call `get_com_positions` /
+`get_com_velocities`, set `indices_of_interest = [1]`.
 
-**Fix:** give `_resolve_blocks` a flag for whether to reserve `t_end_dt`
-steps, and have `get_power_spectrum` call `_get_running_params` like its
-siblings. A `_com_positions(trajectory, array)` helper would fold the
-two remaining `do_com` branches together.
+**Fix:** a helper returning `(array, indices_of_interest, prefactor)`,
+parameterised by the kernel to call. This sits in the numerical inner
+loop, so check MSD and VAF numbers are unchanged before and after.
 
 ## 33. `AttributedArray.__init__` dispatch depends on keyword order
 

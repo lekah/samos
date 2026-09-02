@@ -679,5 +679,89 @@ class TestSlicedTrajectoryTimeAxis(unittest.TestCase):
         np.testing.assert_allclose(t_sliced, t_full[::2][:len(t_sliced)])
 
 
+class TestFitWindowRequirement(unittest.TestCase):
+    """get_power_spectrum used to parse block_length/nr_of_blocks by
+    itself because _get_running_params insists on a fit window.  That
+    requirement is now driven by require_fitting, so the periodogram
+    can share the parsing and the block layout with its siblings."""
+
+    def _analyzer(self, nstep=600, nat=4, seed=17):
+        import numpy as np
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(seed)
+        t = Trajectory(atoms=Atoms('H2O2'), timestep=1.)
+        t.set_positions(np.cumsum(rng.normal(0., .1, (nstep, nat, 3)),
+                                  axis=0))
+        t.calculate_velocities_from_positions()
+        return DynamicsAnalyzer(trajectories=[t], verbosity=0)
+
+    def test_msd_still_requires_a_fit_window(self):
+        from samos.utils.exceptions import InputError
+        with self.assertRaises(InputError) as cm:
+            self._analyzer().get_msd(nr_of_blocks=2)
+        self.assertIn('t_end_fit', str(cm.exception))
+
+    def test_vaf_still_requires_a_fit_window(self):
+        from samos.utils.exceptions import InputError
+        with self.assertRaises(InputError) as cm:
+            self._analyzer().get_vaf(nr_of_blocks=2)
+        self.assertIn('t_end_fit', str(cm.exception))
+
+    def test_params_without_fitting_reserve_no_lag_window(self):
+        d = self._analyzer()
+        p = d._get_running_params(1., nr_of_blocks=3,
+                                  require_fitting=False)
+        self.assertIsNone(p.t_start_fit_dt)
+        self.assertIsNone(p.t_end_fit_dt)
+        # t_end_dt drives how many steps _resolve_blocks holds back.
+        self.assertEqual(p.t_end_dt, 0)
+        self.assertEqual(p.nr_of_blocks, 3)
+
+    def test_fit_window_rejected_rather_than_ignored(self):
+        from samos.utils.exceptions import InputError
+        d = self._analyzer()
+        with self.assertRaises(InputError):
+            d._get_running_params(1., t_end_fit=10, t_unit='dt',
+                                  require_fitting=False)
+
+    def test_blocks_tile_the_whole_trajectory(self):
+        """No lag window is reserved, so a block is nstep // nblocks
+        steps long and the one-sided periodogram has half as many
+        frequency bins plus one."""
+        nstep = 600
+        d = self._analyzer(nstep=nstep)
+        for nr_of_blocks in (1, 2, 7, 13):
+            pws = d.get_power_spectrum(nr_of_blocks=nr_of_blocks)
+            expected = (nstep // nr_of_blocks) // 2 + 1
+            self.assertEqual(len(pws.get_array('frequency_0')), expected,
+                             'nr_of_blocks={}'.format(nr_of_blocks))
+            self.assertEqual(
+                pws.get_array('periodogram_H_0').shape,
+                (nr_of_blocks, expected))
+
+    def test_nr_of_blocks_and_block_length_agree(self):
+        d = self._analyzer(nstep=600)
+        by_count = d.get_power_spectrum(nr_of_blocks=4)
+        by_length = d.get_power_spectrum(block_length=150, t_unit='dt')
+        for name in ('frequency_0', 'periodogram_H_0', 'periodogram_O_0'):
+            np.testing.assert_array_equal(by_count.get_array(name),
+                                          by_length.get_array(name))
+
+    def test_zero_blocks_rejected(self):
+        """_resolve_blocks validates the request; the inline layout the
+        periodogram used to carry did not."""
+        from samos.utils.exceptions import InputError
+        with self.assertRaises(InputError):
+            self._analyzer().get_power_spectrum(nr_of_blocks=0)
+
+    def test_too_many_blocks_message_omits_the_lag_hint(self):
+        """Advising a smaller t_end would send the caller after a knob
+        that does nothing for a periodogram."""
+        from samos.utils.exceptions import InputError
+        with self.assertRaises(InputError) as cm:
+            self._analyzer().get_power_spectrum(nr_of_blocks=5000)
+        self.assertNotIn('t_end', str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -105,7 +105,9 @@ def _resolve_blocks(nstep, params):
 
     Blocks are cut from the first ``nstep - t_end_dt`` steps, so that
     every block start still has ``t_end_dt`` steps of trajectory ahead
-    of it for the longest lag.
+    of it for the longest lag.  ``t_end_dt == 0`` marks an analysis
+    with no lag window (the periodogram), whose blocks tile the whole
+    trajectory.
 
     Exactly one of ``params.nr_of_blocks`` / ``params.block_length_dt``
     is set by :meth:`DynamicsAnalyzer._get_running_params`.
@@ -137,13 +139,20 @@ def _resolve_blocks(nstep, params):
             'Neither nr_of_blocks nor block_length_dt was specified')
 
     if block_length_dt < 1 or nr_of_blocks < 1:
+        if params.t_end_dt:
+            reason = (
+                'only {} step(s) are available as block starts '
+                '(nstep - t_end_dt, with t_end_dt={}). Use fewer '
+                'blocks, a shorter block_length, or a smaller '
+                't_end/t_end_fit.'.format(usable, params.t_end_dt))
+        else:
+            # Nothing is held back here, so advising a smaller t_end
+            # would send the caller after a knob that does nothing.
+            reason = 'use fewer blocks or a shorter block_length.'
         raise InputError(
             'Cannot fit {} block(s) of {} step(s) into a trajectory of '
-            '{} steps: only {} step(s) are available as block starts '
-            '(nstep - t_end_dt, with t_end_dt={}). Use fewer blocks, a '
-            'shorter block_length, or a smaller t_end/t_end_fit.'.format(
-                nr_of_blocks, block_length_dt, nstep, usable,
-                params.t_end_dt))
+            '{} steps: {}'.format(
+                nr_of_blocks, block_length_dt, nstep, reason))
     return block_length_dt, nr_of_blocks
 
 
@@ -247,7 +256,8 @@ class DynamicsAnalyzer:
                             t_start_fit=0, t_end_fit=None,
                             block_length=None, nr_of_blocks=None,
                             do_com=False, do_long=False,
-                            t_long_end=None, t_long_factor=None):
+                            t_long_end=None, t_long_factor=None,
+                            require_fitting=True):
         """
         Parse and validate analysis parameters, converting all time
         values to integer timesteps.
@@ -295,6 +305,15 @@ class DynamicsAnalyzer:
         :param float t_long_factor:
             Fraction of the trajectory length to use as the long-time
             window (dimensionless).  Mutually exclusive with *t_long_end*.
+        :param bool require_fitting:
+            Whether this analysis fits a time series (default True).
+            :meth:`get_msd` and :meth:`get_vaf` pass True and therefore
+            require *t_end_fit*.  Analyses without a lag window -- the
+            periodogram of :meth:`get_power_spectrum` -- pass False:
+            the fit window is then rejected rather than required,
+            ``t_start_fit_dt``/``t_end_fit_dt`` come back as ``None``,
+            and ``t_end_dt`` is 0 so that blocks tile the whole
+            trajectory.
         :returns: :class:`RunningParams` namedtuple.
         :raises InputError: For invalid parameter combinations.
         """
@@ -304,36 +323,46 @@ class DynamicsAnalyzer:
         stepsize_t = int(stepsize_t)
         stepsize_tau = int(stepsize_tau)
 
-        # --- t_start_fit (scalar or list; default 0) ---
-        t_start_fit_dt = parse_time(t_start_fit, t_unit, timestep_fs)
-        if not np.all(np.asarray(t_start_fit_dt) >= 0):
-            raise InputError('t_start_fit must be >= 0')
+        if require_fitting:
+            # --- t_start_fit (scalar or list; default 0) ---
+            t_start_fit_dt = parse_time(t_start_fit, t_unit, timestep_fs)
+            if not np.all(np.asarray(t_start_fit_dt) >= 0):
+                raise InputError('t_start_fit must be >= 0')
 
-        # --- t_end_fit (required; scalar or list) ---
-        if t_end_fit is None:
-            raise InputError(
-                'Provide a time to end fitting the time series '
-                '(t_end_fit=<value>, t_unit={!r}).'.format(t_unit))
-        t_end_fit_dt = parse_time(t_end_fit, t_unit, timestep_fs)
-
-        if not np.all(
-                np.asarray(t_end_fit_dt) > np.asarray(t_start_fit_dt)):
-            raise InputError(
-                't_end_fit must be greater than t_start_fit')
-
-        # Both must be the same kind (scalar or array) and, if arrays,
-        # the same length.
-        fit_start_scalar = isinstance(t_start_fit_dt, int)
-        fit_end_scalar = isinstance(t_end_fit_dt, int)
-        if fit_start_scalar != fit_end_scalar:
-            raise InputError(
-                't_start_fit and t_end_fit must both be scalars or '
-                'both be lists of the same length')
-        if not fit_start_scalar:
-            if len(t_start_fit_dt) != len(t_end_fit_dt):
+            # --- t_end_fit (required; scalar or list) ---
+            if t_end_fit is None:
                 raise InputError(
-                    't_start_fit and t_end_fit lists must have the '
-                    'same length')
+                    'Provide a time to end fitting the time series '
+                    '(t_end_fit=<value>, t_unit={!r}).'.format(t_unit))
+            t_end_fit_dt = parse_time(t_end_fit, t_unit, timestep_fs)
+
+            if not np.all(
+                    np.asarray(t_end_fit_dt) > np.asarray(t_start_fit_dt)):
+                raise InputError(
+                    't_end_fit must be greater than t_start_fit')
+
+            # Both must be the same kind (scalar or array) and, if
+            # arrays, the same length.
+            fit_start_scalar = isinstance(t_start_fit_dt, int)
+            fit_end_scalar = isinstance(t_end_fit_dt, int)
+            if fit_start_scalar != fit_end_scalar:
+                raise InputError(
+                    't_start_fit and t_end_fit must both be scalars or '
+                    'both be lists of the same length')
+            if not fit_start_scalar:
+                if len(t_start_fit_dt) != len(t_end_fit_dt):
+                    raise InputError(
+                        't_start_fit and t_end_fit lists must have the '
+                        'same length')
+        else:
+            # Rejected rather than ignored: silently dropping a fit
+            # window the caller asked for is worse than refusing it.
+            if t_end_fit is not None:
+                raise InputError(
+                    'This analysis does not fit a time series, so '
+                    't_end_fit has no meaning here.')
+            t_start_fit_dt = None
+            t_end_fit_dt = None
 
         # --- t_start (default 0) ---
         t_start_dt = parse_time(t_start, t_unit, timestep_fs)
@@ -345,13 +374,20 @@ class DynamicsAnalyzer:
         # --- t_end (default: max of t_end_fit) ---
         if t_end is not None:
             t_end_dt = parse_time(t_end, t_unit, timestep_fs)
-        else:
+        elif require_fitting:
             t_end_dt = int(np.max(t_end_fit_dt))
-        if t_end_dt <= t_start_dt:
-            raise InputError('t_end must be greater than t_start')
-        if t_end_dt < int(np.max(t_end_fit_dt)):
-            raise InputError('t_end must be >= t_end_fit')
+        else:
+            # _resolve_blocks holds back t_end_dt steps at the end of
+            # the trajectory for the longest lag; an analysis without a
+            # lag window needs none held back.
+            t_end_dt = 0
+        if require_fitting:
+            if t_end_dt <= t_start_dt:
+                raise InputError('t_end must be greater than t_start')
+            if t_end_dt < int(np.max(t_end_fit_dt)):
+                raise InputError('t_end must be >= t_end_fit')
 
+        # 0 when there is no lag window, in which case nothing reads it.
         nr_of_t = (t_end_dt - t_start_dt) // stepsize_t
 
         # --- block_length / nr_of_blocks (mutually exclusive) ---
@@ -501,6 +537,7 @@ class DynamicsAnalyzer:
             block_length=block_length, nr_of_blocks=nr_of_blocks,
             do_com=do_com, do_long=do_long,
             t_long_end=t_long_end, t_long_factor=t_long_factor,
+            require_fitting=True,
         )
         multiple_params_fit = not isinstance(p.t_start_fit_dt, int)
 
@@ -862,6 +899,7 @@ class DynamicsAnalyzer:
             t_start_fit=t_start_fit, t_end_fit=t_end_fit,
             block_length=block_length, nr_of_blocks=nr_of_blocks,
             do_com=do_com,
+            require_fitting=True,
         )
         if p.do_long:
             raise NotImplementedError('Do_long is not implemented for VAF')
@@ -1123,21 +1161,16 @@ class DynamicsAnalyzer:
         # Sampling frequency of the trajectory in THz (inverse ps)
         sampling_frequency_THz = 1e3 / timestep_fs
 
-        if block_length is not None and nr_of_blocks is not None:
-            raise InputError(
-                'block_length and nr_of_blocks are mutually exclusive')
-        if block_length is not None:
-            block_length_dt = parse_time(block_length, t_unit, timestep_fs)
-            nr_of_blocks = None
-        elif nr_of_blocks is not None:
-            block_length_dt = None
-            nr_of_blocks = int(nr_of_blocks)
-        else:
-            nr_of_blocks = 1
-            block_length_dt = None
-
-        if species_of_interest is None:
-            species_of_interest = self.get_species_of_interest()
+        # require_fitting=False: a periodogram has neither a fit nor a
+        # lag window, so t_end_dt comes back 0 and _resolve_blocks lets
+        # the blocks tile the whole trajectory.
+        p = self._get_running_params(
+            timestep_fs, t_unit=t_unit,
+            species_of_interest=species_of_interest,
+            block_length=block_length, nr_of_blocks=nr_of_blocks,
+            require_fitting=False,
+        )
+        species_of_interest = p.species_of_interest
         smoothing = int(smoothing)
 
         power_spectrum = TimeSeries()
@@ -1156,34 +1189,15 @@ class DynamicsAnalyzer:
                         :, trajectory.get_indices_of_species(atomic_species,
                                                              start=0), :]
                 nstep, _, _ = vel_array.shape
-
-                # Unlike get_msd/get_vaf this layout ignores t_end_dt:
-                # a periodogram has no lag window, so every step of a
-                # block is usable and the blocks tile the trajectory.
-                if nr_of_blocks:
-                    nr_of_blocks_this_traj = nr_of_blocks
-                    # Use the number of blocks specified by user
-                    split_number = nstep // nr_of_blocks_this_traj
-                elif block_length_dt is not None and block_length_dt > 0:
-                    nr_of_blocks_this_traj = nstep // block_length_dt
-                    # Use the precise length specified by user
-                    split_number = block_length_dt
-                else:
-                    raise RuntimeError(
-                        'Neither nr_of_blocks nor block_length_dt '
-                        'is specified')
-                if split_number < 1 or nr_of_blocks_this_traj < 1:
-                    raise InputError(
-                        'Cannot fit {} block(s) of {} step(s) into a '
-                        'trajectory of {} steps. Use fewer blocks or a '
-                        'shorter block_length.'.format(
-                            nr_of_blocks_this_traj, split_number, nstep))
+                block_length_dt_this_traj, nr_of_blocks_this_traj = (
+                    _resolve_blocks(nstep, p))
 
                 # I need to have blocks of equal length, and use the
                 # split method I need the length of the array to be
                 # a multiple of nr_of_blocks_this_traj
                 blocks = np.array(np.split(
-                    vel_array[:nr_of_blocks_this_traj*split_number],
+                    vel_array[:nr_of_blocks_this_traj
+                              * block_length_dt_this_traj],
                     nr_of_blocks_this_traj, axis=0))
                 nblocks = len(blocks)
                 if self._verbosity > 0:
