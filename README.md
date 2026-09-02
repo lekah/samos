@@ -393,6 +393,37 @@ species, 11 % for 10 -- and now tend to 1 at large `r` rather than to
 `(N-1)/N`.  Unlike-pair RDFs and all `int_*` running integrals are
 unaffected.
 
+### Minimum-image convention
+
+`RDF`, bond detection and `ADF` now share one `MinimumImage` helper,
+which Minkowski-reduces the cell once and then tests the 27 neighbour
+images.  It is exact for any cell shape.
+
+Two schemes were replaced.  `RDF.run` tested the eight corners of the
+cell, which is exact for a reduced basis but not otherwise; describing
+the same lattice with a sheared basis used to change the answer.  Bond
+detection and `ADF` wrapped each fractional coordinate to (-0.5, 0.5]
+independently, which picks one periodic image without comparing it to
+the others and is exact only for a rectangular cell -- in an fcc
+primitive cell it got roughly one pair in seven wrong.
+
+RDF and ADF results are unchanged for rectangular cells.  ADF angles
+and bond counts change for non-orthogonal cells, and RDF results change
+for a non-reduced basis; in both cases the new numbers are the correct
+ones.  Cost is 1.1-1.2x the previous runtime.
+
+`BondAnalyzer._pbc_wrap` is gone; use `MinimumImage(cell).vectors(diff)`
+or `.distances(diff)`.
+
+### Radius guard
+
+`RDF.run` and bond detection now warn once per run when the radius or
+the largest bond cutoff exceeds `MinimumImage.max_radius`, half the
+shortest lattice vector.  Past that an atom has more than one periodic
+image in range while minimum-image counting keeps only the nearest, so
+the histogram is biased low.  It is a warning, not an error: the
+results are biased rather than meaningless.
+
 ### Stress units
 
 The internal stress unit is now `eV/A^3` (1 eV/A^3 = 160.2177 GPa), and

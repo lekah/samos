@@ -8,12 +8,13 @@ against excludes the atom itself.
 """
 
 import unittest
+import warnings
 
 import numpy as np
 from ase import Atoms
 
 from samos.trajectory import Trajectory
-from samos.analysis.rdf import RDF
+from samos.analysis.rdf import RDF, MinimumImage
 
 
 def _gas(nstep, symbols, length, seed=0, cells=None):
@@ -179,6 +180,89 @@ class TestRunningIntegral(unittest.TestCase):
         expected = ((n - 1) / length**3) * (4. / 3.) * np.pi * edges**3
         np.testing.assert_allclose(integral[radii > 3], expected[radii > 3],
                                    rtol=0.03)
+
+
+class TestMinimumImageInRDF(unittest.TestCase):
+    """RDF.run used to test only the eight corners of the cell, which
+    misses the nearest image when the basis is not reduced."""
+
+    # The same simple cubic lattice, described twice.  Shearing b by
+    # three lattice vectors changes no atom position and no volume, so
+    # every physical result has to come out identical.
+    CUBIC = np.eye(3) * 6.0
+    SHEARED = np.array([[6., 0., 0.], [18., 6., 0.], [0., 0., 6.]])
+
+    def _traj(self, cell, nstep=10, seed=12):
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H20He20', cell=self.CUBIC, pbc=True)
+        positions = rng.random((nstep, len(atoms), 3)) @ self.CUBIC
+        atoms.set_cell(cell)
+        traj = Trajectory(atoms=atoms)
+        traj.set_positions(positions)
+        return traj
+
+    def test_rdf_is_independent_of_the_cell_basis(self):
+        """With the eight-corner scheme the sheared basis lost about a
+        sixth of all pairs, because their nearest image lay further
+        than one cell vector away."""
+        # 2.9 A is inside max_radius (3.0 A) for both, so neither run
+        # trips the radius guard.
+        cubic = RDF(trajectory=self._traj(self.CUBIC)).run(
+            radius=2.9, nbins=30)
+        sheared = RDF(trajectory=self._traj(self.SHEARED)).run(
+            radius=2.9, nbins=30)
+        for name in cubic.get_arraynames():
+            np.testing.assert_allclose(
+                sheared.get_array(name), cubic.get_array(name),
+                err_msg=name)
+
+    def test_the_two_bases_really_are_the_same_lattice(self):
+        """Guards the fixture itself: if the shear stopped being a
+        lattice-preserving one, the test above would prove nothing."""
+        self.assertAlmostEqual(np.linalg.det(self.CUBIC),
+                               np.linalg.det(self.SHEARED), places=9)
+        # Every sheared vector is an integer combination of cubic ones.
+        coeffs = self.SHEARED @ np.linalg.inv(self.CUBIC)
+        np.testing.assert_allclose(coeffs, np.round(coeffs), atol=1e-12)
+
+
+class TestRadiusGuard(unittest.TestCase):
+    """Past half the shortest lattice vector a pair has more than one
+    image in range and only the nearest is counted, so g(r) is biased
+    low.  That used to happen silently."""
+
+    def _traj(self, length=10.0, nstep=5, seed=1):
+        return _gas(nstep, 'H8He8', length, seed=seed)
+
+    def test_radius_within_the_cell_is_quiet(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            RDF(trajectory=self._traj()).run(radius=4.0, nbins=20)
+        self.assertEqual([str(w.message) for w in caught], [])
+
+    def test_radius_beyond_half_the_lattice_vector_warns(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            RDF(trajectory=self._traj()).run(radius=6.0, nbins=20)
+        self.assertEqual(len(caught), 1)
+        self.assertIn('biased low', str(caught[0].message))
+
+    def test_warning_is_emitted_once_per_run(self):
+        """The check runs per frame for a variable cell; the user
+        should not get one warning per frame."""
+        cells = _breathing_cells(20, 10.0, 12.0)
+        traj = _gas(20, 'H8He8', 10.0, cells=cells)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            RDF(trajectory=traj).run(radius=6.0, nbins=20)
+        self.assertEqual(len(caught), 1)
+
+    def test_limit_is_the_lattice_not_the_supplied_basis(self):
+        """An fcc primitive cell of a=8 has 4.6 A perpendicular widths
+        but 5.66 A lattice vectors, so the limit is 2.83 A."""
+        cell = 8.0*np.array([[0., .5, .5], [.5, 0., .5], [.5, .5, 0.]])
+        self.assertAlmostEqual(MinimumImage(cell).max_radius,
+                               0.5 * 8.0 / np.sqrt(2.), places=10)
 
 
 if __name__ == '__main__':

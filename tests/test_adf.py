@@ -14,7 +14,8 @@ import numpy as np
 from ase import Atoms
 
 from samos.trajectory import Trajectory
-from samos.analysis.rdf import ADF, BondAnalyzer, TorsionAnalyzer
+from samos.analysis.rdf import (
+    ADF, BondAnalyzer, MinimumImage, TorsionAnalyzer)
 
 
 def _make_traj(symbols, positions, cell):
@@ -51,34 +52,64 @@ def _bare_ba(traj=None):
 # BondAnalyzer -- static helpers (no trajectory needed)
 # ---------------------------------------------------------------------------
 
-class TestPbcWrap(unittest.TestCase):
+class TestMinimumImage(unittest.TestCase):
+    """MinimumImage replaced BondAnalyzer._pbc_wrap, which wrapped each
+    fractional component to (-0.5, 0.5] and was therefore correct only
+    for a rectangular cell."""
 
     def setUp(self):
-        self.cell = np.eye(3) * 10.0
-        self.cellI = np.linalg.inv(self.cell)
+        self.mic = MinimumImage(np.eye(3) * 10.0)
 
     def test_no_wrap_needed(self):
-        diff = np.array([[3.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
-        np.testing.assert_allclose(result, [[3.0, 0.0, 0.0]])
+        np.testing.assert_allclose(
+            self.mic.vectors([[3.0, 0.0, 0.0]]), [[3.0, 0.0, 0.0]])
 
     def test_wraps_large_positive(self):
         # 9.0 A in a 10 A cell -> minimum image is -1.0 A
-        diff = np.array([[9.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
-        np.testing.assert_allclose(result, [[-1.0, 0.0, 0.0]])
+        np.testing.assert_allclose(
+            self.mic.vectors([[9.0, 0.0, 0.0]]), [[-1.0, 0.0, 0.0]])
 
     def test_exactly_half_not_wrapped(self):
-        # frac = 0.5 is NOT > 0.5, so no wrap applied
-        diff = np.array([[5.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
-        np.testing.assert_allclose(result, [[5.0, 0.0, 0.0]])
+        # Both images are 5 A away; the tie resolves to the positive one.
+        np.testing.assert_allclose(
+            self.mic.vectors([[5.0, 0.0, 0.0]]), [[5.0, 0.0, 0.0]])
 
     def test_multiple_vectors(self):
-        diff = np.array([[9.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
         np.testing.assert_allclose(
-            result, [[-1.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+            self.mic.vectors([[9.0, 0.0, 0.0], [3.0, 0.0, 0.0]]),
+            [[-1.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+
+    def test_distances_match_vector_norms(self):
+        rng = np.random.default_rng(3)
+        diff = (rng.random((500, 3)) - 0.5) * 30.0
+        np.testing.assert_allclose(
+            self.mic.distances(diff),
+            np.linalg.norm(self.mic.vectors(diff), axis=1))
+
+    def _brute(self, diff, cell, n=3):
+        r = range(-n, n + 1)
+        shifts = np.array([i*cell[0] + j*cell[1] + k*cell[2]
+                           for i in r for j in r for k in r])
+        return np.array([np.linalg.norm(d - shifts, axis=1).min()
+                         for d in diff])
+
+    def test_exact_for_skewed_cells(self):
+        """The old eight-corner scheme in RDF.run missed the nearest
+        image here; wrapping each component missed it in fcc too."""
+        rng = np.random.default_rng(4)
+        cells = [
+            np.eye(3) * 10.0,
+            5.0 * np.array([[0., .5, .5], [.5, 0., .5], [.5, .5, 0.]]),
+            np.array([[10., 0., 0.], [8.66, 5., 0.], [0., 0., 10.]]),
+            np.array([[10., 0., 0.], [25., 3., 0.], [0., 0., 10.]]),
+            np.array([[10., 0., 0.], [15., 4., 0.], [15., 4., 4.]]),
+        ]
+        for cell in cells:
+            diff = (rng.random((2000, 3)) - 0.5) @ cell
+            np.testing.assert_allclose(
+                MinimumImage(cell).distances(diff),
+                self._brute(diff, cell),
+                err_msg='cell {}'.format(cell.tolist()))
 
 
 class TestSetBonds(unittest.TestCase):
@@ -810,6 +841,85 @@ class TestADFPlotting(unittest.TestCase):
         src = inspect.getsource(AngularSpectrum.run)
         self.assertIn("set_attr('species_triplets'", src)
         self.assertNotIn("set_attr('species_pairs'", src)
+
+
+class TestBondCutoffGuard(unittest.TestCase):
+    """A bond cutoff past half the shortest lattice vector means an
+    atom has more than one image in range while only the nearest is
+    kept, so bonds go missing."""
+
+    def _traj(self, nstep=4, seed=6):
+        import numpy as np
+        cell = np.eye(3) * 10.0
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H8O8', cell=cell, pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(rng.random((nstep, 16, 3)) @ cell)
+        return t
+
+    def test_short_cutoff_is_quiet(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            ADF(trajectory=self._traj()).run(
+                nbins=20, bonds={'H-O': (0.0, 2.0)})
+        self.assertEqual([str(w.message) for w in caught], [])
+
+    def test_long_cutoff_warns_once_for_the_whole_run(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            ADF(trajectory=self._traj()).run(
+                nbins=20, bonds={'H-O': (0.0, 6.0)})
+        self.assertEqual(len(caught), 1)
+        self.assertIn('biased low', str(caught[0].message))
+
+
+class TestBondDetectionAcrossBases(unittest.TestCase):
+    """Wrapping each fractional component to (-0.5, 0.5] commits to one
+    periodic image without comparing it to the others, so it depends on
+    which basis describes the lattice.  Bonds went missing."""
+
+    CUBIC = np.eye(3) * 6.0
+    # Same lattice: b sheared by three a.  No atom moves.
+    SHEARED = np.array([[6., 0., 0.], [18., 6., 0.], [0., 0., 6.]])
+
+    def _traj(self, cell, seed=8):
+        rng = np.random.default_rng(seed)
+        positions = rng.random((1, 24, 3)) @ self.CUBIC
+        atoms = Atoms('H12O12', cell=cell, pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(positions)
+        return t
+
+    def _brute(self, traj, cutoff):
+        pos = traj.get_positions()[0]
+        r = range(-3, 4)
+        shifts = np.array([i*self.CUBIC[0] + j*self.CUBIC[1]
+                           + k*self.CUBIC[2]
+                           for i in r for j in r for k in r])
+        types = traj.get_types()
+        found = set()
+        for i in np.where(types == 'H')[0]:
+            for j in np.where(types == 'O')[0]:
+                d = np.linalg.norm(pos[j] - pos[i] - shifts, axis=1).min()
+                if d <= cutoff:
+                    found.add((min(int(i), int(j)), max(int(i), int(j))))
+        return found
+
+    def _detected(self, cell, cutoff):
+        ba = _bare_ba(self._traj(cell))
+        bonds = ba._detect_bonds({'H-O': (0.0, cutoff)}, 0)
+        return {(int(i), int(j)) for i, j in bonds}
+
+    def test_same_bonds_from_either_basis(self):
+        """The old scheme found 27 of these 50 bonds from the sheared
+        basis and all 50 from the cubic one."""
+        cutoff = 2.5
+        expected = self._brute(self._traj(self.CUBIC), cutoff)
+        self.assertTrue(expected, 'fixture found no bonds at all')
+        self.assertEqual(self._detected(self.CUBIC, cutoff), expected)
+        self.assertEqual(self._detected(self.SHEARED, cutoff), expected)
 
 
 if __name__ == '__main__':

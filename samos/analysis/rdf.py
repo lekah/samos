@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+from ase.geometry import minkowski_reduce
 from scipy.spatial.distance import cdist
 
 from samos.trajectory import Trajectory
@@ -9,6 +10,103 @@ from samos.utils.attributed_array import AttributedArray
 import itertools
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
+from warnings import warn
+
+
+def get_cell(trajectory, frame=None):
+    """
+    Cell of *frame*, or the trajectory's fixed cell if it stores none
+    per frame.
+
+    ``ase.cell.Cell`` only grew its ``.array`` attribute in ase 3.18;
+    ``.copy()`` is the fallback for anything older.
+    """
+    cells = trajectory.get_cells()
+    if cells is not None and frame is not None:
+        return cells[frame]
+    atoms = trajectory.get_atoms()
+    try:
+        return atoms.cell.array
+    except AttributeError:
+        return atoms.cell.copy()
+
+
+class MinimumImage:
+    """
+    Shortest periodic distances and displacement vectors for one cell.
+
+    Two wrong-but-tempting schemes preceded this one, and both used to
+    live in this module:
+
+    * Wrapping each fractional component to (-0.5, 0.5] picks one
+      periodic image without ever comparing it to the others.  It is
+      exact only for a rectangular cell; for an fcc primitive cell it
+      gets a quarter of all pairs wrong, by up to 1.8 A.
+    * Testing the eight corners of the cell does compare, and is exact
+      for a reduced cell, but a strongly skewed cell puts the nearest
+      image further than one cell vector away, out of reach of those
+      eight.
+
+    Minkowski-reducing the cell first makes the nearest image one of
+    the 27 immediate neighbours, so testing those is exact for any
+    cell.  The reduction is the expensive part, which is why it happens
+    once here rather than once per call.  See ase.geometry.find_mic,
+    which is correct in the same way but redoes the reduction on every
+    call and so runs several times slower in a loop.
+
+    Like any minimum-image scheme, this is only meaningful for
+    distances below half the cell's narrowest width.
+    """
+
+    # Offsets of the 27 immediate neighbour cells, origin included.
+    _OFFSETS = np.array(list(itertools.product((-1, 0, 1), repeat=3)))
+
+    def __init__(self, cell):
+        cell = np.asarray(cell, dtype=float)
+        reduced, _ = minkowski_reduce(cell)
+        self._cell = reduced
+        self._cellI = np.linalg.inv(reduced)
+        self._images = self._OFFSETS @ reduced
+        lengths = np.linalg.norm(self._images, axis=1)
+        self._shortest_lattice_vector = lengths[lengths > 0.0].min()
+
+    @property
+    def max_radius(self):
+        """
+        Largest distance at which a minimum-image analysis is unbiased.
+
+        Two periodic copies of the same atom are separated by a lattice
+        vector t, so both can sit within r of another atom as soon as
+        |t| <= 2r.  Beyond half the shortest lattice vector, a pair
+        therefore has more than one image in range while minimum-image
+        counting keeps only the nearest, and histograms come out low.
+
+        The shortest lattice vector is read off the Minkowski-reduced
+        basis, so this is a property of the lattice and not of the cell
+        the caller happened to supply.  It is a weaker limit than the
+        familiar half-narrowest-width rule, which exists to keep naive
+        wrapping honest rather than to keep counting honest.
+        """
+        return 0.5 * self._shortest_lattice_vector
+
+    def _wrapped(self, diff):
+        return ((np.asarray(diff) @ self._cellI) % 1.0) @ self._cell
+
+    def distances(self, diff):
+        """Shortest periodic distance for each row of *diff*."""
+        return cdist(self._wrapped(diff), self._images).min(axis=1)
+
+    def vectors(self, diff):
+        """
+        Shortest periodic displacement vector for each row of *diff*.
+
+        Ties -- a displacement of exactly half a cell vector -- resolve
+        to the first of the equidistant images, which is the one with
+        the most negative offset.
+        """
+        wrapped = self._wrapped(diff)
+        closest = cdist(wrapped, self._images).argmin(axis=1)
+        return wrapped - self._images[closest]
 
 
 class BaseAnalyzer(metaclass=ABCMeta):
@@ -38,6 +136,27 @@ class BaseAnalyzer(metaclass=ABCMeta):
                 'method, or pass trajectory=... to the constructor.')
         return self._trajectory
 
+    def _check_radius(self, mic, radius, what='radius'):
+        """
+        Warn, at most once per run, if *radius* is too large for the
+        cell to support unbiased minimum-image counting.
+
+        A warning rather than an error: the result is biased low past
+        this point, not meaningless, and callers have been computing
+        RDFs out to it for years.
+        """
+        if radius <= mic.max_radius:
+            return
+        if getattr(self, '_radius_warned', False):
+            return
+        self._radius_warned = True
+        warn('{} of {:.3f} A exceeds half the shortest lattice vector '
+             '({:.3f} A). Beyond that, an atom has more than one '
+             'periodic image in range and only the nearest is counted, '
+             'so the result is biased low. Use a larger cell or a '
+             'smaller radius.'.format(what, radius, mic.max_radius),
+             stacklevel=3)
+
     @abstractmethod
     def run(self, *args, **kwargs):
         pass
@@ -61,7 +180,9 @@ class RDF(BaseAnalyzer):
         if species_pairs is None:
             species_pairs = list(itertools.combinations_with_replacement(
                 set(atoms.get_chemical_symbols()), 2))
-        cell = np.array(atoms.cell.T)
+        # Transposed, unlike AngularSpectrum below -- one of the two
+        # is wrong, but run_fort raises before reaching here.
+        cell = get_cell(self.trajectory).T
         cellI = np.linalg.inv(cell)
         chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
         rdf_res = AttributedArray()
@@ -104,9 +225,10 @@ class RDF(BaseAnalyzer):
         edge of that bin, half a binsize beyond the matching entry of
         ``radii_*``, which holds bin centres.
 
-        TODO:
-            Improve algorithm because it can actually fail in
-            very acute cell systems
+        Distances use :class:`MinimumImage`, which is exact for any
+        cell shape.  A *radius* beyond ``MinimumImage.max_radius``
+        still biases g(r) low -- see there -- and warns.
+
         TODO: Implement orthorhombic case to gain efficiency
 
         :param float radius:
@@ -152,19 +274,12 @@ class RDF(BaseAnalyzer):
         positions = self.trajectory.get_positions()
         types = self.trajectory.get_types()
         cells = self.trajectory.get_cells()
-        range_ = list(range(0, 2))
+        self._radius_warned = False
         if cells is None:
             fixed_cell = True
-            atoms = self.trajectory.atoms
-            volume = atoms.get_volume()
-            try:
-                cell = atoms.cell.array
-            except AttributeError:
-                cell = atoms.cell.copy()
-            cellI = np.linalg.inv(cell)
-            a, b, c = cell
-            corners = [i*a+j*b + k *
-                       c for i in range_ for j in range_ for k in range_]
+            volume = self.trajectory.atoms.get_volume()
+            mic = MinimumImage(get_cell(self.trajectory))
+            self._check_radius(mic, radius, 'RDF radius')
         else:
             fixed_cell = False
 
@@ -253,21 +368,11 @@ class RDF(BaseAnalyzer):
                 if not fixed_cell:
                     cell = cells[index]
                     volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
-                    cellI = np.linalg.inv(cell)
-                    a, b, c = cell
-                    corners = np.array([i*a+j*b + k*c
-                                        for i in range_
-                                        for j in range_
-                                        for k in range_])
-                diff_real_unwrapped = (
+                    mic = MinimumImage(cell)
+                    self._check_radius(mic, radius, 'RDF radius')
+                shortest_distances = mic.distances(
                     positions[index, ind_pair2, :]
                     - positions[index, ind_pair1, :])
-                diff_crystal_wrapped = (diff_real_unwrapped@cellI) % 1.0
-                diff_real_wrapped = np.dot(diff_crystal_wrapped, cell)
-                # in diff_real_wrapped I have all positions wrapped
-                #  into periodic cell
-                shortest_distances = cdist(
-                    diff_real_wrapped, corners).min(axis=1)
                 shortest_distance_this_pair = min(
                     shortest_distance_this_pair, shortest_distances.min())
                 counts = prefactor * (
@@ -318,7 +423,9 @@ class AngularSpectrum(BaseAnalyzer):
         if species_pairs is None:
             species_pairs = list(itertools.combinations_with_replacement(
                 set(atoms.get_chemical_symbols()), 3))
-        cell = np.array(atoms.cell)
+        # The Fortran kernel does its own, naive, minimum image; it
+        # does not go through MinimumImage.  See issues.md.
+        cell = get_cell(self.trajectory)
         cellI = np.linalg.inv(cell)
         chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
         rdf_res = AttributedArray()
@@ -470,17 +577,6 @@ class BondAnalyzer(BaseAnalyzer):
                 spec1, spec2,
                 ', '.join('-'.join(k) for k in cutoffs_parsed)))
 
-    @staticmethod
-    def _pbc_wrap(diff, cellI, cell):
-        """
-        Wrap displacement vectors diff (shape N x 3) to minimum-image
-        vectors.  Projects to fractional coordinates, wraps each
-        component to (-0.5, 0.5], and projects back to Cartesian.
-        """
-        frac = (diff @ cellI) % 1.0
-        frac[frac > 0.5] -= 1.0
-        return frac @ cell
-
     def _detect_bonds(self, cutoffs, frame):
         """
         Detect bonds in a single frame via distance cutoffs.
@@ -490,15 +586,9 @@ class BondAnalyzer(BaseAnalyzer):
         """
         cutoffs_parsed = self._parse_cutoffs(cutoffs)
         positions = self.trajectory.get_positions()[frame]
-        cells = self.trajectory.get_cells()
-        if cells is not None:
-            cell = cells[frame]
-        else:
-            try:
-                cell = self.trajectory.get_atoms().cell.array
-            except AttributeError:
-                cell = self.trajectory.get_atoms().cell.copy()
-        cellI = np.linalg.inv(cell)
+        mic = MinimumImage(get_cell(self.trajectory, frame))
+        self._check_radius(mic, max(r for _, r in cutoffs_parsed.values()),
+                           'Bond cutoff')
         types = self.trajectory.get_types()
 
         bond_set = set()
@@ -506,9 +596,7 @@ class BondAnalyzer(BaseAnalyzer):
             ind1 = np.where(types == sp1)[0]
             ind2 = np.where(types == sp2)[0]
             for i in ind1:
-                diffs = self._pbc_wrap(
-                    positions[ind2] - positions[i], cellI, cell)
-                dists = np.linalg.norm(diffs, axis=1)
+                dists = mic.distances(positions[ind2] - positions[i])
                 for j in ind2[(dists >= r_min) & (dists <= r_max)]:
                     ji = int(j)
                     if ji != i:
@@ -577,6 +665,7 @@ class ADF(BondAnalyzer):
             raise ValueError(
                 "Pass species_triplets or centers, not both.")
 
+        self._radius_warned = False
         positions = self.trajectory.get_positions()
         types = self.trajectory.get_types()
         cells = self.trajectory.get_cells()
@@ -633,21 +722,16 @@ class ADF(BondAnalyzer):
         bin_centers = (np.arange(nbins) + 0.5) * binsize
         hists = {t: np.zeros(nbins, dtype=float) for t in species_triplets}
 
-        # Invert cell only once for fixed-cell trajectories.
+        # Reduce the cell only once for fixed-cell trajectories.
         if cells is None:
             fixed_cell = True
-            try:
-                cell = self.trajectory.get_atoms().cell.array
-            except AttributeError:
-                cell = self.trajectory.get_atoms().cell.copy()
-            cellI = np.linalg.inv(cell)
+            mic = MinimumImage(get_cell(self.trajectory))
         else:
             fixed_cell = False
 
         for frame in frames:
             if not fixed_cell:
-                cell = cells[frame]
-                cellI = np.linalg.inv(cell)
+                mic = MinimumImage(cells[frame])
             pos = positions[frame]
 
             # Bond detection is per-frame for dynamic mode; static mode
@@ -674,10 +758,9 @@ class ADF(BondAnalyzer):
                     if not left or not right:
                         continue
 
-                    r_l = self._pbc_wrap(
-                        pos[left] - pos[j], cellI, cell)
-                    r_r = r_l if same else self._pbc_wrap(
-                        pos[right] - pos[j], cellI, cell)
+                    r_l = mic.vectors(pos[left] - pos[j])
+                    r_r = r_l if same else mic.vectors(
+                        pos[right] - pos[j])
 
                     nl = np.linalg.norm(r_l, axis=1)
                     nr = np.linalg.norm(r_r, axis=1)

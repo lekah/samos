@@ -18,9 +18,8 @@ here.
 **Everything that could be fixed without a decision has been.** The
 three entries left over need something this file cannot supply:
 
-* **A physics decision** -- #25 (which minimum-image convention wins,
-  given that switching changes published numbers for non-orthogonal
-  cells).
+* **A decision about scope** -- #41 (whether the Fortran
+  `AngularSpectrum` is worth repairing now that `ADF` supersedes it).
 * **A large refactor with silent failure modes** -- #33.
   #26 is now a small, optional tidy-up.
 
@@ -30,30 +29,44 @@ labels, not an ordering contract.
 
 ---
 
-## 25. Two incompatible minimum-image implementations in one module
+## 41. The Fortran AngularSpectrum reports wrong angles across the cell boundary
 
-**Fix difficulty: 6**
+**Fix difficulty: 4**
 
-`samos/analysis/rdf.py:255-270` (`RDF.run`, 8-corner `cdist` scheme)
-versus `samos/analysis/rdf.py:473-482` (`BondAnalyzer._pbc_wrap`,
-fractional wrapping)
+`samos/lib/rdf.f90:129-135` and `:150-156` (`calculate_angular_spec`),
+reached through `AngularSpectrum.run`
 
-The two disagree for acute cells, and only `RDF.run` carries the
-"can actually fail in very acute cell systems" caveat. Whichever is
-chosen, both RDF and ADF/bond detection should use the same one, so that
-a bond present in the ADF is a bond visible in the RDF.
+Both wrap loops do this for a fractional component above one half:
 
-Related duplication in the same file: the
-`try: cell.array / except AttributeError: cell.copy()` idiom appears at
-`:161`, `:498` and `:640`, and the fixed/variable-cell setup block is
-written twice.
+```fortran
+distance_crystal(idim) = 1.0D0 - distance_crystal(idim)
+```
 
-**Fix:** one `minimum_image(diff, cell, cellI)` helper plus one
-`get_cell(trajectory, frame)` helper, used by both analyzers. Changing
-the RDF's scheme changes published numbers for non-orthogonal cells --
-verify against a reference RDF before switching.
+That mirrors the component instead of translating it; the periodic
+image is at `f - 1`, not `1 - f`.  The magnitude survives, so distances
+in a cubic cell still come out right, but the *vector* is reflected and
+the angle built from it is not.
+
+Reproduced in a plain cubic cell: an O with two H neighbours whose
+bonds cross the boundary has a true angle of 180 degrees and is
+reported at 45.  The same geometry placed in the middle of the cell,
+where nothing wraps, comes out correct at 90 degrees.
+
+The surrounding scheme is the naive one that `MinimumImage` replaced on
+the Python side, so it is also wrong for non-orthogonal cells even
+without the sign error.
+
+`AngularSpectrum` is not reachable from the CLI and is superseded by
+`ADF`, which is correct.  Nothing in the examples or the README uses
+it.
+
+**Fix:** decide whether `AngularSpectrum` earns its keep.  Deleting it
+in favour of `ADF` costs nothing that is documented.  Keeping it means
+correcting the Fortran and rebuilding, which needs gfortran and cannot
+be verified by the Python tests alone.
 
 ---
+
 
 ## 26. `get_msd` and `get_vaf` repeat the `do_com` call sequence
 
