@@ -15,18 +15,14 @@ Each issue carries a **Fix difficulty** score from 1 to 10:
 This file supersedes the old `TODO.md`, whose open items were folded in
 here.
 
-**Everything from the original review that could be fixed without a
-decision has been.** The entries left over need something this file
-cannot supply:
+**Everything that could be fixed without a decision has been.** The
+five entries left over need something this file cannot supply:
 
 * **A physics decision** -- #11 (which density definition an NPT RDF
   should use), #21 (what samos's internal stress unit is), #25 (which
   minimum-image convention wins, given that switching changes published
   numbers for non-orthogonal cells).
 * **A large refactor with silent failure modes** -- #26, #33.
-
-One later finding, #40, is not in that list: it is a two-line fix that
-simply has not been made yet.
 
 **When an issue is fixed and verified, delete its entry from this file.**
 Renumbering the remaining entries is not required -- the numbers are
@@ -144,27 +140,3 @@ rather than a useful message.
 **Fix:** explicit keyword arguments with a defined application order,
 or an ordered whitelist of setters applied in dependency order. Touches
 every constructor call site, hence the score.
-
----
-
-## 40. The power spectrum stores an all-NaN standard error for a single block
-
-**Fix difficulty: 2**
-
-`samos/analysis/dynamics.py:1239-1241`
-
-The standard error of the mean is computed as
-`std / np.sqrt(len(periodogram_this_species) - 1)`.  With one block --
-which is the default, and what `samos-vdos` uses unless `-n` is given --
-the denominator is `sqrt(0)`, so every element of
-`periodogram_{species}_sem` is NaN and numpy emits a
-`RuntimeWarning: invalid value encountered in divide` on every run.
-
-The surrounding `except Exception as e: print(e)` does not catch it,
-because a numpy divide warning is not an exception; the NaN array is
-stored and handed to whoever reads it.
-
-**Fix:** skip the sem array (or store zeros) when there is only one
-block, the same way any single-sample standard error is undefined.  A
-test asserting `np.isfinite(sem).all()` for `nr_of_blocks=1` catches a
-regression.

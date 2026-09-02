@@ -585,6 +585,58 @@ class TestMSDPlottingFitWindows(unittest.TestCase):
         plot_msd_anisotropic(msd, ax=self._axes(), diagonal_only=True)
 
 
+class TestPowerSpectrumSpread(unittest.TestCase):
+    """
+    The standard error was computed as std/sqrt(nblocks - 1), so the
+    default single-block run divided by zero: numpy emitted a
+    RuntimeWarning and the stored sem array was entirely NaN.  get_msd
+    and get_vaf already filled NaN explicitly in that case.
+    """
+
+    def _spectrum(self, nr_of_blocks):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(3)
+        t = Trajectory(atoms=Atoms('H' * 4), timestep=1.0)
+        t.set_velocities(rng.random((200, 4, 3)))
+        return DynamicsAnalyzer(trajectories=[t]).get_power_spectrum(
+            nr_of_blocks=nr_of_blocks)
+
+    def test_single_block_does_not_warn(self):
+        # Warnings are recorded rather than raised: the division sits
+        # inside a bare `except Exception: print(e)`, which would
+        # swallow an escalated warning before the test could see it.
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            self._spectrum(1)
+        divides = [w for w in caught
+                   if issubclass(w.category, RuntimeWarning)
+                   and 'divide' in str(w.message)]
+        self.assertEqual(divides, [])
+
+    def test_single_block_reports_no_spread(self):
+        import numpy as np
+        ps = self._spectrum(1)
+        mean = ps.get_array('periodogram_H_mean')
+        self.assertTrue(np.isfinite(mean).all())
+        for name in ('periodogram_H_std', 'periodogram_H_sem'):
+            spread = ps.get_array(name)
+            self.assertEqual(spread.shape, mean.shape)
+            self.assertTrue(np.isnan(spread).all(), name)
+
+    def test_several_blocks_report_a_finite_spread(self):
+        import numpy as np
+        ps = self._spectrum(4)
+        for name in ('periodogram_H_std', 'periodogram_H_sem'):
+            self.assertTrue(np.isfinite(ps.get_array(name)).all(), name)
+        np.testing.assert_allclose(
+            ps.get_array('periodogram_H_sem'),
+            ps.get_array('periodogram_H_std') / np.sqrt(3))
+
+
 class TestSlicedTrajectoryTimeAxis(unittest.TestCase):
     """
     Striding a trajectory has to carry through to the analysis: the MSD

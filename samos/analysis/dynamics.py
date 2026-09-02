@@ -1231,14 +1231,22 @@ class DynamicsAnalyzer:
                             ' because of different lengths')
                 periodogram_this_species = np.array(
                     periodogram_this_species)
-                power_spectrum.set_array('periodogram_{}_mean'.format(
-                    atomic_species), periodogram_this_species.mean(axis=0))
-                std = periodogram_this_species.std(axis=0)
+                mean = periodogram_this_species.mean(axis=0)
+                if len(periodogram_this_species) > 1:
+                    std = periodogram_this_species.std(axis=0)
+                    sem = std / np.sqrt(len(periodogram_this_species) - 1)
+                else:
+                    # A single block carries no spread; reporting 0/0
+                    # here produced a RuntimeWarning and a silent NaN.
+                    # get_msd and get_vaf fill NaN in the same situation.
+                    std = np.full(mean.shape, np.nan)
+                    sem = np.full(mean.shape, np.nan)
+                power_spectrum.set_array(
+                    'periodogram_{}_mean'.format(atomic_species), mean)
                 power_spectrum.set_array(
                     'periodogram_{}_std'.format(atomic_species), std)
-                power_spectrum.set_array('periodogram_{}_sem'.format(
-                    atomic_species),
-                    std/np.sqrt(len(periodogram_this_species)-1))
+                power_spectrum.set_array(
+                    'periodogram_{}_sem'.format(atomic_species), sem)
             except Exception as e:
                 # Not the end of the world, I just don't calculate the mean
                 print(e)
