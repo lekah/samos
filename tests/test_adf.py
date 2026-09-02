@@ -800,9 +800,9 @@ class TestWriteXsfHeaderOnly(unittest.TestCase):
 
 
 class TestADFPlotting(unittest.TestCase):
-    """ADF results had no plotter: plot_angular_spec read the
-    'species_pairs' attribute that AngularSpectrum wrote for triplets,
-    and the CLI carried its own inline copy."""
+    """ADF results had no plotter of their own: the CLI carried an
+    inline copy, and the only angular plotter belonged to the Fortran
+    AngularSpectrum, since removed."""
 
     def _result(self):
         import numpy as np
@@ -832,15 +832,6 @@ class TestADFPlotting(unittest.TestCase):
         handles = plot_adf(res, ax=self._axes())
         self.assertEqual(len(handles), 1)
         self.assertEqual(handles[0].get_label(), 'O-Si-O')
-
-    def test_angular_spectrum_uses_the_triplet_key(self):
-        """AngularSpectrum and ADF must agree on the attribute name so
-        one plotting function can serve both."""
-        import inspect
-        from samos.analysis.rdf import AngularSpectrum
-        src = inspect.getsource(AngularSpectrum.run)
-        self.assertIn("set_attr('species_triplets'", src)
-        self.assertNotIn("set_attr('species_pairs'", src)
 
 
 class TestBondCutoffGuard(unittest.TestCase):

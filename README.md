@@ -393,6 +393,24 @@ species, 11 % for 10 -- and now tend to 1 at large `r` rather than to
 `(N-1)/N`.  Unlike-pair RDFs and all `int_*` running integrals are
 unaffected.
 
+### Removed: AngularSpectrum, RDF.run_fort, plot_angular_spec
+
+`samos/lib/rdf.f90` held two Fortran routines and neither was reachable
+from working code.  `calculate_rdf` was called only by `RDF.run_fort`,
+which raised `NotImplementedError` on its first line.
+`calculate_angular_spec` was called only by `AngularSpectrum`, which
+`ADF` supersedes; it also wrapped a fractional coordinate as `1 - f`
+instead of `f - 1`, mirroring the displacement instead of translating
+it, so an angle whose bond crossed the cell boundary came out wrong
+even in a cubic cell (180 degrees reported as 45).
+
+Removed with them: `samos.lib.rdf` as an importable module, and
+`samos.plotting.plot_rdf.plot_angular_spec`, whose only producer was
+`AngularSpectrum`.  Use `ADF` and `plot_adf` instead.
+
+The Fortran extension now builds from `gaussian_density.f90` and
+`mdutils.f90` only, so **rerun `pip install -e .`** after pulling this.
+
 ### Minimum-image convention
 
 `RDF`, bond detection and `ADF` now share one `MinimumImage` helper,

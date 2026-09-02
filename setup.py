@@ -59,7 +59,6 @@ setup(
         f2py_Extension('samos.lib.fortran_lib', [
             'samos/lib/gaussian_density.f90',
             'samos/lib/mdutils.f90',
-            'samos/lib/rdf.f90',
         ]),
         Pybind11Extension(
             'samos.lib.mdutils_cpp_omp',

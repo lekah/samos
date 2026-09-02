@@ -163,44 +163,6 @@ class BaseAnalyzer(metaclass=ABCMeta):
 
 
 class RDF(BaseAnalyzer):
-    def run_fort(self, radius=None, species_pairs=None, istart=0,
-                 istop=None, stepsize=1, nbins=100):
-        """
-        :param float radius:
-            The radius for the calculation of the RDF
-        """
-        if 1:
-            raise NotImplementedError('This is not fully implemented')
-        from samos.lib.rdf import calculate_rdf
-        atoms = self.trajectory.atoms
-        volume = atoms.get_volume()
-        positions = self.trajectory.get_positions()
-        if istop is None:
-            istop = len(positions)
-        if species_pairs is None:
-            species_pairs = list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 2))
-        # Transposed, unlike AngularSpectrum below -- one of the two
-        # is wrong, but run_fort raises before reaching here.
-        cell = get_cell(self.trajectory).T
-        cellI = np.linalg.inv(cell)
-        chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
-        rdf_res = AttributedArray()
-        rdf_res.set_attr('species_pairs', species_pairs)
-        for spec1,  spec2 in species_pairs:
-            ind1 = np.where(chem_sym == spec1)[
-                0] + 1  # +1 for fortran indexing
-            ind2 = np.where(chem_sym == spec2)[0] + 1
-            density = float(len(ind2)) / volume
-            rdf, integral, radii = calculate_rdf(
-                positions, istart, istop, stepsize,
-                radius, density, cell,
-                cellI, ind1, ind2, nbins)
-            rdf_res.set_array('rdf_{}_{}'.format(spec1, spec2), rdf)
-            rdf_res.set_array('int_{}_{}'.format(spec1, spec2), integral)
-            rdf_res.set_array('radii_{}_{}'.format(spec1, spec2), radii)
-        return rdf_res
-
     def run(self, radius, species_pairs=None,
             istart=0, istop=None, stepsize=1, nbins=100):
         """
@@ -406,45 +368,6 @@ class RDF(BaseAnalyzer):
         # to be written inside the loop, so it held the running minimum
         # over the pairs seen so far under a name that reads per-pair.
         rdf_res.set_attr('shortest_distance', float(shortest_distance_all))
-        return rdf_res
-
-
-class AngularSpectrum(BaseAnalyzer):
-    def run(self, radius=None, species_pairs=None,
-            istart=1, istop=None, stepsize=1, nbins=100):
-        """
-        :param float radius: The radius for the calculation of the RDF
-        """
-        from samos.lib.rdf import calculate_angular_spec
-        atoms = self.trajectory.atoms
-        positions = self.trajectory.get_positions()
-        if istop is None:
-            istop = len(positions)
-        if species_pairs is None:
-            species_pairs = list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 3))
-        # The Fortran kernel does its own, naive, minimum image; it
-        # does not go through MinimumImage.  See issues.md.
-        cell = get_cell(self.trajectory)
-        cellI = np.linalg.inv(cell)
-        chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
-        rdf_res = AttributedArray()
-        # These are triplets, not pairs; the attribute used to be called
-        # 'species_pairs', which no plotting function could tell apart
-        # from an RDF result.
-        rdf_res.set_attr('species_triplets', species_pairs)
-        for spec1,  spec2, spec3 in species_pairs:
-            ind1 = np.where(chem_sym == spec1)[
-                0] + 1  # +1 for fortran indexing
-            ind2 = np.where(chem_sym == spec2)[0] + 1
-            ind3 = np.where(chem_sym == spec3)[0] + 1
-            angular_spec, angles = calculate_angular_spec(
-                positions, istart, istop, stepsize,
-                radius, cell, cellI, ind1, ind2, ind3, nbins)
-            rdf_res.set_array('aspec_{}_{}_{}'.format(
-                spec1, spec2, spec3), angular_spec)
-            rdf_res.set_array('angles_{}_{}_{}'.format(
-                spec1, spec2, spec3), angles)
         return rdf_res
 
 

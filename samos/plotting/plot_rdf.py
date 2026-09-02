@@ -116,32 +116,3 @@ def plot_adf(adf_res, ax=None, show=False, no_label=False,
     if show:
         plt.show()
     return handles
-
-
-def plot_angular_spec(angspec_res,
-                      ax=None,  # no_legend=False, species_of_interest=None,
-                      show=False,  # label=None,
-                      no_label=False,
-                      #   alpha_fill=0.2, alpha_block=0.3, alpha_fit=0.4,
-                      #   color_scheme='jmol', exclude_from_label=None,
-                      **kwargs):
-
-    if ax is None:
-        fig = plt.figure(**kwargs)
-        ax = fig.add_subplot(1, 1, 1)
-    attrs = angspec_res.get_attrs()
-    handles = []
-    for spec1, spec2, spec3 in attrs['species_triplets']:
-        angular_spec = angspec_res.get_array(
-            'aspec_{}_{}_{}'.format(spec1, spec2, spec3))
-        angles = angspec_res.get_array(
-            'angles_{}_{}_{}'.format(spec1, spec2, spec3))
-        if not no_label:
-            label1 = r'$g(r)$ {}-{}-{}'.format(spec2, spec1, spec3)
-        else:
-            label1 = None
-        l, = ax.plot(angles, angular_spec, label=label1)
-        handles.append(l)
-    plt.legend(handles=handles)
-    if show:
-        plt.show()
