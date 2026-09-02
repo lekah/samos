@@ -771,7 +771,7 @@ class TestWriteXsfHeaderOnly(unittest.TestCase):
 class TestADFPlotting(unittest.TestCase):
     """ADF results had no plotter: plot_angular_spec read the
     'species_pairs' attribute that AngularSpectrum wrote for triplets,
-    and scripts/samos carried its own inline copy."""
+    and the CLI carried its own inline copy."""
 
     def _result(self):
         import numpy as np

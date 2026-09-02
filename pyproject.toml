@@ -37,6 +37,16 @@ pre-commit = ["pre-commit", "flake8"]
 tests = ["pytest"]
 docs = ["Sphinx", "docutils", "sphinx_rtd_theme"]
 
+[project.scripts]
+# The dispatcher plus one executable per analysis.  Both spellings run
+# the same code: "samos msd ..." is dispatched to "samos-msd ...".
+samos = "samos.cli:main"
+samos-msd = "samos.cli:main_msd"
+samos-vaf = "samos.cli:main_vaf"
+samos-vdos = "samos.cli:main_vdos"
+samos-rdf = "samos.cli:main_rdf"
+samos-adf = "samos.cli:main_adf"
+
 [project.urls]
 Homepage = "https://github.com/lekah/samos"
 
