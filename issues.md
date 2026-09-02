@@ -16,42 +16,17 @@ This file supersedes the old `TODO.md`, whose open items were folded in
 here.
 
 **Everything that could be fixed without a decision has been.** The
-four entries left over need something this file cannot supply:
+three entries left over need something this file cannot supply:
 
-* **A physics decision** -- #21 (what samos's internal stress unit is),
-  #25 (which minimum-image convention wins, given that switching
-  changes published numbers for non-orthogonal cells).
+* **A physics decision** -- #25 (which minimum-image convention wins,
+  given that switching changes published numbers for non-orthogonal
+  cells).
 * **A large refactor with silent failure modes** -- #33.
   #26 is now a small, optional tidy-up.
 
 **When an issue is fixed and verified, delete its entry from this file.**
 Renumbering the remaining entries is not required -- the numbers are
 labels, not an ordering contract.
-
----
-
-## 21. `s_conv` is 1.0 for every unit system while the API claims otherwise
-
-**Fix difficulty: 4**
-
-`samos/utils/units.py` (all seven entries), documented at
-`samos/io/lammps.py:227-232` and in the `--units` CLI help
-
-Every unit system sets `'s_conv': 1.0`, including `si` (Pa), `cgs`
-(dyne/cm^2), `real` (atm) and `metal` (bar). The docstring says `units`
-"sets *all* conversion factors automatically". Stresses come out
-unconverted while the API states the opposite -- a silent, physically
-wrong result for anyone reading stress from a LAMMPS dump.
-
-`samos/utils/units.py` also does not define an internal stress unit at
-all (the module docstring lists positions, velocities, forces, energy,
-time).
-
-**Fix:** decide on an internal stress unit (eV/A^3 would match the rest),
-fill in the table, and add it to the module docstring -- or, if stress
-conversion is deliberately out of scope, document `s_conv` as a no-op
-placeholder and say so in the `--units` help. This needs a physics
-decision, not just code.
 
 ---
 

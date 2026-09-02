@@ -454,7 +454,7 @@ class Trajectory(AttributedArray):
         :param float v_conv: velocity factor (multiply to get A/fs)
         :param float f_conv: force factor (multiply to get eV/A)
         :param float e_conv: energy factor (multiply to get eV)
-        :param float s_conv: stress factor
+        :param float s_conv: stress factor to eV/Angstrom^3
         """
         names = self.get_arraynames()
         if l_conv != 1.0:

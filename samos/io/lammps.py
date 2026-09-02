@@ -259,7 +259,7 @@ def read_lammps_dump(filename, elements=None,
     :param l_conv: length conversion factor to Angstrom (positions, cells)
     :param f_conv: force conversion factor to eV/Angstrom
     :param e_conv: energy conversion factor to eV
-    :param s_conv: stress conversion factor
+    :param s_conv: stress conversion factor to eV/Angstrom^3
     :param v_conv:
         Velocity conversion factor to Angstrom/femtosecond.
         Ignored when *units* is set.
@@ -547,7 +547,7 @@ if __name__ == '__main__':
                         help='Conversion factor for energies to eV.',
                         default=1.0)
     parser.add_argument('--s-conv', type=float,
-                        help='Conversion factor for stresses.',
+                        help='Conversion factor for stresses to eV/A^3.',
                         default=1.0)
     parser.add_argument('--v-conv', type=float, default=1.0,
                         help='Conversion factor for velocities to A/fs.')
