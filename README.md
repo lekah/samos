@@ -393,6 +393,16 @@ species, 11 % for 10 -- and now tend to 1 at large `r` rather than to
 `(N-1)/N`.  Unlike-pair RDFs and all `int_*` running integrals are
 unaffected.
 
+### Stress units
+
+The internal stress unit is now `eV/A^3` (1 eV/A^3 = 160.2177 GPa), and
+`UNIT_SYSTEMS` carries a real `s_conv` for every unit system.  It was
+1.0 everywhere before, so stress read with `read_lammps_dump(...,
+units=...)` came through in the file's own unit (bar for `metal`, atm
+for `real`, Pa for `si` and `electron`) despite the documentation
+saying otherwise.  Stress values now change by the corresponding
+factor; nothing else does.
+
 ### CLI structure
 
 The single `samos TRAJECTORY [global options] COMMAND [command options]`
