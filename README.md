@@ -531,7 +531,7 @@ things on either side of the command name:
 `msd`'s `-n`/`-b` used to mean OpenMP threads and compute backend.
 Both moved to `-j/--num-threads` and `--backend` at the time, and both
 have since been removed entirely along with the C++ backend they
-controlled -- see "The C++ backend is gone" below.
+controlled -- see "The C++ backend is disabled" below.
 
 `-n/--nblocks` is no longer accepted by `samos-rdf` and `samos-adf`,
 which never used it.
@@ -560,10 +560,12 @@ Previously returned a 14-element positional tuple.  Now returns a
 
 ### `get_gaussian_density` no longer needs a Fortran build
 
-`samos/lib/gaussian_density.f90` is gone; `get_gaussian_density` now
-bins the density onto the grid in pure numpy and hands the array to
-`write_xsf` directly, instead of writing the header in Python and
-having Fortran open the same file again in append mode to finish it.
+`get_gaussian_density` now bins the density onto the grid in pure
+numpy and hands the array to `write_xsf` directly, instead of writing
+the header in Python and having Fortran open the same file again in
+append mode to finish it. `setup.py` no longer builds
+`samos/lib/gaussian_density.f90` -- the file is kept in the repo for
+reference, but it is dead code: nothing imports it any more.
 
 The Fortran carried two bugs, both fixed rather than ported over:
 
@@ -585,7 +587,7 @@ every other writer in `samos.io.xsf`, rather than the Fortran's
 for skewed cells, correctly placed at all) relative to files written
 by the old code.
 
-### The C++ backend is gone
+### The C++ backend is disabled
 
 `samos/lib/mdutils_cpp_omp.cpp` re-implemented 4 of the 6 Fortran
 routines with OpenMP, but never `get_com_velocities` or
@@ -598,7 +600,8 @@ averaging method that, on inspection, the Fortran used too.
 `get_msd`'s `backend` and `num_threads` keywords are gone, along with
 `samos-msd`'s `--backend` and `-j/--num-threads` flags -- the Fortran
 kernel is the only one now, so there is nothing left to pick between.
-`setup.py` no longer builds a C++ extension, so `pybind11` is no
-longer a build dependency and the `-fopenmp` compiler flag (the one
-that broke the macOS build, see "Removed: unreachable Fortran..."
-above) is gone from the project entirely.
+`setup.py` no longer builds this file, so `pybind11` is no longer a
+build dependency and the `-fopenmp` compiler flag (the one that broke
+the macOS build, see "Removed: unreachable Fortran..." above) is gone
+from the build entirely. The source is kept in the repo for reference
+-- it compiles to nothing and nothing imports it.
