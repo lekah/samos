@@ -195,6 +195,33 @@ def _com_array(trajectory, atomic_species, array, kernel):
     return kernel(array, masses, factors), [1], prefactor
 
 
+def _fit_block(block, fit, t_list_fit_fs, decomposed):
+    """
+    Least-squares fit of one MSD block over one fit window.
+
+    Four copies of this used to sit inline, nested eight levels deep
+    inside :meth:`DynamicsAnalyzer.get_msd`, where there was no room
+    left on the line to write them legibly.
+
+    :param block: One block of the MSD, indexed by lag time; shape
+        ``(nr_of_t,)``, or ``(nr_of_t, 3, 3)`` when *decomposed*.
+    :param slice fit: Lag-time range to fit over.
+    :param t_list_fit_fs: Times in fs, one per entry that *fit* selects.
+    :param bool decomposed: Whether *block* holds the (3, 3) tensor.
+    :returns: Slope and intercept: shape ``(2,)``, or ``(3, 3, 2)``.
+    """
+    if not decomposed:
+        slope, intercept, _, _, _ = linregress(t_list_fit_fs, block[fit])
+        return np.array([slope, intercept])
+    out = np.empty((3, 3, 2))
+    for ipol in range(3):
+        for jpol in range(3):
+            slope, intercept, _, _, _ = linregress(
+                t_list_fit_fs, block[fit, ipol, jpol])
+            out[ipol, jpol] = (slope, intercept)
+    return out
+
+
 class DynamicsAnalyzer:
     """
     This class serves as the main analyzer
@@ -636,8 +663,7 @@ class DynamicsAnalyzer:
                         '      Outer stepsize is {}, inner is {}\n'
                         ''.format(
                             atomic_species, itraj, nat_of_interest,
-                            atomic_species,
-                            nr_of_blocks_this_traj,
+                            atomic_species, nr_of_blocks_this_traj,
                             block_length_dt_this_traj,
                             block_length_dt_this_traj * timestep_fs / 1e3,
                             p.t_start_fit_dt,
@@ -684,45 +710,21 @@ class DynamicsAnalyzer:
                         slopes_intercepts = np.empty(
                             (len(p.t_start_fit_dt),
                              nr_of_blocks_this_traj, 2))
-                    for istart, (current_t_start_fit_dt,
-                                 current_t_end_fit_dt) in enumerate(
+                    for istart, (start_dt, end_dt) in enumerate(
                             zip(p.t_start_fit_dt, p.t_end_fit_dt)):
-                        current_t_list_fit_fs = (
-                            timestep_fs * p.stepsize_t *
-                            np.arange(
-                                current_t_start_fit_dt // p.stepsize_t,
-                                current_t_end_fit_dt // p.stepsize_t))
+                        # Does not vary per block, so hoisted out of
+                        # the loop below.
+                        fit = slice(
+                            (start_dt - p.t_start_dt) // p.stepsize_t,
+                            end_dt // p.stepsize_t)
+                        t_list_fit_fs = (
+                            timestep_fs * p.stepsize_t
+                            * np.arange(start_dt // p.stepsize_t,
+                                        end_dt // p.stepsize_t))
                         for iblock, block in enumerate(
                                 msd_this_species_this_traj):
-                            if decomposed:
-                                for ipol in range(3):
-                                    for jpol in range(3):
-                                        data = block[
-                                            current_t_start_fit_dt
-                                            // p.stepsize_t:
-                                            current_t_end_fit_dt
-                                            // p.stepsize_t,
-                                            ipol, jpol]
-                                        slope, intercept, _, _, _ = (
-                                            linregress(
-                                                current_t_list_fit_fs,
-                                                data))
-                                        slopes_intercepts[
-                                            istart, iblock,
-                                            ipol, jpol, 0] = slope
-                                        slopes_intercepts[
-                                            istart, iblock,
-                                            ipol, jpol, 1] = intercept
-                            else:
-                                data = block[
-                                    (current_t_start_fit_dt
-                                     - p.t_start_dt) // p.stepsize_t:
-                                    current_t_end_fit_dt // p.stepsize_t]
-                                slope, intercept, _, _, _ = linregress(
-                                    current_t_list_fit_fs, data)
-                                slopes_intercepts[istart, iblock, 0] = slope
-                                slopes_intercepts[
-                                    istart, iblock, 1] = intercept
+                            slopes_intercepts[istart, iblock] = _fit_block(
+                                block, fit, t_list_fit_fs, decomposed)
                     for iblock, block in enumerate(msd_this_species_this_traj):
                         if decomposed:
                             slopes.append(
@@ -739,35 +741,20 @@ class DynamicsAnalyzer:
                     else:
                         slopes_intercepts = np.empty(
                             (nr_of_blocks_this_traj, 2))
+                    fit = slice(
+                        (p.t_start_fit_dt - p.t_start_dt) // p.stepsize_t,
+                        p.t_end_fit_dt // p.stepsize_t)
                     t_list_fit_fs = (
                         timestep_fs * p.stepsize_t
                         * np.arange(
                             p.t_start_fit_dt // p.stepsize_t,
                             p.t_end_fit_dt // p.stepsize_t))
                     for iblock, block in enumerate(msd_this_species_this_traj):
+                        slopes_intercepts[iblock] = _fit_block(
+                            block, fit, t_list_fit_fs, decomposed)
                         if decomposed:
-                            for ipol in range(3):
-                                for jpol in range(3):
-                                    slope, intercept, _, _, _ = linregress(
-                                        t_list_fit_fs,
-                                        block[
-                                            p.t_start_fit_dt // p.stepsize_t:
-                                            p.t_end_fit_dt // p.stepsize_t,
-                                            ipol, jpol])
-                                    slopes_intercepts[
-                                        iblock, ipol, jpol, 0] = slope
-                                    slopes_intercepts[
-                                        iblock, ipol, jpol, 1] = intercept
                             slopes.append(slopes_intercepts[iblock, :, :, 0])
                         else:
-                            slope, intercept, _, _, _ = linregress(
-                                t_list_fit_fs,
-                                block[
-                                    (p.t_start_fit_dt - p.t_start_dt)
-                                    // p.stepsize_t:
-                                    p.t_end_fit_dt // p.stepsize_t])
-                            slopes_intercepts[iblock, 0] = slope
-                            slopes_intercepts[iblock, 1] = intercept
                             slopes.append(slopes_intercepts[iblock, 0])
 
                 msd.set_array('slopes_intercepts_{}_{}_{}'.format(
