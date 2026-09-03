@@ -144,7 +144,7 @@ def _wrap_into_box(positions, edges):
 
 
 def pairs_within(positions_1, positions_2, radius, algorithm,
-                 cell=None, mic=None):
+                 cell=None, mic=None, wrapped=False):
     """
     Every periodic pair closer than *radius*, and how far apart it is.
 
@@ -162,6 +162,16 @@ def pairs_within(positions_1, positions_2, radius, algorithm,
     both are biased low beyond ``MinimumImage.max_radius`` and in the
     same way -- see :meth:`BaseAnalyzer._check_radius`.
 
+    :param bool wrapped:
+        For ``'ortho'`` only: skip folding *positions_1* and
+        *positions_2* into the box, because the caller already did so.
+        A caller that queries the same frame for several species pairs
+        can fold every atom once and pass the same wrapped array in
+        for each pair, rather than this function folding the same
+        atoms again for every pair that touches them.  Ignored for
+        ``'skew'``, which never wraps -- :class:`MinimumImage` finds
+        the nearest periodic image directly from unwrapped positions.
+
     :returns:
         ``(i, j, d)``.  *i* indexes *positions_1* and *j* indexes
         *positions_2*, both locally; *d* holds the distances.  Pairs of
@@ -170,8 +180,10 @@ def pairs_within(positions_1, positions_2, radius, algorithm,
     """
     if algorithm == 'ortho':
         edges = np.diag(np.asarray(cell, dtype=float))
-        tree_1 = cKDTree(_wrap_into_box(positions_1, edges), boxsize=edges)
-        tree_2 = cKDTree(_wrap_into_box(positions_2, edges), boxsize=edges)
+        p1 = positions_1 if wrapped else _wrap_into_box(positions_1, edges)
+        p2 = positions_2 if wrapped else _wrap_into_box(positions_2, edges)
+        tree_1 = cKDTree(p1, boxsize=edges)
+        tree_2 = cKDTree(p2, boxsize=edges)
         found = tree_1.sparse_distance_matrix(
             tree_2, radius, output_type='ndarray')
         return found['i'], found['j'], found['v']
@@ -521,11 +533,26 @@ class RDF(BaseAnalyzer):
                 volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
                 mic = prepare_cell(cell, algorithm)
 
+            # Every species pair that shares a species would otherwise
+            # fold that species' atoms into the box again for each
+            # pair it appears in.  Folding the whole frame once here
+            # instead means every atom is wrapped exactly once per
+            # frame, however many pairs it takes part in.
+            if algorithm == 'ortho':
+                wrapped_positions = _wrap_into_box(
+                    positions[index], np.diag(cell))
+
             for entry in plan:
                 ind1, ind2 = entry['ind1'], entry['ind2']
+                if algorithm == 'ortho':
+                    pos1 = wrapped_positions[ind1]
+                    pos2 = wrapped_positions[ind2]
+                else:
+                    pos1 = positions[index, ind1, :]
+                    pos2 = positions[index, ind2, :]
                 i, j, distances = pairs_within(
-                    positions[index, ind1, :], positions[index, ind2, :],
-                    radius, algorithm, cell=cell, mic=mic)
+                    pos1, pos2, radius, algorithm, cell=cell, mic=mic,
+                    wrapped=(algorithm == 'ortho'))
                 # An atom is not its own neighbour.  For a species
                 # against itself, i < j additionally keeps each
                 # unordered pair once, which pair_factor doubles back.
