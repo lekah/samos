@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import sys
 
 import re
 from ase import Atoms
 from ase.data import atomic_masses, chemical_symbols
 from samos.trajectory import Trajectory
+from samos.utils.units import UNIT_SYSTEMS as _LAMMPS_UNITS
 
 #  only matches positive integers
 integer_regex = re.compile(r'(?P<int>\d+)')  # noqa: W605
-float_regex = re.compile(r'(?P<float>[\-]?\d+\.\d+(e[+\-]\d+)?)')  # noqa: W605
-
-from samos.utils.units import UNIT_SYSTEMS as _LAMMPS_UNITS
+# Accepts 0, 0.0, .5, 1e3, -1.0E+01, 2.5d0 -- LAMMPS writes box
+# bounds in several of these forms depending on how it was built.
+float_regex = re.compile(
+    r'(?P<float>[+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)')
 
 
 def get_indices(header_list, prefix='', postfix=''):
@@ -38,7 +39,10 @@ def get_position_indices(header_list):
         raise NotImplementedError('Do not support scaled'
                                   ' unwrapped coordinates')
 
-    raise TypeError('No position indices found')
+    raise TypeError(
+        'No position columns found in the dump header ({}). Expected '
+        'x/y/z (wrapped), xs/ys/zs (scaled) or xu/yu/zu '
+        '(unwrapped).'.format(header_list))
 
 
 def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
@@ -60,6 +64,10 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     except Exception as e:
         print('Could not read number of atoms')
         raise e
+    # Only the box lengths are kept, the origin (xlo/ylo/zlo) is
+    # dropped. Everything downstream works on displacements, where the
+    # origin cancels; scaled coordinates are converted with pos.dot(cell)
+    # and so end up relative to the origin as well.
     cell = np.zeros((3, 3))
     if lines[4].startswith('ITEM: BOX BOUNDS pp pp pp'):
         try:
@@ -87,7 +95,8 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             cell[2, 0] = xz
             cell[2, 1] = yz
         except Exception as e:
-            print(f'Could not read cell dimension {idim}')
+            print('Could not read triclinic cell bounds from:\n{}'.format(
+                ''.join(lines[5:8])))
             raise e
     else:
         raise ValueError('unsupported lammps dump file, '
@@ -98,7 +107,7 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             print(f'Read starting cell as:\n{cell}')
         if not lines[8].startswith('ITEM: ATOMS'):
             raise Exception('Not a supported format, expected ITEM: ATOMS')
-        header_list = lines[8].lstrip('ITEM: ATOMS').split()
+        header_list = lines[8].removeprefix('ITEM: ATOMS').split()
 
         atomid_idx = header_list.index('id')
         if not quiet:
@@ -106,20 +115,18 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
         try:
             element_idx = header_list.index('element')
             if not quiet:
-                print('Element found at index {element_idx}')
+                print(f'Element found at index {element_idx}')
         except ValueError:
             element_idx = None
         try:
             type_idx = header_list.index('type')
             if not quiet:
-                print('type found at index {type_idx}')
+                print(f'type found at index {type_idx}')
         except ValueError:
             type_idx = None
-        try:
-            postype, posids = get_position_indices(header_list)
-        except Exception:
-            print('Abandoning because positions are not given')
-            sys.exit(1)
+        # Let the error propagate: this used to call sys.exit(1), which
+        # kills the interpreter of any program importing this module.
+        postype, posids = get_position_indices(header_list)
         if not quiet:
             print('Positions are given as: {}'.format(
                 {'u': 'unwrapped', 's': 'Scaled (wrapped)',
@@ -152,6 +159,38 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
                 posids, has_vel, velids, has_frc, frcids, additional_ids)
     else:
         return nat, timestep, cell
+
+
+def read_body(f, nat, lidx=0):
+    """
+    Read *nat* atom lines from *f* and return them as a string array.
+
+    :param f: The open dump file, positioned at the first atom line
+    :param int nat: The number of atom lines to read
+    :param int lidx: Lines consumed so far, used for the error message
+    :returns: A (nat, ncolumns) array of strings
+    :raises ValueError:
+        If the file ends early or a line has a different number of
+        columns than the first. numpy would otherwise report this as an
+        inhomogeneous-shape error naming neither the frame nor the line.
+    """
+    rows = []
+    ncol = None
+    for iat in range(nat):
+        line = f.readline()
+        if not line:
+            raise ValueError(
+                'File ended after {} of {} atom lines (line {})'.format(
+                    iat, nat, lidx + iat + 1))
+        row = line.split()
+        if ncol is None:
+            ncol = len(row)
+        elif len(row) != ncol:
+            raise ValueError(
+                'Line {} has {} columns, the frame started with {}'.format(
+                    lidx + iat + 1, len(row), ncol))
+        rows.append(row)
+    return np.array(rows)
 
 
 def pos_2_absolute(cell, pos, postype):
@@ -220,7 +259,7 @@ def read_lammps_dump(filename, elements=None,
     :param l_conv: length conversion factor to Angstrom (positions, cells)
     :param f_conv: force conversion factor to eV/Angstrom
     :param e_conv: energy conversion factor to eV
-    :param s_conv: stress conversion factor
+    :param s_conv: stress conversion factor to eV/Angstrom^3
     :param v_conv:
         Velocity conversion factor to Angstrom/femtosecond.
         Ignored when *units* is set.
@@ -270,7 +309,7 @@ def read_lammps_dump(filename, elements=None,
         if ignore_velocities:
             has_vel = False
         # these are read as strings
-        body = np.array([f.readline().split() for _ in range(nat_must)])
+        body = read_body(f, nat_must, lidx=9)
         atomids = np.array(body[:, atomid_idx], dtype=int)
         sorting_key = atomids.argsort()
         # figuring out elements of structure
@@ -284,7 +323,7 @@ def read_lammps_dump(filename, elements=None,
             types_in_body -= 1  # 1-based to 0-based indexing
             symbols = np.array(types, dtype=str)[types_in_body]
         elif element_idx is not None:
-            # readingin elements frmo body
+            # reading in elements from body
             symbols = np.array(body[:, element_idx])[sorting_key]
             # print(elements)
             # print(len(elements))
@@ -358,7 +397,7 @@ def read_lammps_dump(filename, elements=None,
 
     lidx = 0
     iframe = 0
-    # dealing with additional kwywods
+    # dealing with additional keywords
     additional_arrays = {kw: [] for kw in additional_keywords_dump}
 
     with open(filename) as f:
@@ -376,7 +415,7 @@ def read_lammps_dump(filename, elements=None,
                 break
 
             # these are read as strings
-            body = np.array([f.readline().split() for _ in range(nat_must)])
+            body = read_body(f, nat_must, lidx=lidx)
             lidx += nat_must
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()
@@ -508,7 +547,7 @@ if __name__ == '__main__':
                         help='Conversion factor for energies to eV.',
                         default=1.0)
     parser.add_argument('--s-conv', type=float,
-                        help='Conversion factor for stresses.',
+                        help='Conversion factor for stresses to eV/A^3.',
                         default=1.0)
     parser.add_argument('--v-conv', type=float, default=1.0,
                         help='Conversion factor for velocities to A/fs.')
@@ -528,7 +567,7 @@ if __name__ == '__main__':
                               'without the xx/yy/xz..'))
     parser.add_argument('-tk', '--thermo-keywords',
                         nargs='*', default=[],
-                        help='The keywrods to read from the thermo file')
+                        help='The keywords to read from the thermo file')
     parser.add_argument('--save-extxyz',
                         action='store_true',
                         help='save extxyz instead of traj')

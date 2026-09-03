@@ -1,21 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-samosdyn.py - command-line interface for samos dynamics analysis.
+Command-line interface for samos.
 
-Usage
------
-  samosdyn.py TRAJECTORY [--timestep FS] COMMAND [options]
+Every analysis is a command of its own, installed both as a standalone
+executable and as a sub-command of the ``samos`` dispatcher::
 
-Currently supported sub-commands
----------------------------------
-msd    Calculate the mean-square displacement (MSD) and optionally plot it.
-vaf    Calculate the velocity autocorrelation function and optionally plot it.
-vdos   Calculate the vibrational density of states (power spectrum) and
-       optionally plot it.
+    samos-msd TRAJECTORY [options]
+    samos msd TRAJECTORY [options]
+
+Each command builds a single parser from the shared parent parsers in
+this module, so its options may be given in any order.  The dispatcher
+takes the command name as its first argument and passes the rest
+through unchanged.
+
+Commands: msd, vaf, vdos, rdf, adf.
 """
 
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
+import sys
+from argparse import ArgumentParser, ArgumentTypeError
 
 import numpy as np
 from ase.io import read
@@ -23,14 +26,14 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 from samos.trajectory import Trajectory
 from samos.analysis.dynamics import DynamicsAnalyzer
-from samos.analysis.rdf import RDF, ADF
+from samos.analysis.rdf import RDF, ADF, pairs_with_other_species
 from samos.utils.units import UNIT_SYSTEMS
 from samos.plotting.plot_dynamics import (
     plot_msd_isotropic,
     plot_power_spectrum,
     plot_vaf_isotropic,
 )
-from samos.plotting.plot_rdf import plot_rdf
+from samos.plotting.plot_rdf import plot_adf, plot_rdf
 
 
 def _expand_elements(values):
@@ -57,6 +60,40 @@ def _expand_elements(values):
     return values
 
 
+def _parse_index(text):
+    """
+    Parse the ``--index`` slice expression into a :class:`slice`.
+
+    Accepts the Python slice forms without the brackets, e.g. ``:1000``,
+    ``::10``, ``500:1500:2`` or ``-1000:``.  A bare frame number is
+    rejected: every analysis here needs a range, and silently reducing
+    the trajectory to one frame would be worse than an error.
+
+    :param str text: The raw argument value.
+    :returns: :class:`slice`
+    :raises argparse.ArgumentTypeError: If *text* is not a slice.
+    """
+    if ':' not in text:
+        raise ArgumentTypeError(
+            "--index takes a slice such as ':1000', '::10' or "
+            "'500:1500:2', got '{}'.".format(text))
+    parts = text.split(':')
+    if len(parts) > 3:
+        raise ArgumentTypeError(
+            "--index takes at most start:stop:step, got '{}'.".format(text))
+    try:
+        bounds = [int(part) if part.strip() else None for part in parts]
+    except ValueError:
+        raise ArgumentTypeError(
+            "--index bounds have to be integers, got '{}'.".format(text))
+    if len(bounds) == 2:
+        bounds.append(None)
+    start, stop, step = bounds
+    if step == 0:
+        raise ArgumentTypeError('--index step cannot be zero.')
+    return slice(start, stop, step)
+
+
 def _write_csv(filename, x_col, x_label, y_cols, y_labels):
     """
     Write a two-dimensional dataset to a CSV file.
@@ -74,6 +111,33 @@ def _write_csv(filename, x_col, x_label, y_cols, y_labels):
     header = ','.join([x_label] + y_labels)
     data = np.column_stack([x_col] + y_cols)
     np.savetxt(filename, data, delimiter=',', header=header, comments='')
+
+
+def _make_axes(margins=None):
+    """
+    Create the single-axes figure every sub-command plots into.
+
+    :param dict margins:
+        GridSpec margins, defaults to the layout used by the time-series
+        plots. The RDF passes its own, since its twin axis needs room on
+        the right.
+    :returns: the matplotlib Axes
+    """
+    if margins is None:
+        margins = dict(left=0.18, right=0.95, bottom=0.18, top=0.95)
+    gs = GridSpec(1, 1, **margins)
+    fig = plt.figure(figsize=(4, 3))
+    return fig.add_subplot(gs[0])
+
+
+def _finish_plot(savefig):
+    """
+    Save the current figure to *savefig*, or show it when that is None.
+    """
+    if savefig:
+        plt.savefig(savefig, dpi=240)
+    else:
+        plt.show()
 
 
 def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
@@ -195,16 +259,10 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         )
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         plot_msd_isotropic(msd, ax=ax)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return msd
 
@@ -284,16 +342,10 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
         )
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         plot_vaf_isotropic(vaf, ax=ax)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return vaf
 
@@ -318,9 +370,7 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         Number of blocks to split the trajectory into (default 1).
     :param int smoothing:
         Smoothing kernel width in frequency bins (default 1, no
-        smoothing). Passed as ``smothening`` to
-        :meth:`DynamicsAnalyzer.get_power_spectrum` to work around the
-        typo in the underlying API.
+        smoothing).
     :param str write:
         If given, write the mean power spectrum for each species to this
         CSV file.  Columns: ``frequency_THz``, then one column per
@@ -330,12 +380,10 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         species = sorted(set(traj.atoms.get_chemical_symbols()))
 
     dyn = DynamicsAnalyzer(trajectories=[traj])
-    # 'smothening' is the misspelled kwarg in get_power_spectrum;
-    # we expose a correctly-spelled parameter and translate it here.
     vdos = dyn.get_power_spectrum(
         species_of_interest=species,
         nr_of_blocks=nblocks,
-        smothening=smoothing,
+        smoothing=smoothing,
         remove_angular_momentum=remove_angular_momentum,
     )
 
@@ -356,16 +404,10 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         )
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes()
         plot_power_spectrum(vdos, ax=ax)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return vdos
 
@@ -410,11 +452,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
     if species_pairs is not None:
         pairs = [sp.split('-') for sp in species_pairs]
     elif species is not None:
-        # Build pairs between the requested species and all others,
-        # matching the behaviour of the original util_rdf_and_plot.
-        all_sym = traj.get_atoms().get_chemical_symbols()
-        other = [s for s in all_sym if s not in species]
-        pairs = [(s, o) for s in species for o in other]
+        pairs = pairs_with_other_species(traj, species)
     else:
         pairs = None
 
@@ -440,17 +478,12 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
                    y_cols=y_cols, y_labels=y_labels)
 
     if plot or savefig:
-        gs = GridSpec(1, 1, top=0.99, right=0.83,
-                      left=0.14, bottom=0.16)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
+        ax = _make_axes(dict(top=0.99, right=0.83,
+                             left=0.14, bottom=0.16))
         plot_rdf(res, ax=ax, no_int=no_int)
         ax.set_xlim(-0.2, radius)
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return res
 
@@ -572,51 +605,51 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
                            y_cols=y_cols, y_labels=y_labels)
 
     if plot or savefig:
-        gs = GridSpec(1, 1, left=0.18, right=0.95,
-                      bottom=0.18, top=0.95)
-        fig = plt.figure(figsize=(4, 3))
-        ax = fig.add_subplot(gs[0])
-        for sl, sc, sr in computed_triplets:
-            key = '{}_{}_{}'.format(sl, sc, sr)
-            if 'adf_{}'.format(key) not in res:
-                continue
-            angles = res.get_array('angles_{}'.format(key))
-            adf = res.get_array('adf_{}'.format(key))
-            ax.plot(angles, adf, label='{}-{}-{}'.format(sl, sc, sr))
-        ax.set_xlabel('angle (deg)')
-        ax.set_ylabel('ADF (per center atom per frame per deg)')
-        ax.legend()
+        plot_adf(res, ax=_make_axes())
 
-        if savefig:
-            plt.savefig(savefig, dpi=240)
-        else:
-            plt.show()
+        _finish_plot(savefig)
 
     return res
 
 
-def _build_parser():
-    parser = ArgumentParser(
-        prog='samos', description=__doc__,
-        formatter_class=RawDescriptionHelpFormatter)
+# Sub-command name -> one-line summary, used by the samos dispatcher.
+COMMAND_SUMMARIES = (
+    ('msd', 'Mean-square displacement and the diffusion coefficient.'),
+    ('vaf', 'Velocity autocorrelation function and its integral.'),
+    ('vdos', 'Vibrational density of states (Welch periodogram).'),
+    ('rdf', 'Radial distribution function and its running integral.'),
+    ('adf', 'Angular distribution function over bond triplets.'),
+)
 
-    # Trajectory arguments are shared by all sub-commands and are
-    # placed before the sub-command name so they appear in the top-level
-    # help and do not need to be repeated in every sub-parser.
-    parser.add_argument(
+
+def _traj_parser():
+    """
+    Build the parser holding the options every command accepts: which
+    file to read, how to interpret it, what to do to it before the
+    analysis, and where the output goes.
+
+    Returned as a parent parser (``add_help=False``) so that every
+    command parser gets one flat namespace from a single
+    ``parse_args`` call.  There is therefore no ordering rule between
+    these options and the command-specific ones.
+
+    :returns: :class:`argparse.ArgumentParser` to be used as a parent.
+    """
+    p = ArgumentParser(add_help=False)
+    p.add_argument(
         'trajectory_path',
         help='Path to the trajectory file (.extxyz or native samos format).')
-    parser.add_argument(
+    p.add_argument(
         '--timestep', type=float, default=None, metavar='FS',
         help='Override the trajectory timestep in femtoseconds.')
-    parser.add_argument(
+    p.add_argument(
         '--lammps-types', nargs='+', metavar='SYMBOL',
         dest='lammps_types',
         help='Read the trajectory as a LAMMPS dump file and map LAMMPS '
              'integer types to these chemical symbols in type order '
              '(e.g. Li P S for types 1 2 3). Use when the dump stores '
              'a "type" column but no "element" column.')
-    parser.add_argument(
+    p.add_argument(
         '--lammps-elements', nargs='+', metavar='SYMBOL',
         dest='lammps_elements',
         help='Read the trajectory as a LAMMPS dump file and assign '
@@ -625,34 +658,31 @@ def _build_parser():
              'or a space-separated list (e.g. Al Al Al). Use when '
              'neither a "type" column with a type map nor an "element" '
              'column is available.')
-    parser.add_argument(
+    p.add_argument(
         '--lammps', action='store_true', default=False,
         help='Read the trajectory as a LAMMPS dump file. Use this when '
              'the dump already contains an "element" column so no element '
              'list needs to be supplied.')
-    parser.add_argument(
+    p.add_argument(
         '--species', nargs='+', metavar='SYMBOL',
         help='Chemical symbols to analyse (default: all species).')
-    parser.add_argument(
-        '-n', '--nblocks', type=int, default=1, metavar='N',
-        help='Number of blocks to split the trajectory into (default: 1).')
-    parser.add_argument(
+    p.add_argument(
         '--write', metavar='FILE',
         help='Write results to FILE as CSV (one column per species).')
-    parser.add_argument(
+    p.add_argument(
         '--recenter', action='store_true',
         help='Recenter positions and velocities before analysis.')
-    parser.add_argument(
+    p.add_argument(
         '--compute-velocities', action='store_true',
         dest='compute_velocities',
         help='Compute velocities from positions using the Verlet finite-'
              'difference formula before analysis. Required for VAF and '
              'VDOS when the trajectory does not store velocities.')
-    parser.add_argument(
+    p.add_argument(
         '--transform-species', metavar='SYMBOL', default=None,
         dest='transform_species',
         help='Relabel all atoms as SYMBOL before analysis.')
-    parser.add_argument(
+    p.add_argument(
         '--units', default=None, metavar='SYSTEM',
         choices=sorted(UNIT_SYSTEMS),
         help='Convert trajectory arrays to samos internal units '
@@ -660,149 +690,174 @@ def _build_parser():
              'For LAMMPS dumps conversion is applied during reading; '
              'for all other formats it is applied after loading. '
              'Choices: ' + ', '.join(sorted(UNIT_SYSTEMS)) + '.')
+    p.add_argument(
+        '-i', '--index', type=_parse_index, default=None, metavar='SLICE',
+        help='Analyse only these frames, given as a Python slice: '
+             "':1000' for the first 1000, '::10' for every 10th, "
+             "'500:1500:2' for every 2nd between 500 and 1500. A stride "
+             'multiplies the timestep by the same factor, so time axes '
+             'stay correct.')
 
-    plot_group = parser.add_mutually_exclusive_group()
+    plot_group = p.add_mutually_exclusive_group()
     plot_group.add_argument(
         '--plot', action='store_true', help='Show the plot interactively.')
     plot_group.add_argument(
         '--savefig', metavar='FILE',
         help='Save the plot to FILE instead of showing it.')
+    return p
 
-    sub = parser.add_subparsers(dest='command', metavar='COMMAND')
-    sub.required = True
 
-    # ------------------------------------------------------------------
-    # msd sub-command
-    # ------------------------------------------------------------------
-    p_msd = sub.add_parser(
-        'msd',
-        help='Calculate and optionally plot the mean-square displacement.',
-        description='Calculate and optionally plot the MSD.')
-    p_msd.add_argument(
-        '-s', '--stepsize', type=int, default=1, metavar='N',
-        help='Step size over trajectory frames (default: 1).')
-    p_msd.add_argument(
+def _block_parser():
+    """
+    Build the parent parser for block averaging, which only the
+    time-correlation commands (msd, vaf, vdos) support.  It used to be
+    a global option that rdf and adf accepted and silently ignored.
+
+    :returns: :class:`argparse.ArgumentParser` to be used as a parent.
+    """
+    p = ArgumentParser(add_help=False)
+    p.add_argument(
+        '-n', '--nblocks', type=int, default=1, metavar='N',
+        help='Number of blocks to split the trajectory into (default: 1).')
+    return p
+
+
+def _make_parser(command, description, blocks=True):
+    """
+    Build the parser for one command, with the shared parents attached.
+
+    :param str command: The command name, e.g. ``'msd'``.
+    :param str description: Shown at the top of ``--help``.
+    :param bool blocks: Whether the command supports ``-n/--nblocks``.
+    :returns: :class:`argparse.ArgumentParser`
+    """
+    parents = [_traj_parser()]
+    if blocks:
+        parents.append(_block_parser())
+    return ArgumentParser(prog='samos-{}'.format(command),
+                          description=description, parents=parents)
+
+
+def _add_fit_window(p, what):
+    """
+    Add the ``-ts``/``-te``/``--t-unit`` trio shared by msd and vaf.
+
+    :param p: The parser to add to.
+    :param str what: What the window is used for, spliced into the help.
+    """
+    p.add_argument(
         '-ts', '--t-start-fit', type=float, default=5., metavar='T',
         dest='t_start_fit',
-        help='Start of the linear-fit window (default: 5, unit: --t-unit).')
-    p_msd.add_argument(
+        help='Start of the {} (default: 5, unit: --t-unit).'.format(what))
+    p.add_argument(
         '-te', '--t-end-fit', type=float, default=10., metavar='T',
         dest='t_end_fit',
-        help='End of the linear-fit window (default: 10, unit: --t-unit).')
-    p_msd.add_argument(
+        help='End of the {} (default: 10, unit: --t-unit).'.format(what))
+    p.add_argument(
         '--t-unit', default='ps', choices=['fs', 'ps', 'dt'],
         dest='t_unit', metavar='UNIT',
-        help='Time unit for -ts and -te: fs, ps, or dt (default: ps).')
-    p_msd.add_argument(
-        '-b', '--backend', default='fortran', choices=['fortran', 'cpp'],
+        help='Time unit for the time arguments: fs, ps, or dt '
+             '(default: ps).')
+
+
+def _add_stepsize(p):
+    """Add the frame stride shared by every command except vdos."""
+    p.add_argument(
+        '-s', '--stepsize', type=int, default=1, metavar='N',
+        help='Step size over trajectory frames (default: 1).')
+
+
+def _add_angular_momentum(p):
+    """Add the angular-momentum removal flag shared by vaf and vdos."""
+    p.add_argument(
+        '-a', '--remove-angular-momentum', action='store_true',
+        dest='remove_angular_momentum',
+        help='Remove rigid-body rotational contribution from velocities.')
+
+
+def _parser_msd():
+    p = _make_parser('msd', 'Calculate and optionally plot the MSD.')
+    _add_stepsize(p)
+    _add_fit_window(p, 'linear-fit window')
+    p.add_argument(
+        '--backend', default='fortran', choices=['fortran', 'cpp'],
         help='Compute kernel: fortran (default) or cpp (OpenMP).')
-    p_msd.add_argument(
-        '-n', '--num-threads', type=int, default=None, metavar='N',
+    p.add_argument(
+        '-j', '--num-threads', type=int, default=None, metavar='N',
         dest='num_threads',
         help='OpenMP thread count for the cpp backend '
              '(default: OMP_NUM_THREADS).')
+    return p
 
-    # ------------------------------------------------------------------
-    # vaf sub-command
-    # ------------------------------------------------------------------
-    p_vaf = sub.add_parser(
-        'vaf',
-        help='Calculate and plot the velocity autocorrelation function.',
-        description='Calculate the VAF and its integral (diff. coefficient).')
-    p_vaf.add_argument(
-        '-s', '--stepsize', type=int, default=1, metavar='N',
-        help='Step size over trajectory frames (default: 1).')
-    p_vaf.add_argument(
-        '-ts', '--t-start-fit', type=float, default=5., metavar='T',
-        dest='t_start_fit',
-        help='Start of the integral-averaging window '
-             '(default: 5, unit: --t-unit).')
-    p_vaf.add_argument(
-        '-te', '--t-end-fit', type=float, default=10., metavar='T',
-        dest='t_end_fit',
-        help='End of the integral-averaging window '
-             '(default: 10, unit: --t-unit).')
-    p_vaf.add_argument(
+
+def _parser_vaf():
+    p = _make_parser(
+        'vaf', 'Calculate the VAF and its integral (diff. coefficient).')
+    _add_stepsize(p)
+    _add_fit_window(p, 'integral-averaging window')
+    p.add_argument(
         '--t-end', type=float, default=None, metavar='T',
         dest='t_end',
         help='Maximum lag time of the VAF (unit: --t-unit; '
              'default: t-end-fit).')
-    p_vaf.add_argument(
-        '--t-unit', default='ps', choices=['fs', 'ps', 'dt'],
-        dest='t_unit', metavar='UNIT',
-        help='Time unit for -ts, -te, and --t-end: fs, ps, or dt '
-             '(default: ps).')
-    p_vaf.add_argument(
-        '-i', '--integration', default='trapezoid', metavar='METHOD',
+    p.add_argument(
+        '--integration', default='trapezoid', metavar='METHOD',
         choices=['trapezoid', 'simpson'],
         help='Integration method: trapezoid (default) or simpson.')
-    p_vaf.add_argument(
-        '-a', '--remove-angular-momentum', action='store_true',
-        dest='remove_angular_momentum',
-        help='Remove rigid-body rotational contribution from velocities.')
+    _add_angular_momentum(p)
+    return p
 
-    # ------------------------------------------------------------------
-    # vdos sub-command
-    # ------------------------------------------------------------------
-    p_vdos = sub.add_parser(
+
+def _parser_vdos():
+    p = _make_parser(
         'vdos',
-        help='Calculate and optionally plot the vibrational density of states.',
-        description='Calculate the VDOS via a Welch periodogram of atomic velocities.')
-    p_vdos.add_argument(
+        'Calculate the VDOS via a Welch periodogram of atomic velocities.')
+    p.add_argument(
         '-sm', '--smoothing', type=int, default=1, metavar='N',
-        help='Smoothing kernel width in frequency bins (default: 1, no smoothing).')
-    p_vdos.add_argument(
-        '-a', '--remove-angular-momentum', action='store_true',
-        dest='remove_angular_momentum',
-        help='Remove rigid-body rotational contribution from velocities.')
+        help='Smoothing kernel width in frequency bins '
+             '(default: 1, no smoothing).')
+    _add_angular_momentum(p)
+    return p
 
-    # ------------------------------------------------------------------
-    # rdf sub-command
-    # ------------------------------------------------------------------
-    p_rdf = sub.add_parser(
-        'rdf', help='Calculate and optionally plot the radial distribution function.',
-        description='Calculate the RDF and its running integral.')
-    p_rdf.add_argument(
-        '-s', '--stepsize', type=int, default=1, metavar='N',
-        help='Step size over trajectory frames (default: 1).')
-    p_rdf.add_argument(
+
+def _parser_rdf():
+    p = _make_parser('rdf', 'Calculate the RDF and its running integral.',
+                     blocks=False)
+    _add_stepsize(p)
+    p.add_argument(
         '-r', '--radius', type=float, default=5.0, metavar='A',
         help='Maximum radius of the RDF in Angstrom (default: 5.0).')
-    p_rdf.add_argument(
+    p.add_argument(
         '-b', '--bins', type=int, default=100, metavar='N',
         help='Number of histogram bins (default: 100).')
-    # --species (top-level) and --species-pairs are mutually exclusive;
-    # enforced in run_rdf since they cannot share an argparse group.
-    p_rdf.add_argument(
+    # --species and --species-pairs are mutually exclusive; the check is
+    # in run_rdf because --species comes from the shared parent parser.
+    p.add_argument(
         '--species-pairs', nargs='+', metavar='A-B', dest='species_pairs',
         help='Species pairs to compute, e.g. Li-O O-O. '
-             'Mutually exclusive with top-level --species.')
-    p_rdf.add_argument(
+             'Mutually exclusive with --species.')
+    p.add_argument(
         '--no-int', action='store_true', dest='no_int',
         help='Suppress the running integral from the plot.')
+    return p
 
-    # ------------------------------------------------------------------
-    # adf sub-command
-    # ------------------------------------------------------------------
-    p_adf = sub.add_parser(
+
+def _parser_adf():
+    p = _make_parser(
         'adf',
-        help='Calculate and optionally plot the angular distribution '
-             'function.',
-        description='Calculate the ADF for bond triplets A-B-C '
-                    '(B is the center atom).')
-    p_adf.add_argument(
-        '-s', '--stepsize', type=int, default=1, metavar='N',
-        help='Step size over trajectory frames (default: 1).')
-    p_adf.add_argument(
+        'Calculate the ADF for bond triplets A-B-C (B is the center atom).',
+        blocks=False)
+    _add_stepsize(p)
+    p.add_argument(
         '-b', '--bins', type=int, default=180, metavar='N',
         help='Number of angle bins over [0, 180] degrees (default: 180).')
-    p_adf.add_argument(
+    p.add_argument(
         '--static-bonds', action='store_true', dest='static_bonds',
         help='When using --bonds cutoffs, detect topology once from the '
              'first frame and reuse it for all frames (default: detect '
              'per frame).')
 
-    bond_src = p_adf.add_mutually_exclusive_group(required=True)
+    bond_src = p.add_mutually_exclusive_group(required=True)
     bond_src.add_argument(
         '-r', '--radius', type=float, metavar='A',
         help='Global neighbor cutoff in Angstrom: all pairs within this '
@@ -818,7 +873,7 @@ def _build_parser():
         help='LAMMPS data file containing a Bonds section with explicit '
              'bond topology.')
 
-    triplet_sel = p_adf.add_mutually_exclusive_group()
+    triplet_sel = p.add_mutually_exclusive_group()
     triplet_sel.add_argument(
         '--centers', nargs='+', metavar='SYMBOL',
         help='Center species for the ADF.  Computes all (*,center,*) '
@@ -829,14 +884,17 @@ def _build_parser():
         help='Explicit triplets to compute, center in the middle, '
              'separated by dashes (e.g. O-Si-O O-Al-O).  '
              'Mutually exclusive with --centers.')
+    return p
 
-    return parser
 
+def _prepare(args):
+    """
+    Load the trajectory named on the command line and apply the
+    preprocessing requested by the shared options.
 
-if __name__ == '__main__':
-    parser = _build_parser()
-    args = parser.parse_args()
-
+    :param args: The parsed :class:`argparse.Namespace`.
+    :returns: :class:`~samos.trajectory.Trajectory`
+    """
     lammps_elements = (
         _expand_elements(args.lammps_elements)
         if args.lammps_elements is not None else None
@@ -847,6 +905,17 @@ if __name__ == '__main__':
                            lammps=args.lammps,
                            units=args.units)
 
+    if args.index is not None:
+        stride = abs(args.index.step or 1)
+        if stride > 1 and args.compute_velocities:
+            print(
+                'Warning: --index keeps every {}th frame, so '
+                '--compute-velocities differences positions across that '
+                'wider spacing. The velocities are correct for the '
+                'sliced trajectory but a coarser estimate than those '
+                'from every frame.'.format(stride))
+        traj = traj.slice_steps(args.index)
+
     if args.transform_species:
         traj.transform_species(args.transform_species)
 
@@ -856,42 +925,109 @@ if __name__ == '__main__':
     if args.compute_velocities:
         traj.calculate_velocities_from_positions()
 
-    # Arguments shared by every sub-command.
-    common = dict(species=args.species, plot=args.plot,
-                  savefig=args.savefig, write=args.write)
+    return traj
 
-    if args.command == 'msd':
-        run_msd(traj, stepsize=args.stepsize, nblocks=args.nblocks,
-                t_start_fit=args.t_start_fit,
-                t_end_fit=args.t_end_fit,
-                t_unit=args.t_unit,
-                backend=args.backend, num_threads=args.num_threads,
-                **common)
-    elif args.command == 'vaf':
-        run_vaf(traj, stepsize=args.stepsize, nblocks=args.nblocks,
-                t_start_fit=args.t_start_fit,
-                t_end_fit=args.t_end_fit,
-                t_end=args.t_end,
-                t_unit=args.t_unit,
-                integration=args.integration,
-                remove_angular_momentum=args.remove_angular_momentum,
-                **common)
-    elif args.command == 'vdos':
-        run_vdos(traj, nblocks=args.nblocks, smoothing=args.smoothing,
-                 remove_angular_momentum=args.remove_angular_momentum,
-                 **common)
-    elif args.command == 'rdf':
-        run_rdf(traj, stepsize=args.stepsize,
-                species_pairs=args.species_pairs,
-                radius=args.radius, bins=args.bins,
-                no_int=args.no_int, **common)
-    elif args.command == 'adf':
-        run_adf(traj, stepsize=args.stepsize,
-                centers=args.centers,
-                species_triplets=args.species_triplets,
-                bonds=args.bonds,
-                bonds_file=args.bonds_file,
-                radius=args.radius,
-                static_bonds=args.static_bonds,
-                bins=args.bins,
-                **common)
+
+def _output_kwargs(args):
+    """The species/output options every run_* function takes."""
+    return dict(species=args.species, plot=args.plot,
+                savefig=args.savefig, write=args.write)
+
+
+def main_msd(argv=None):
+    """Entry point of the ``samos-msd`` command."""
+    args = _parser_msd().parse_args(argv)
+    run_msd(_prepare(args), stepsize=args.stepsize, nblocks=args.nblocks,
+            t_start_fit=args.t_start_fit, t_end_fit=args.t_end_fit,
+            t_unit=args.t_unit, backend=args.backend,
+            num_threads=args.num_threads, **_output_kwargs(args))
+
+
+def main_vaf(argv=None):
+    """Entry point of the ``samos-vaf`` command."""
+    args = _parser_vaf().parse_args(argv)
+    run_vaf(_prepare(args), stepsize=args.stepsize, nblocks=args.nblocks,
+            t_start_fit=args.t_start_fit, t_end_fit=args.t_end_fit,
+            t_end=args.t_end, t_unit=args.t_unit,
+            integration=args.integration,
+            remove_angular_momentum=args.remove_angular_momentum,
+            **_output_kwargs(args))
+
+
+def main_vdos(argv=None):
+    """Entry point of the ``samos-vdos`` command."""
+    args = _parser_vdos().parse_args(argv)
+    run_vdos(_prepare(args), nblocks=args.nblocks, smoothing=args.smoothing,
+             remove_angular_momentum=args.remove_angular_momentum,
+             **_output_kwargs(args))
+
+
+def main_rdf(argv=None):
+    """Entry point of the ``samos-rdf`` command."""
+    args = _parser_rdf().parse_args(argv)
+    run_rdf(_prepare(args), stepsize=args.stepsize,
+            species_pairs=args.species_pairs, radius=args.radius,
+            bins=args.bins, no_int=args.no_int, **_output_kwargs(args))
+
+
+def main_adf(argv=None):
+    """Entry point of the ``samos-adf`` command."""
+    args = _parser_adf().parse_args(argv)
+    run_adf(_prepare(args), stepsize=args.stepsize, centers=args.centers,
+            species_triplets=args.species_triplets, bonds=args.bonds,
+            bonds_file=args.bonds_file, radius=args.radius,
+            static_bonds=args.static_bonds, bins=args.bins,
+            **_output_kwargs(args))
+
+
+MAINS = {
+    'msd': main_msd,
+    'vaf': main_vaf,
+    'vdos': main_vdos,
+    'rdf': main_rdf,
+    'adf': main_adf,
+}
+
+
+def _usage(stream):
+    """Write the dispatcher's command listing to *stream*."""
+    stream.write(
+        'usage: samos COMMAND [options]\n\n'
+        'Every command is also installed as a standalone executable, so\n'
+        '"samos msd ..." and "samos-msd ..." are the same thing.\n\n'
+        'Commands:\n')
+    for name, summary in COMMAND_SUMMARIES:
+        stream.write('  {:<6}{}\n'.format(name, summary))
+    stream.write(
+        "\nRun 'samos COMMAND --help' for the options of one command.\n")
+
+
+def main(argv=None):
+    """
+    Entry point of the ``samos`` command, which dispatches on its first
+    argument and passes everything after it through unchanged.  The
+    command name is always ``argv[0]``, so no option can be mistaken
+    for it and no option needs to precede it.
+
+    :param list argv: Argument list, defaults to ``sys.argv[1:]``.
+    :returns: The process exit status.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        _usage(sys.stderr)
+        return 2
+    command = argv[0]
+    if command in ('-h', '--help'):
+        _usage(sys.stdout)
+        return 0
+    if command not in MAINS:
+        sys.stderr.write(
+            "samos: error: unknown command '{}' (choose from {})\n".format(
+                command, ', '.join(name for name, _ in COMMAND_SUMMARIES)))
+        return 2
+    return MAINS[command](argv[1:])
+
+
+if __name__ == '__main__':
+    sys.exit(main())

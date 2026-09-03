@@ -82,130 +82,47 @@ Working examples are in the `examples/` directory:
 | `ex2-compute-VAF-from-extxyz/` | VAF and VDOS from an extxyz file |
 | `ex3-compute-RDF/` | Radial distribution function |
 | `ex4-compute-ionic-density/` | Ionic probability densities |
-| `ex5-using-the-script/` | All of the above reproduced with the `samos` CLI |
+| `ex5-using-the-script/` | All of the above reproduced with the command-line tools |
 
 Run `bash examples/ex5-using-the-script/run.sh` from the repository root
-to see every sub-command in action.
+to see every command in action.
 
 ---
 
 ## Command-line usage
 
-The `samos` script accepts a trajectory path followed by a sub-command.
-Global options (trajectory format, preprocessing, output) come before the
-sub-command; sub-command-specific options come after it.
+Every analysis is its own command, taking a trajectory path followed by
+its options:
 
 ```
-samos TRAJECTORY [global options] COMMAND [command options]
+samos-msd TRAJECTORY [options]
 ```
 
-Time values are plain floats; the unit is set once per sub-command with
-`--t-unit` (choices: `fs`, `ps`, `dt`; default: `ps`).
+| Command | What it computes |
+|---------|------------------|
+| `samos-msd` | Mean-square displacement and the diffusion coefficient |
+| `samos-vaf` | Velocity autocorrelation function and its integral |
+| `samos-vdos` | Vibrational density of states (Welch periodogram) |
+| `samos-rdf` | Radial distribution function and its running integral |
+| `samos-adf` | Angular distribution function over bond triplets |
 
-### Reading LAMMPS dump files
-
-LAMMPS dump files are not auto-detected.  Use one of these flags to
-tell `samos` how to resolve element names:
+`samos` is a dispatcher for the same commands, so that `samos` on its
+own lists what is available:
 
 ```bash
-# Dump has an 'element' column -- no element list needed
-samos traj.lammpstrj --lammps --timestep 2 msd ...
-
-# Dump has a 'type' column -- supply symbols in LAMMPS type order
-samos traj.lammpstrj --lammps-types Li Ge P S --timestep 2 msd ...
-
-# No type or element column -- supply one symbol per atom
-# Accepts a formula string or a space-separated list
-samos traj.lammpstrj --lammps-elements Li10GeP2S12 --timestep 2 msd ...
-samos traj.lammpstrj --lammps-elements Al Al Al --timestep 2 msd ...
+samos            # list the commands
+samos msd ...    # identical to samos-msd ...
 ```
 
-### Preprocessing
+Options may be given in any order, with one exception: **put the
+trajectory path first**.  A list-valued option such as `--species Li O`
+placed immediately before the path swallows it, because argparse cannot
+tell where the list ends and the path begins.
 
-```bash
-# Subtract centre-of-mass motion before analysis
-samos traj.extxyz --recenter msd ...
+Time values are plain floats; the unit is set with `--t-unit`
+(choices: `fs`, `ps`, `dt`; default: `ps`).
 
-# Derive velocities from positions (required for VAF/VDOS when the
-# trajectory file does not store velocities)
-samos traj.extxyz --compute-velocities vaf ...
-
-# Relabel all atoms as a single species before analysis
-samos traj.lammpstrj --lammps-types Li Ge P S \
-    --transform-species Li msd ...
-```
-
-### MSD
-
-```bash
-# Fit window 2-4 ps, 6 blocks, Li and O species
-samos traj.extxyz --species Li O -n 6 msd --t-start-fit 2 --t-end-fit 4
-
-# Specify fit window in femtoseconds
-samos traj.extxyz msd --t-start-fit 2000 --t-end-fit 4000 --t-unit fs
-
-# Fit window in timesteps
-samos traj.extxyz msd --t-start-fit 160 --t-end-fit 320 --t-unit dt
-
-# C++ backend with 4 OpenMP threads; write results to CSV
-samos traj.extxyz msd -b cpp -n 4 --write msd.csv --savefig msd.png
-
-# LAMMPS dump, Li species, 3 blocks
-samos traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
-    --species Li -n 3 \
-    msd --t-start-fit 50 --t-end-fit 100
-```
-
-### VAF
-
-VAF and VDOS require velocities.  If the trajectory file does not store
-them, add `--compute-velocities` to derive them from positions, if every timestep was stored (otherwise velocities cannot be re-computed)
-
-```bash
-# 12 blocks, integral-averaging window 2-4 ps, max lag time 5 ps
-samos traj.extxyz -n 12 vaf --t-start-fit 2 --t-end-fit 4 --t-end 5
-
-# extxyz without velocities: derive from positions first
-samos traj.extxyz --compute-velocities --timestep 2 \
-    -n 4 vaf --t-start-fit 1 --t-end-fit 5
-
-# Remove rigid-body angular momentum
-samos traj.extxyz --compute-velocities \
-    vaf --remove-angular-momentum --t-start-fit 1 --t-end-fit 5
-
-# Write VAF to CSV and save plot
-samos traj.extxyz --compute-velocities \
-    vaf --write vaf.csv --savefig vaf.png
-```
-
-### VDOS (vibrational density of states)
-
-```bash
-# 4 blocks, smoothing kernel width of 3 bins
-samos traj.extxyz --compute-velocities -n 4 vdos --smoothing 3
-
-# Plot interactively
-samos traj.extxyz --compute-velocities vdos --plot
-
-# Save to file
-samos traj.extxyz --compute-velocities vdos --savefig vdos.png
-```
-
-### RDF
-
-```bash
-# All pairs involving Li, radius 6 A
-samos traj.extxyz --species Li rdf --radius 6
-
-# Explicit pairs, custom bin count
-samos traj.extxyz rdf --species-pairs Li-O O-O --bins 200
-
-# LAMMPS dump
-samos traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
-    rdf --radius 6 --savefig rdf.png
-```
-
-### Global options
+### Options accepted by every command
 
 | Flag | Description |
 |------|-------------|
@@ -213,14 +130,179 @@ samos traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
 | `--lammps` | Read as LAMMPS dump (file must have an `element` column) |
 | `--lammps-types SYM ...` | Read as LAMMPS dump; map integer types to symbols in order |
 | `--lammps-elements SYM...\|FORMULA` | Read as LAMMPS dump; assign symbols per atom or via formula |
+| `--units SYSTEM` | Convert arrays from a named unit system to samos internal units |
+| `-i/--index SLICE` | Analyse only these frames, e.g. `::10` or `500:1500:2` |
 | `--species SYM ...` | Restrict analysis to these chemical symbols |
-| `-n N` / `--nblocks N` | Split trajectory into N blocks |
 | `--recenter` | Subtract centre-of-mass motion before analysis |
 | `--compute-velocities` | Derive velocities from positions (Verlet formula) |
 | `--transform-species SYM` | Relabel all atoms as SYM |
 | `--write FILE` | Write results to a CSV file |
 | `--plot` | Show the plot interactively |
 | `--savefig FILE` | Save the plot to FILE |
+
+`-n/--nblocks N` splits the trajectory into N blocks and is accepted by
+`samos-msd`, `samos-vaf` and `samos-vdos`.  It is not accepted by
+`samos-rdf` and `samos-adf`, which do not block-average.
+
+### Reading LAMMPS dump files
+
+LAMMPS dump files are not auto-detected.  Use one of these flags to
+tell samos how to resolve element names:
+
+```bash
+# Dump has an 'element' column -- no element list needed
+samos-msd traj.lammpstrj --lammps --timestep 2
+
+# Dump has a 'type' column -- supply symbols in LAMMPS type order
+samos-msd traj.lammpstrj --lammps-types Li Ge P S --timestep 2
+
+# No type or element column -- supply one symbol per atom
+# Accepts a formula string or a space-separated list
+samos-msd traj.lammpstrj --lammps-elements Li10GeP2S12 --timestep 2
+samos-msd traj.lammpstrj --lammps-elements Al Al Al --timestep 2
+```
+
+Preprocessing applies to every command:
+
+```bash
+# Remove centre-of-mass drift
+samos-msd traj.extxyz --recenter
+
+# Derive velocities from positions (needed for VAF and VDOS when the
+# trajectory does not store them)
+samos-vaf traj.extxyz --compute-velocities
+```
+
+### Selecting frames
+
+`-i/--index` takes a Python slice and restricts the analysis to those
+frames:
+
+```bash
+# First 1000 frames
+samos-msd traj.extxyz --index :1000
+
+# Every 10th frame
+samos-rdf traj.extxyz --index ::10 --radius 6
+
+# Every 2nd frame between 500 and 1500
+samos-msd traj.extxyz --index 500:1500:2
+```
+
+A stride multiplies the timestep by the same factor, so time axes stay
+in real femtoseconds: `--index ::10` on a 2 fs trajectory yields lags
+spaced 20 fs apart, not 2 fs.
+
+Combining a stride with `--compute-velocities` derives velocities from
+the retained frames only, across the wider spacing.  That is consistent
+but coarser than differencing every frame, and the commands warn when
+you do it.
+
+### MSD
+
+```bash
+# Fit window 2-4 ps, 6 blocks, Li and O species
+samos-msd traj.extxyz --species Li O -n 6 --t-start-fit 2 --t-end-fit 4
+
+# Specify fit window in femtoseconds
+samos-msd traj.extxyz --t-start-fit 2000 --t-end-fit 4000 --t-unit fs
+
+# Fit window in timesteps
+samos-msd traj.extxyz --t-start-fit 160 --t-end-fit 320 --t-unit dt
+
+# C++ backend with 4 OpenMP threads; write results to CSV
+samos-msd traj.extxyz --backend cpp -j 4 --write msd.csv --savefig msd.png
+
+# LAMMPS dump, Li species, 3 blocks
+samos-msd traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
+    --species Li -n 3 --t-start-fit 50 --t-end-fit 100
+```
+
+Command options: `-s/--stepsize N`, `-ts/--t-start-fit T`,
+`-te/--t-end-fit T`, `--t-unit UNIT`, `--backend {fortran,cpp}`,
+`-j/--num-threads N`.
+
+### VAF
+
+VAF and VDOS require velocities.  If the trajectory file does not store
+them, add `--compute-velocities` to derive them from positions -- which
+is only possible if every timestep was written.
+
+```bash
+# 12 blocks, integral-averaging window 2-4 ps, max lag time 5 ps
+samos-vaf traj.extxyz -n 12 --t-start-fit 2 --t-end-fit 4 --t-end 5
+
+# extxyz without velocities: derive from positions first
+samos-vaf traj.extxyz --compute-velocities --timestep 2 \
+    -n 4 --t-start-fit 1 --t-end-fit 5
+
+# Remove rigid-body angular momentum
+samos-vaf traj.extxyz --compute-velocities \
+    --remove-angular-momentum --t-start-fit 1 --t-end-fit 5
+
+# Write VAF to CSV and save plot
+samos-vaf traj.extxyz --compute-velocities --write vaf.csv --savefig vaf.png
+```
+
+Command options: `-s/--stepsize N`, `-ts/--t-start-fit T`,
+`-te/--t-end-fit T`, `--t-end T`, `--t-unit UNIT`,
+`--integration {trapezoid,simpson}`, `-a/--remove-angular-momentum`.
+
+### VDOS (vibrational density of states)
+
+```bash
+# 4 blocks, smoothing kernel width of 3 bins
+samos-vdos traj.extxyz --compute-velocities -n 4 --smoothing 3
+
+# Plot interactively
+samos-vdos traj.extxyz --compute-velocities --plot
+
+# Save to file
+samos-vdos traj.extxyz --compute-velocities --savefig vdos.png
+```
+
+Command options: `-sm/--smoothing N`, `-a/--remove-angular-momentum`.
+
+### RDF
+
+```bash
+# All pairs involving Li, radius 6 A
+samos-rdf traj.extxyz --species Li --radius 6
+
+# Explicit pairs, custom bin count
+samos-rdf traj.extxyz --species-pairs Li-O O-O --bins 200
+
+# LAMMPS dump
+samos-rdf traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
+    --radius 6 --savefig rdf.png
+```
+
+Command options: `-s/--stepsize N`, `-r/--radius A`, `-b/--bins N`,
+`--species-pairs A-B ...`, `--no-int`.  `--species` and
+`--species-pairs` are mutually exclusive.
+
+### ADF
+
+The ADF needs a bond definition: a global cutoff, per-pair cutoffs, or
+an explicit topology from a LAMMPS data file.
+
+```bash
+# Every pair within 3.2 A counts as a bond
+samos-adf traj.extxyz --radius 3.2 --centers Si
+
+# Per-bond cutoffs, explicit triplets (centre species in the middle)
+samos-adf traj.extxyz --bonds Si-O:1.4:2.0 Al-O:1.6:2.2 \
+    --species-triplets O-Si-O O-Al-O --write adf.csv
+
+# Topology from a LAMMPS data file, detected once from the first frame
+samos-adf traj.lammpstrj --lammps --bonds-file system.data --static-bonds
+```
+
+Command options: `-s/--stepsize N`, `-b/--bins N`, `-r/--radius A`,
+`--bonds SPEC:RMIN:RMAX ...`, `--bonds-file FILE`, `--static-bonds`,
+`--centers SYM ...`, `--species-triplets A-B-C ...`.  The three bond
+sources are mutually exclusive and one is required; `--centers` and
+`--species-triplets` are mutually exclusive.
 
 ---
 
@@ -295,6 +377,159 @@ d.get_vaf(t_end=5., t_unit='ps', nr_of_blocks=12)
 Passing an old-style suffix kwarg (e.g. `t_end_fit_ps`) now raises an
 `InputError` with an explicit migration message.
 
+### RDF normalisation
+
+`RDF.run` now normalises each sampled frame by its own number density
+and averages the result, so `g(r)` is the mean of the per-frame `g(r)`.
+It previously divided the summed histogram by whichever frame happened
+to be sampled last, which left the RDF of a variable-cell (NPT)
+trajectory dependent on the frame order.  Fixed-cell results are
+unchanged by this.
+
+The ideal-gas reference now excludes the centre atom, so a species
+paired with itself is normalised by `N-1` instead of `N`.  Like-pair
+RDFs therefore rise by a factor `N/(N-1)` -- 1 % for 100 atoms of a
+species, 11 % for 10 -- and now tend to 1 at large `r` rather than to
+`(N-1)/N`.  Unlike-pair RDFs and all `int_*` running integrals are
+unaffected.
+
+### Removed: unreachable Fortran and the code that reached it
+
+`samos/lib/rdf.f90` held two Fortran routines and neither was reachable
+from working code.  `calculate_rdf` was called only by `RDF.run_fort`,
+which raised `NotImplementedError` on its first line.
+`calculate_angular_spec` was called only by `AngularSpectrum`, which
+`ADF` supersedes; it also wrapped a fractional coordinate as `1 - f`
+instead of `f - 1`, mirroring the displacement instead of translating
+it, so an angle whose bond crossed the cell boundary came out wrong
+even in a cubic cell (180 degrees reported as 45).
+
+Removed with them: `samos.lib.rdf` as an importable module, and
+`samos.plotting.plot_rdf.plot_angular_spec`, whose only producer was
+`AngularSpectrum`.  Use `ADF` and `plot_adf` instead.
+
+`mdutils.f90` also lost `recenter_positions` and
+`recenter_velocities`.  `Trajectory.recenter()` replaced them some time
+ago and nothing but a cross-check test still called them; that test
+went too.  The remaining `recenter` tests assert the property directly
+-- the centre of mass ends up at zero -- rather than agreeing with
+another implementation.
+
+`samos/lib/rdf.f90` is gone entirely, so the Fortran extension now
+builds from `gaussian_density.f90` and `mdutils.f90` only.  **Rerun
+`pip install -e .`** after pulling this.
+
+### Minimum-image convention
+
+`RDF`, bond detection and `ADF` now share one `MinimumImage` helper,
+which Minkowski-reduces the cell once and then tests the 27 neighbour
+images.  It is exact for any cell shape.
+
+Two schemes were replaced.  `RDF.run` tested the eight corners of the
+cell, which is exact for a reduced basis but not otherwise; describing
+the same lattice with a sheared basis used to change the answer.  Bond
+detection and `ADF` wrapped each fractional coordinate to (-0.5, 0.5]
+independently, which picks one periodic image without comparing it to
+the others and is exact only for a rectangular cell -- in an fcc
+primitive cell it got roughly one pair in seven wrong.
+
+RDF and ADF results are unchanged for rectangular cells.  ADF angles
+and bond counts change for non-orthogonal cells, and RDF results change
+for a non-reduced basis; in both cases the new numbers are the correct
+ones.  Cost is 1.1-1.2x the previous runtime.
+
+`BondAnalyzer._pbc_wrap` is gone; use `MinimumImage(cell).vectors(diff)`
+or `.distances(diff)`.
+
+### Radius guard
+
+`RDF.run` and bond detection now warn once per run when the radius or
+the largest bond cutoff exceeds `MinimumImage.max_radius`, half the
+shortest lattice vector.  Past that an atom has more than one periodic
+image in range while minimum-image counting keeps only the nearest, so
+the histogram is biased low.  It is a warning, not an error: the
+results are biased rather than meaningless.
+
+### Constructor keywords are explicit and order-independent
+
+`Trajectory`, `DynamicsAnalyzer`, `RDF`, `ADF` and the other analyzers
+took `**kwargs` and called `set_<keyword>` for each entry in the order
+the keywords were typed.  That made correctness depend on argument
+order, because two of the setters depend on earlier ones:
+
+    Trajectory(atoms=a, positions=p)      # worked
+    Trajectory(positions=p, atoms=a)      # ValueError: Types have
+                                          # not been set
+    Trajectory(atoms=a, cells=c, positions=p)   # TypeError from
+                                                # inside np.tile
+
+Each constructor now names its keywords explicitly, so they are
+tab-completable and appear in the API documentation, and applies them
+in dependency order regardless of how they were passed.  All three
+lines above now work.
+
+Two consequences for callers:
+
+* An unrecognised keyword raises `TypeError: Trajectory got unexpected
+  keyword argument(s): postions` instead of `AttributeError:
+  'Trajectory' object has no attribute 'set_postions'`.
+* The keywords are keyword-only.  No call site in samos passed them
+  positionally, since that was never possible.
+
+Two error messages were improved at the same time.  `Trajectory.nat`
+now says which methods supply the atom count rather than `Types have
+not been set`, and `set_cells` explains that a bare 3x3 cell needs a
+step count to be broadcast over, instead of failing inside `np.tile`.
+
+### `atom_indices` is ignored when `do_com` is set
+
+`get_msd(do_com=True, atom_indices=[...])` used to intersect
+*atom_indices* with the single pseudo-atom that `do_com` produces.
+That silently emptied the selection whenever *atom_indices* did not
+contain index 1, and the Fortran kernel was then handed zero atoms and
+returned uninitialised memory.  *atom_indices* selects individual
+atoms, and `do_com` leaves none, so it is now skipped in that case.
+
+### Stress units
+
+The internal stress unit is now `eV/A^3` (1 eV/A^3 = 160.2177 GPa), and
+`UNIT_SYSTEMS` carries a real `s_conv` for every unit system.  It was
+1.0 everywhere before, so stress read with `read_lammps_dump(...,
+units=...)` came through in the file's own unit (bar for `metal`, atm
+for `real`, Pa for `si` and `electron`) despite the documentation
+saying otherwise.  Stress values now change by the corresponding
+factor; nothing else does.
+
+### CLI structure
+
+The single `samos TRAJECTORY [global options] COMMAND [command options]`
+script has been replaced by one command per analysis.  Options no longer
+have to be split across the command name:
+
+```bash
+# OLD
+samos traj.extxyz --species Li -n 6 msd --t-start-fit 2 --t-end-fit 4
+
+# NEW (samos msd ... is equivalent)
+samos-msd traj.extxyz --species Li -n 6 --t-start-fit 2 --t-end-fit 4
+```
+
+Two short flags changed meaning, because they used to denote different
+things on either side of the command name:
+
+| Old | New |
+|---|---|
+| `msd -n N` (OpenMP threads) | `-j/--num-threads N`; `-n` is always `--nblocks` |
+| `msd -b BACKEND` | `--backend BACKEND`; `-b` is always `--bins` |
+| `vaf -i METHOD` | `--integration METHOD` |
+
+`-n/--nblocks` is no longer accepted by `samos-rdf` and `samos-adf`,
+which never used it.
+
+The `run_msd`, `run_vaf`, `run_vdos`, `run_rdf` and `run_adf` functions
+that back these commands now live in the importable `samos.cli` module,
+together with `load_trajectory`.
+
 ### CLI time flags
 
 Old per-parameter flags have been replaced:
@@ -305,7 +540,7 @@ Old per-parameter flags have been replaced:
 | `--t-end-fit-ps` | `--t-end-fit` (with `--t-unit ps`) |
 | `--t-end-ps` (VAF) | `--t-end` (with `--t-unit ps`) |
 
-The `--t-unit` flag is per sub-command and defaults to `ps`.
+The `--t-unit` flag is per command and defaults to `ps`.
 
 ### `_get_running_params` return value
 

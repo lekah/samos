@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+from ase.geometry import minkowski_reduce
 from scipy.spatial.distance import cdist
 
 from samos.trajectory import Trajectory
@@ -9,68 +10,195 @@ from samos.utils.attributed_array import AttributedArray
 import itertools
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
+from warnings import warn
 
 
-class BaseAnalyzer(object, metaclass=ABCMeta):
-    def __init__(self, **kwargs):
-        for key, val in list(kwargs.items()):
-            getattr(self, 'set_{}'.format(key))(val)
+def get_cell(trajectory, frame=None):
+    """
+    Cell of *frame*, or the trajectory's fixed cell if it stores none
+    per frame.
+
+    ``ase.cell.Cell`` only grew its ``.array`` attribute in ase 3.18;
+    ``.copy()`` is the fallback for anything older.
+    """
+    cells = trajectory.get_cells()
+    if cells is not None and frame is not None:
+        return cells[frame]
+    atoms = trajectory.get_atoms()
+    try:
+        return atoms.cell.array
+    except AttributeError:
+        return atoms.cell.copy()
+
+
+class MinimumImage:
+    """
+    Shortest periodic distances and displacement vectors for one cell.
+
+    Two wrong-but-tempting schemes preceded this one, and both used to
+    live in this module:
+
+    * Wrapping each fractional component to (-0.5, 0.5] picks one
+      periodic image without ever comparing it to the others.  It is
+      exact only for a rectangular cell; for an fcc primitive cell it
+      gets a quarter of all pairs wrong, by up to 1.8 A.
+    * Testing the eight corners of the cell does compare, and is exact
+      for a reduced cell, but a strongly skewed cell puts the nearest
+      image further than one cell vector away, out of reach of those
+      eight.
+
+    Minkowski-reducing the cell first makes the nearest image one of
+    the 27 immediate neighbours, so testing those is exact for any
+    cell.  The reduction is the expensive part, which is why it happens
+    once here rather than once per call.  See ase.geometry.find_mic,
+    which is correct in the same way but redoes the reduction on every
+    call and so runs several times slower in a loop.
+
+    Like any minimum-image scheme, this is only meaningful for
+    distances below half the cell's narrowest width.
+    """
+
+    # Offsets of the 27 immediate neighbour cells, origin included.
+    _OFFSETS = np.array(list(itertools.product((-1, 0, 1), repeat=3)))
+
+    def __init__(self, cell):
+        cell = np.asarray(cell, dtype=float)
+        reduced, _ = minkowski_reduce(cell)
+        self._cell = reduced
+        self._cellI = np.linalg.inv(reduced)
+        self._images = self._OFFSETS @ reduced
+        lengths = np.linalg.norm(self._images, axis=1)
+        self._shortest_lattice_vector = lengths[lengths > 0.0].min()
+
+    @property
+    def max_radius(self):
+        """
+        Largest distance at which a minimum-image analysis is unbiased.
+
+        Two periodic copies of the same atom are separated by a lattice
+        vector t, so both can sit within r of another atom as soon as
+        |t| <= 2r.  Beyond half the shortest lattice vector, a pair
+        therefore has more than one image in range while minimum-image
+        counting keeps only the nearest, and histograms come out low.
+
+        The shortest lattice vector is read off the Minkowski-reduced
+        basis, so this is a property of the lattice and not of the cell
+        the caller happened to supply.  It is a weaker limit than the
+        familiar half-narrowest-width rule, which exists to keep naive
+        wrapping honest rather than to keep counting honest.
+        """
+        return 0.5 * self._shortest_lattice_vector
+
+    def _wrapped(self, diff):
+        return ((np.asarray(diff) @ self._cellI) % 1.0) @ self._cell
+
+    def distances(self, diff):
+        """Shortest periodic distance for each row of *diff*."""
+        return cdist(self._wrapped(diff), self._images).min(axis=1)
+
+    def vectors(self, diff):
+        """
+        Shortest periodic displacement vector for each row of *diff*.
+
+        Ties -- a displacement of exactly half a cell vector -- resolve
+        to the first of the equidistant images, which is the one with
+        the most negative offset.
+        """
+        wrapped = self._wrapped(diff)
+        closest = cdist(wrapped, self._images).argmin(axis=1)
+        return wrapped - self._images[closest]
+
+
+class BaseAnalyzer(metaclass=ABCMeta):
+    def __init__(self, *, trajectory=None, **kwargs):
+        """
+        :param Trajectory trajectory: The trajectory to analyse.
+        :raises TypeError: On an unrecognised keyword argument.
+        """
+        self._trajectory = None
+        if kwargs:
+            raise TypeError(
+                '{} got unexpected keyword argument(s): {}'.format(
+                    type(self).__name__, ', '.join(sorted(kwargs))))
+        if trajectory is not None:
+            self.set_trajectory(trajectory)
 
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
             raise TypeError(
-                'You need ot pass a {} as trajectory'.format(Trajectory))
+                'You need to pass a {} as trajectory'.format(Trajectory))
         self._trajectory = trajectory
 
+    @property
+    def trajectory(self):
+        """
+        The trajectory set with :meth:`set_trajectory`.
+
+        :raises ValueError:
+            If none was set.  Reading ``self._trajectory`` directly used
+            to give an AttributeError from deep inside :meth:`run`.
+        """
+        if self._trajectory is None:
+            raise ValueError(
+                'No trajectory has been set. Use the set_trajectory '
+                'method, or pass trajectory=... to the constructor.')
+        return self._trajectory
+
+    def _check_radius(self, mic, radius, what='radius'):
+        """
+        Warn, at most once per run, if *radius* is too large for the
+        cell to support unbiased minimum-image counting.
+
+        A warning rather than an error: the result is biased low past
+        this point, not meaningless, and callers have been computing
+        RDFs out to it for years.
+        """
+        if radius <= mic.max_radius:
+            return
+        if getattr(self, '_radius_warned', False):
+            return
+        self._radius_warned = True
+        warn('{} of {:.3f} A exceeds half the shortest lattice vector '
+             '({:.3f} A). Beyond that, an atom has more than one '
+             'periodic image in range and only the nearest is counted, '
+             'so the result is biased low. Use a larger cell or a '
+             'smaller radius.'.format(what, radius, mic.max_radius),
+             stacklevel=3)
+
     @abstractmethod
-    def run(*args, **kwargs):
+    def run(self, *args, **kwargs):
         pass
 
 
 class RDF(BaseAnalyzer):
-    def run_fort(self, radius=None, species_pairs=None, istart=0,
-                 istop=None, stepsize=1, nbins=100):
-        """
-        :param float radius:
-            The radius for the calculation of the RDF
-        """
-        if 1:
-            raise NotImplementedError('This is not fully implemented')
-        from samos.lib.rdf import calculate_rdf
-        atoms = self._trajectory.atoms
-        volume = atoms.get_volume()
-        positions = self._trajectory.get_positions()
-        if istop is None:
-            istop = len(positions)
-        if species_pairs is None:
-            species_pairs = list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 2))
-        cell = np.array(atoms.cell.T)
-        cellI = np.linalg.inv(cell)
-        chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
-        rdf_res = AttributedArray()
-        rdf_res.set_attr('species_pairs', species_pairs)
-        for spec1,  spec2 in species_pairs:
-            ind1 = np.where(chem_sym == spec1)[
-                0] + 1  # +1 for fortran indexing
-            ind2 = np.where(chem_sym == spec2)[0] + 1
-            density = float(len(ind2)) / volume
-            rdf, integral, radii = calculate_rdf(
-                positions, istart, istop, stepsize,
-                radius, density, cell,
-                cellI, ind1, ind2, nbins)
-            rdf_res.set_array('rdf_{}_{}'.format(spec1, spec2), rdf)
-            rdf_res.set_array('int_{}_{}'.format(spec1, spec2), integral)
-            rdf_res.set_array('radii_{}_{}'.format(spec1, spec2), radii)
-        return rdf_res
-
-    def run(self, radius=None, species_pairs=None,
+    def run(self, radius, species_pairs=None,
             istart=0, istop=None, stepsize=1, nbins=100):
         """
         Calculate a RDF, also searching periodic images.
-        TODO:
-            Improve algorithm because it can actually fail in
-            very acute cell systems
+
+        Each sampled frame is normalised by its own number density and
+        the results are averaged, so g(r) is the mean of the per-frame
+        g(r).  For a fixed cell this is the same as normalising the
+        summed histogram once; for a variable cell it is not, and the
+        alternatives (normalising by the mean volume, or by the mean
+        density) differ from this one by the covariance between the
+        pair count and the volume.
+
+        The ideal-gas reference an atom is compared against excludes
+        the atom itself, so a species paired with itself is normalised
+        by N-1 rather than N.  Without that, g(r) of a like pair tends
+        to (N-1)/N at large r instead of 1.
+
+        The ``int_*`` arrays are running neighbour counts and carry no
+        volume factor, so they are unaffected by either of the above.
+        Each entry sums whole bins, so it is the count inside the outer
+        edge of that bin, half a binsize beyond the matching entry of
+        ``radii_*``, which holds bin centres.
+
+        Distances use :class:`MinimumImage`, which is exact for any
+        cell shape.  A *radius* beyond ``MinimumImage.max_radius``
+        still biases g(r) low -- see there -- and warns.
+
         TODO: Implement orthorhombic case to gain efficiency
 
         :param float radius:
@@ -103,8 +231,8 @@ class RDF(BaseAnalyzer):
 
         def get_label(spec, ispec):
             """
-            Get a good label for scpecification spec. If none can befound
-            give on based on iteration counter ispec
+            Get a good label for specification spec. If none can be found
+            give one based on iteration counter ispec
             """
             if isinstance(spec, str):
                 return spec
@@ -113,30 +241,23 @@ class RDF(BaseAnalyzer):
             else:
                 print(type(spec))
 
-        positions = self._trajectory.get_positions()
-        types = self._trajectory.get_types()
-        cells = self._trajectory.get_cells()
-        range_ = list(range(0, 2))
+        positions = self.trajectory.get_positions()
+        types = self.trajectory.get_types()
+        cells = self.trajectory.get_cells()
+        self._radius_warned = False
         if cells is None:
             fixed_cell = True
-            atoms = self._trajectory.atoms
-            volume = atoms.get_volume()
-            try:
-                cell = atoms.cell.array
-            except AttributeError:
-                cell = atoms.cell.copy()
-            cellI = np.linalg.inv(cell)
-            a, b, c = cell
-            corners = [i*a+j*b + k *
-                       c for i in range_ for j in range_ for k in range_]
+            volume = self.trajectory.atoms.get_volume()
+            mic = MinimumImage(get_cell(self.trajectory))
+            self._check_radius(mic, radius, 'RDF radius')
         else:
             fixed_cell = False
 
         if istop is None:
             istop = len(positions)
-        elif istop >= len(positions):
-            raise ValueError('Istop ({}) is higher than (or equal to) '
-                             'number of positions ({})'.format(
+        elif istop > len(positions):
+            raise ValueError('Istop ({}) is higher than the number of '
+                             'positions ({})'.format(
                                  istop, len(positions)))
         if species_pairs is None:
             species_pairs = sorted(list(
@@ -165,6 +286,7 @@ class RDF(BaseAnalyzer):
         # wrapping the positions:
         shortest_distance_all = np.inf
         for label, (ind1, ind2) in zip(labels, indices_pairs):
+            shortest_distance_this_pair = np.inf
             if ind1 == ind2:
                 # lists are equal, I will therefore not double calculate
                 pairs_of_atoms = [(i, j) for i in ind1
@@ -174,48 +296,66 @@ class RDF(BaseAnalyzer):
                 pairs_of_atoms = [(i, j) for i in ind1
                                   for j in ind2 if i != j]
                 pair_factor = 1.0
-            # It can happen that pairs_of_atoms
+            if not pairs_of_atoms:
+                # e.g. a species that is absent from the trajectory.
+                # Skipping keeps the remaining pairs computable; the
+                # unpacking below would raise an opaque
+                # 'not enough values to unpack' instead.
+                print('Warning: no atom pairs for {}, skipping'
+                      ''.format(label))
+                continue
             ind_pair1, ind_pair2 = list(zip(*pairs_of_atoms))
 
             # doinng a loop in time to avoid memory explosion
             # this also makes it easier to deal with cell changes
             hist, bin_edges = np.histogram([], bins=nbins, range=(0, radius))
             hist = hist.astype(float)
+            # Second accumulator, weighted by each frame's volume, so
+            # that the g(r) below is the mean of the per-frame g(r)
+            # rather than one histogram divided by a single volume.
+            # hist itself stays a plain neighbour count, which is what
+            # the running integral reports.
+            hist_by_density = np.zeros(nbins, dtype=float)
             # normalize the histogram, by the number of steps taken,
             # and the number of species1
             prefactor = (
                 pair_factor
                 / float(len(np.arange(istart, istop, stepsize)))
                 / float(len(ind1)))
+            # An atom of species 1 that is itself one of the species-2
+            # atoms is not its own neighbour, so the ideal-gas count it
+            # is compared against is len(ind2) minus the chance of that
+            # coincidence.  For a pair of a species with itself this is
+            # the familiar N-1; for disjoint species it is len(ind2).
+            n_neighbours_ideal = (
+                len(ind2)
+                - len(set(ind1) & set(ind2)) / float(len(ind1)))
+            if n_neighbours_ideal <= 0:
+                print('Warning: no ideal-gas reference for {}, skipping'
+                      ''.format(label))
+                continue
             for index in np.arange(istart, istop, stepsize):
                 if not fixed_cell:
                     cell = cells[index]
                     volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
-                    cellI = np.linalg.inv(cell)
-                    a, b, c = cell
-                    corners = np.array([i*a+j*b + k*c
-                                        for i in range_
-                                        for j in range_
-                                        for k in range_])
-                diff_real_unwrapped = (
+                    mic = MinimumImage(cell)
+                    self._check_radius(mic, radius, 'RDF radius')
+                shortest_distances = mic.distances(
                     positions[index, ind_pair2, :]
                     - positions[index, ind_pair1, :])
-                diff_crystal_wrapped = (diff_real_unwrapped@cellI) % 1.0
-                diff_real_wrapped = np.dot(diff_crystal_wrapped, cell)
-                # in diff_real_wrapped I have all positions wrapped
-                #  into periodic cell
-                shortest_distances = cdist(
-                    diff_real_wrapped, corners).min(axis=1)
-                shortest_distance_all = min([shortest_distance_all,
-                                             shortest_distances.min()])
-                hist += prefactor * \
-                    (np.histogram(shortest_distances, bins=nbins,
-                     range=(0, radius))[0]).astype(float)
+                shortest_distance_this_pair = min(
+                    shortest_distance_this_pair, shortest_distances.min())
+                counts = prefactor * (
+                    np.histogram(shortest_distances, bins=nbins,
+                                 range=(0, radius))[0]).astype(float)
+                hist += counts
+                hist_by_density += counts * volume
 
             radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
 
-            rdf = hist / (4.0 * np.pi * radii**2 * binsize) / \
-                (len(ind2)/volume)
+            rdf = (hist_by_density
+                   / (4.0 * np.pi * radii**2 * binsize)
+                   / n_neighbours_ideal)
             integral = np.empty(len(rdf))
             sum_ = 0.0
             for i in range(len(integral)):
@@ -228,42 +368,14 @@ class RDF(BaseAnalyzer):
             rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
             rdf_res.set_attr('n_data_{}'.format(label),
                              len(pairs_of_atoms) * ((istop-istart)//stepsize))
-            rdf_res.set_attr('shortest_distance',
-                             shortest_distance_all)
-        return rdf_res
-
-
-class AngularSpectrum(BaseAnalyzer):
-    def run(self, radius=None, species_pairs=None,
-            istart=1, istop=None, stepsize=1, nbins=100):
-        """
-        :param float radius: The radius for the calculation of the RDF
-        """
-        from samos.lib.rdf import calculate_angular_spec
-        atoms = self._trajectory.atoms
-        positions = self._trajectory.get_positions()
-        if istop is None:
-            istop = len(positions)
-        if species_pairs is None:
-            species_pairs = list(itertools.combinations_with_replacement(
-                set(atoms.get_chemical_symbols()), 3))
-        cell = np.array(atoms.cell)
-        cellI = np.linalg.inv(cell)
-        chem_sym = np.array(atoms.get_chemical_symbols(), dtype=str)
-        rdf_res = AttributedArray()
-        rdf_res.set_attr('species_pairs', species_pairs)
-        for spec1,  spec2, spec3 in species_pairs:
-            ind1 = np.where(chem_sym == spec1)[
-                0] + 1  # +1 for fortran indexing
-            ind2 = np.where(chem_sym == spec2)[0] + 1
-            ind3 = np.where(chem_sym == spec3)[0] + 1
-            angular_spec, angles = calculate_angular_spec(
-                positions, istart, istop, stepsize,
-                radius, cell, cellI, ind1, ind2, ind3, nbins)
-            rdf_res.set_array('aspec_{}_{}_{}'.format(
-                spec1, spec2, spec3), angular_spec)
-            rdf_res.set_array('angles_{}_{}_{}'.format(
-                spec1, spec2, spec3), angles)
+            rdf_res.set_attr('shortest_distance_{}'.format(label),
+                             float(shortest_distance_this_pair))
+            shortest_distance_all = min(shortest_distance_all,
+                                        shortest_distance_this_pair)
+        # One global value, after every pair has contributed.  This used
+        # to be written inside the loop, so it held the running minimum
+        # over the pairs seen so far under a name that reads per-pair.
+        rdf_res.set_attr('shortest_distance', float(shortest_distance_all))
         return rdf_res
 
 
@@ -283,9 +395,15 @@ class BondAnalyzer(BaseAnalyzer):
          set_bonds() before the main loop.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, bonds=None, **kwargs):
+        """
+        :param array-like bonds: Explicit bond topology, shape
+            (N_bonds, 2), 0-based atom indices.  See :meth:`set_bonds`.
+        """
         self._bonds = None
         super().__init__(**kwargs)
+        if bonds is not None:
+            self.set_bonds(bonds)
 
     def set_bonds(self, bonds):
         """
@@ -396,17 +514,6 @@ class BondAnalyzer(BaseAnalyzer):
                 spec1, spec2,
                 ', '.join('-'.join(k) for k in cutoffs_parsed)))
 
-    @staticmethod
-    def _pbc_wrap(diff, cellI, cell):
-        """
-        Wrap displacement vectors diff (shape N x 3) to minimum-image
-        vectors.  Projects to fractional coordinates, wraps each
-        component to (-0.5, 0.5], and projects back to Cartesian.
-        """
-        frac = (diff @ cellI) % 1.0
-        frac[frac > 0.5] -= 1.0
-        return frac @ cell
-
     def _detect_bonds(self, cutoffs, frame):
         """
         Detect bonds in a single frame via distance cutoffs.
@@ -415,26 +522,18 @@ class BondAnalyzer(BaseAnalyzer):
         A set is used internally to deduplicate same-species pairs.
         """
         cutoffs_parsed = self._parse_cutoffs(cutoffs)
-        positions = self._trajectory.get_positions()[frame]
-        cells = self._trajectory.get_cells()
-        if cells is not None:
-            cell = cells[frame]
-        else:
-            try:
-                cell = self._trajectory.get_atoms().cell.array
-            except AttributeError:
-                cell = self._trajectory.get_atoms().cell.copy()
-        cellI = np.linalg.inv(cell)
-        types = self._trajectory.get_types()
+        positions = self.trajectory.get_positions()[frame]
+        mic = MinimumImage(get_cell(self.trajectory, frame))
+        self._check_radius(mic, max(r for _, r in cutoffs_parsed.values()),
+                           'Bond cutoff')
+        types = self.trajectory.get_types()
 
         bond_set = set()
         for (sp1, sp2), (r_min, r_max) in cutoffs_parsed.items():
             ind1 = np.where(types == sp1)[0]
             ind2 = np.where(types == sp2)[0]
             for i in ind1:
-                diffs = self._pbc_wrap(
-                    positions[ind2] - positions[i], cellI, cell)
-                dists = np.linalg.norm(diffs, axis=1)
+                dists = mic.distances(positions[ind2] - positions[i])
                 for j in ind2[(dists >= r_min) & (dists <= r_max)]:
                     ji = int(j)
                     if ji != i:
@@ -503,13 +602,19 @@ class ADF(BondAnalyzer):
             raise ValueError(
                 "Pass species_triplets or centers, not both.")
 
-        positions = self._trajectory.get_positions()
-        types = self._trajectory.get_types()
-        cells = self._trajectory.get_cells()
+        self._radius_warned = False
+        positions = self.trajectory.get_positions()
+        types = self.trajectory.get_types()
+        cells = self.trajectory.get_cells()
 
         if istop is None:
             istop = len(positions)
         frames = np.arange(istart, istop, stepsize)
+        if not len(frames):
+            raise ValueError(
+                'No frames selected: istart={}, istop={}, stepsize={} '
+                'over a trajectory of {} step(s).'.format(
+                    istart, istop, stepsize, len(positions)))
 
         # One-time detection: freeze topology from the first sampled frame.
         if static_bonds and bonds is not None and self._bonds is None:
@@ -554,21 +659,16 @@ class ADF(BondAnalyzer):
         bin_centers = (np.arange(nbins) + 0.5) * binsize
         hists = {t: np.zeros(nbins, dtype=float) for t in species_triplets}
 
-        # Invert cell only once for fixed-cell trajectories.
+        # Reduce the cell only once for fixed-cell trajectories.
         if cells is None:
             fixed_cell = True
-            try:
-                cell = self._trajectory.get_atoms().cell.array
-            except AttributeError:
-                cell = self._trajectory.get_atoms().cell.copy()
-            cellI = np.linalg.inv(cell)
+            mic = MinimumImage(get_cell(self.trajectory))
         else:
             fixed_cell = False
 
         for frame in frames:
             if not fixed_cell:
-                cell = cells[frame]
-                cellI = np.linalg.inv(cell)
+                mic = MinimumImage(cells[frame])
             pos = positions[frame]
 
             # Bond detection is per-frame for dynamic mode; static mode
@@ -595,10 +695,9 @@ class ADF(BondAnalyzer):
                     if not left or not right:
                         continue
 
-                    r_l = self._pbc_wrap(
-                        pos[left] - pos[j], cellI, cell)
-                    r_r = r_l if same else self._pbc_wrap(
-                        pos[right] - pos[j], cellI, cell)
+                    r_l = mic.vectors(pos[left] - pos[j])
+                    r_r = r_l if same else mic.vectors(
+                        pos[right] - pos[j])
 
                     nl = np.linalg.norm(r_l, axis=1)
                     nr = np.linalg.norm(r_r, axis=1)
@@ -647,97 +746,21 @@ class TorsionAnalyzer(BondAnalyzer):
             "TorsionAnalyzer is not yet implemented.")
 
 
-def util_rdf_and_plot(trajectory_path, radius=5.0, stepsize=1, bins=100,
-                      species_pairs=None, species=None, savefig=None,
-                      plot=False, printrdf=False, no_int=False, index=':'):
-    if trajectory_path.endswith('.extxyz'):
-        from ase.io import read
-        aselist = read(trajectory_path, format='extxyz', index=index)
-        traj = Trajectory.from_atoms(aselist)
-    else:
-        traj = Trajectory.load_file(trajectory_path)
-    print('Read trajectory of shape {}'.format(traj.get_positions().shape))
-    if species_pairs:
-        species_pairs_ = []
-        for spec in species_pairs:
-            species_pairs_.append(spec.split('-'))
-    elif species:
-        species_pairs_ = []
-        other_species = [s for s in traj.get_atoms().get_chemical_symbols()
-                         if s not in species]
-        for thisspec in species:
-            for otherspec in other_species:
-                species_pairs_.append((thisspec, otherspec))
-    else:
-        species_pairs_ = None
-    rdf = RDF(trajectory=traj)
-    res = rdf.run(radius=radius, stepsize=stepsize,
-                  nbins=bins, species_pairs=species_pairs_)
-    print('Shortest distance: {}'.format(
-        res.get_attr('shortest_distance')))
-    if plot or savefig:
-        from samos.plotting.plot_rdf import plot_rdf
-        from matplotlib import pyplot as plt
-        from matplotlib.gridspec import GridSpec
-        fig = plt.figure(figsize=(4, 3))
-        gs = GridSpec(1, 1, top=0.99, right=0.83, left=0.14, bottom=0.16)
-        ax = fig.add_subplot(gs[0])
-        plot_rdf(res, ax=ax, no_int=no_int)
-        ax.set_xlim(-0.2, radius)
-        if savefig:
-            plt.savefig(savefig, dpi=250)
-        if plot:
-            plt.show()
+def pairs_with_other_species(trajectory, species):
+    """
+    Build the ``(requested, other)`` species pairs for an RDF.
 
-    if printrdf:
-        species_pairs = res.get_attr('species_pairs')
-        for spec1, spec2 in species_pairs:
-            try:
-                rdf = res.get_array('rdf_{}_{}'.format(spec1, spec2))
-            except KeyError:
-                print(
-                    'Warning: RDF for {}-{} was not calculated, skipping'
-                    ''.format(spec1, spec2))
-                continue
-            integral = res.get_array('int_{}_{}'.format(spec1, spec2))
-            radii = res.get_array('radii_{}_{}'.format(spec1, spec2))
-            name = '{}-{}-{}.dat'.format(printrdf, spec1, spec2)
-            np.savetxt(name, np.array([radii, rdf, integral]).T,
-                       header='radius    rdf     integral')
+    Every entry of *species* is paired with every distinct species
+    present in *trajectory* that was not itself requested.
 
+    Deduplicating matters: both call sites used to iterate the per-atom
+    symbol list rather than the set of species, so a hundred-atom cell
+    produced a hundred identical copies of each pair, every one of them
+    computed from scratch.
 
-if __name__ == '__main__':
-    from argparse import ArgumentParser
-    parser = ArgumentParser('analysis/plot of a RDF, given a trajectory')
-    parser.add_argument('trajectory_path')
-    parser.add_argument('-r', '--radius', required=False, type=float,
-                        default=5.0,
-                        help='The radius (max) of the RDF, defaults to 5.0')
-    parser.add_argument('-b', '--bins', type=int,
-                        help='Number of bins, defaults to 100', default=100)
-    parser.add_argument('-s', '--stepsize', type=int,
-                        help='Stepsize over the trajectory, defaults to 1',
-                        default=1)
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        '--species-pairs', nargs='+',
-        help=('species pairs separated by a space between pairs and a'
-              ' dash within the pair, e.g., '
-              '--species C-O O-O'))
-    group.add_argument(
-        '--species', nargs='+',
-        help=('species separated by a space, e.g., --species C O'))
-    parser.add_argument('--printrdf',
-                        help='Print the RDF to a file as a csv',)
-    parser.add_argument('--plot', action='store_true',
-                        help='Plot the RDF to screen')
-    parser.add_argument('--no-int', action='store_true',
-                        help='dont plot integral')
-    parser.add_argument('-i', '--index', type=str, default=':',
-                        help='index to read from trajectory, default is all')
-    parser.add_argument(
-        '--savefig',
-        help='Where to save figure (will otherwise show on screen)')
-    args = parser.parse_args()
-    kwargs = vars(args)
-    util_rdf_and_plot(**kwargs)
+    :param trajectory: :class:`~samos.trajectory.Trajectory` to inspect.
+    :param list species: Chemical symbols of interest.
+    :returns: List of ``(spec, other)`` tuples, deterministically ordered.
+    """
+    others = sorted(set(trajectory.get_types()) - set(species))
+    return [(spec, other) for spec in species for other in others]

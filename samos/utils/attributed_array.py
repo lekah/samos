@@ -5,16 +5,28 @@ import numpy as np
 import shutil
 
 
-class AttributedArray(object):
+class AttributedArray:
     _ATTRIBUTE_FILENAME = 'attributes.json'
 
     def __init__(self, **kwargs):
+        """
+        Subclasses name their own constructor keywords explicitly and
+        forward whatever they do not recognise here, so this is the end
+        of the chain: anything still left is a keyword nothing knows
+        how to apply, and is reported rather than ignored.
+
+        The base class itself takes no keywords -- its only setters,
+        :meth:`set_array` and :meth:`set_attr`, need a name as well as
+        a value and so cannot be driven from a single keyword.
+        """
         self._arrays = {}
         self._attrs = {}
 
         self._nstep = None
-        for key, val in list(kwargs.items()):
-            getattr(self, 'set_{}'.format(key))(val)
+        if kwargs:
+            raise TypeError(
+                '{} got unexpected keyword argument(s): {}'.format(
+                    type(self).__name__, ', '.join(sorted(kwargs))))
 
     def set_array(
         self, name, array, check_existing=False,
@@ -31,16 +43,15 @@ class AttributedArray(object):
             Check for an array of that name existing,
             and raise if it exists.
             Defaults to False.
-        :param book check_nstep:
+        :param bool check_nstep:
             Check if the number of steps, which is the first
             dimension of the array, is commensurate
             with other arrays stored. Defaults to False
-        :param bool check_nat:
+        :param check_nat:
+            The expected number of atoms, or False to skip the check.
             If the array is of rank 3 or higher, the second
-            dimension is interpreted as the number of atoms.
-            If this flag is True, I will check for arrays
-            with rank 3 or higher. Defaults  to True.
-            Requires that the atoms have been set
+            dimension is interpreted as the number of atoms and
+            compared against this value. Defaults to False.
         """
         # First, I call np.array to ensure it's a valid array
         array = np.array(array)
@@ -48,22 +59,28 @@ class AttributedArray(object):
             raise TypeError('Name has to be a string')
         if check_existing:
             if name in list(self._arrays.keys()):
-                raise ValueError('Name {} already exists'.formamt(name))
-        if wanted_shape_len:
+                raise ValueError('Name {} already exists'.format(name))
+        if wanted_shape_len is not None:
             if len(array.shape) != wanted_shape_len:
                 raise TypeError(
                     f'array {name} is of wrong type, has to be of '
-                    f'dimension {wanted_shape_len}')
-        if wanted_shape_1:
-            if array.shape[1] != wanted_shape_1:
+                    f'dimension {wanted_shape_len}, got '
+                    f'{len(array.shape)}')
+        # Check the rank before indexing into shape, so that a rank-1
+        # array reports what is wrong instead of raising a bare
+        # IndexError from the guard itself.
+        for idim, wanted in ((1, wanted_shape_1), (2, wanted_shape_2)):
+            if wanted is None:
+                continue
+            if len(array.shape) <= idim:
                 raise IndexError(
-                    f'1st dimension of array {name} has to '
-                    f'be {wanted_shape_1}')
-        if wanted_shape_2:
-            if array.shape[2] != wanted_shape_2:
+                    f'array {name} has {len(array.shape)} dimension(s), '
+                    f'so dimension {idim} cannot be checked '
+                    f'against {wanted}')
+            if array.shape[idim] != wanted:
                 raise IndexError(
-                    f'2nd dimension of array {name} has '
-                    f'to be {wanted_shape_2}')
+                    f'{idim}. dimension of array {name} has to '
+                    f'be {wanted}, got {array.shape[idim]}')
         if check_nstep:
             if self._nstep is None:
                 self._nstep = array.shape[0]
@@ -148,6 +165,19 @@ class AttributedArray(object):
         for arrayname, array in list(self._arrays.items()):
             np.save(join(folder_name, '{}.npy'.format(arrayname)), array)
 
+    def _load_extra(self, folder_name, files_in_tar):
+        """
+        Hook for subclasses to restore members that are not arrays or
+        attributes, mirroring their ``_save_*`` methods.
+
+        Implementations must discard the names they consumed from
+        *files_in_tar*; whatever remains is loaded as a ``.npy`` array.
+
+        :param str folder_name: The unpacked archive directory.
+        :param set files_in_tar: Names still to be accounted for.
+        """
+        pass
+
     def remove_array(self, arrayname):
         if arrayname not in self._arrays:
             raise KeyError(f'{arrayname} is not one of arrays')
@@ -166,7 +196,7 @@ class AttributedArray(object):
         Given a filename, try to load the trajectories and
         return a new instance of the class.
         The filename should ideally be created with the
-        Trajectore.store method.
+        save method.
         If created by hand, it has to be a valid tar.gz
         compressed tar.
         """
@@ -180,7 +210,15 @@ class AttributedArray(object):
         try:
             with tarfile.open(filename, 'r:gz',
                               format=tarfile.PAX_FORMAT) as tar:
-                tar.extractall(temp_folder)
+                # filter='data' refuses members with absolute paths or
+                # paths escaping temp_folder.  It became the default in
+                # Python 3.14; tarfile.data_filter is present exactly
+                # when the argument is supported (3.12, backported to
+                # 3.10.12 and 3.11.4).
+                if hasattr(tarfile, 'data_filter'):
+                    tar.extractall(temp_folder, filter='data')
+                else:
+                    tar.extractall(temp_folder)
 
             files_in_tar = set(os.listdir(temp_folder))
 
@@ -191,18 +229,19 @@ class AttributedArray(object):
             for k, v in list(attributes.items()):
                 new.set_attr(k, v)
 
-            if cls._ATOMS_FILENAME in files_in_tar:
-                from ase.io import read
-                new.set_atoms(read(join(temp_folder, cls._ATOMS_FILENAME)))
-                files_in_tar.remove(cls._ATOMS_FILENAME)
+            new._load_extra(temp_folder, files_in_tar)
 
             for array_file in files_in_tar:
                 if not array_file.endswith('.npy'):
                     raise Exception(
                         'Unrecognized file in trajectory export: {}'
                         ''.format(array_file))
-                new.set_array(array_file.rstrip('.npy'), np.load(
-                    join(temp_folder, array_file), mmap_mode='r'))
+                # No mmap_mode here: set_array calls np.array() on
+                # whatever it is given, so the mapping was copied into
+                # memory immediately anyway.  Loading eagerly also means
+                # nothing references temp_folder once it is removed.
+                new.set_array(array_file.removesuffix('.npy'),
+                              np.load(join(temp_folder, array_file)))
         except Exception as e:
             shutil.rmtree(temp_folder)
             raise e

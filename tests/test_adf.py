@@ -14,7 +14,8 @@ import numpy as np
 from ase import Atoms
 
 from samos.trajectory import Trajectory
-from samos.analysis.rdf import ADF, BondAnalyzer, TorsionAnalyzer
+from samos.analysis.rdf import (
+    ADF, BondAnalyzer, MinimumImage, TorsionAnalyzer)
 
 
 def _make_traj(symbols, positions, cell):
@@ -51,34 +52,64 @@ def _bare_ba(traj=None):
 # BondAnalyzer -- static helpers (no trajectory needed)
 # ---------------------------------------------------------------------------
 
-class TestPbcWrap(unittest.TestCase):
+class TestMinimumImage(unittest.TestCase):
+    """MinimumImage replaced BondAnalyzer._pbc_wrap, which wrapped each
+    fractional component to (-0.5, 0.5] and was therefore correct only
+    for a rectangular cell."""
 
     def setUp(self):
-        self.cell = np.eye(3) * 10.0
-        self.cellI = np.linalg.inv(self.cell)
+        self.mic = MinimumImage(np.eye(3) * 10.0)
 
     def test_no_wrap_needed(self):
-        diff = np.array([[3.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
-        np.testing.assert_allclose(result, [[3.0, 0.0, 0.0]])
+        np.testing.assert_allclose(
+            self.mic.vectors([[3.0, 0.0, 0.0]]), [[3.0, 0.0, 0.0]])
 
     def test_wraps_large_positive(self):
         # 9.0 A in a 10 A cell -> minimum image is -1.0 A
-        diff = np.array([[9.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
-        np.testing.assert_allclose(result, [[-1.0, 0.0, 0.0]])
+        np.testing.assert_allclose(
+            self.mic.vectors([[9.0, 0.0, 0.0]]), [[-1.0, 0.0, 0.0]])
 
     def test_exactly_half_not_wrapped(self):
-        # frac = 0.5 is NOT > 0.5, so no wrap applied
-        diff = np.array([[5.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
-        np.testing.assert_allclose(result, [[5.0, 0.0, 0.0]])
+        # Both images are 5 A away; the tie resolves to the positive one.
+        np.testing.assert_allclose(
+            self.mic.vectors([[5.0, 0.0, 0.0]]), [[5.0, 0.0, 0.0]])
 
     def test_multiple_vectors(self):
-        diff = np.array([[9.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
-        result = BondAnalyzer._pbc_wrap(diff, self.cellI, self.cell)
         np.testing.assert_allclose(
-            result, [[-1.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+            self.mic.vectors([[9.0, 0.0, 0.0], [3.0, 0.0, 0.0]]),
+            [[-1.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+
+    def test_distances_match_vector_norms(self):
+        rng = np.random.default_rng(3)
+        diff = (rng.random((500, 3)) - 0.5) * 30.0
+        np.testing.assert_allclose(
+            self.mic.distances(diff),
+            np.linalg.norm(self.mic.vectors(diff), axis=1))
+
+    def _brute(self, diff, cell, n=3):
+        r = range(-n, n + 1)
+        shifts = np.array([i*cell[0] + j*cell[1] + k*cell[2]
+                           for i in r for j in r for k in r])
+        return np.array([np.linalg.norm(d - shifts, axis=1).min()
+                         for d in diff])
+
+    def test_exact_for_skewed_cells(self):
+        """The old eight-corner scheme in RDF.run missed the nearest
+        image here; wrapping each component missed it in fcc too."""
+        rng = np.random.default_rng(4)
+        cells = [
+            np.eye(3) * 10.0,
+            5.0 * np.array([[0., .5, .5], [.5, 0., .5], [.5, .5, 0.]]),
+            np.array([[10., 0., 0.], [8.66, 5., 0.], [0., 0., 10.]]),
+            np.array([[10., 0., 0.], [25., 3., 0.], [0., 0., 10.]]),
+            np.array([[10., 0., 0.], [15., 4., 0.], [15., 4., 4.]]),
+        ]
+        for cell in cells:
+            diff = (rng.random((2000, 3)) - 0.5) @ cell
+            np.testing.assert_allclose(
+                MinimumImage(cell).distances(diff),
+                self._brute(diff, cell),
+                err_msg='cell {}'.format(cell.tolist()))
 
 
 class TestSetBonds(unittest.TestCase):
@@ -495,6 +526,391 @@ class TestADFExplicitBonds(unittest.TestCase):
         # Only 1 neighbor -> no angle can be formed
         self.assertAlmostEqual(
             res.get_array('adf_O_Si_O').sum(), 0.0)
+
+
+class TestADFEmptyFrameSelection(unittest.TestCase):
+    """An empty frame selection used to reach frames[0] (IndexError) with
+    static_bonds, and to divide by n_frames=0 without it."""
+
+    def _analyzer(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        from samos.analysis.rdf import ADF
+        atoms = Atoms('OSiO', cell=np.eye(3) * 10., pbc=True)
+        pos = np.tile(np.array([[0., 0., 0.],
+                                [1.6, 0., 0.],
+                                [3.2, 0., 0.]]), (5, 1, 1))
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(pos)
+        return ADF(trajectory=t)
+
+    def test_empty_frame_range_raises(self):
+        adf = self._analyzer()
+        with self.assertRaises(ValueError) as cm:
+            adf.run(istart=5, istop=5, bonds={'Si-O': (1.0, 2.0)})
+        self.assertIn('No frames selected', str(cm.exception))
+
+    def test_empty_frame_range_raises_with_static_bonds(self):
+        adf = self._analyzer()
+        with self.assertRaises(ValueError):
+            adf.run(istart=10, istop=None, bonds={'Si-O': (1.0, 2.0)},
+                    static_bonds=True)
+
+
+class TestPlotRDFColors(unittest.TestCase):
+    """plot_rdf's second-axis colour selection had `if 'color': pass`
+    followed by an independent `if/else`, so an explicitly supplied
+    colour was overwritten by the g(r) line's colour."""
+
+    def _result(self):
+        import numpy as np
+        from samos.utils.attributed_array import AttributedArray
+        res = AttributedArray()
+        res.set_attr('species_pairs', [('Li', 'O')])
+        res.set_array('rdf_Li_O', np.linspace(0., 2., 10))
+        res.set_array('int_Li_O', np.linspace(0., 5., 10))
+        res.set_array('radii_Li_O', np.linspace(0., 5., 10))
+        return res
+
+    def _axes(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib import pyplot as plt
+        fig = plt.figure()
+        self.addCleanup(plt.close, fig)
+        return fig.add_subplot(1, 1, 1)
+
+    def test_explicit_integral_color_is_kept(self):
+        from samos.plotting.plot_rdf import plot_rdf
+        handles = plot_rdf(self._result(), ax=self._axes(),
+                           plot_params={'color': 'red'},
+                           plot_params2={'color': 'black'})
+        rdf_line, int_line = handles
+        self.assertEqual(rdf_line.get_color(), 'red')
+        self.assertEqual(int_line.get_color(), 'black')
+
+    def test_integral_defaults_to_the_rdf_color(self):
+        from samos.plotting.plot_rdf import plot_rdf
+        handles = plot_rdf(self._result(), ax=self._axes(),
+                           plot_params={'color': 'red'})
+        rdf_line, int_line = handles
+        self.assertEqual(int_line.get_color(), rdf_line.get_color())
+
+
+class TestRDFValidationAndAttributes(unittest.TestCase):
+    """RDF.run had an impossible default (radius=None), rejected the
+    istop its own default resolves to, crashed opaquely on a species
+    that is absent, and wrote a cross-pair running minimum under a
+    per-pair-looking attribute name."""
+
+    def _trajectory(self, seed=3, nstep=8):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2', cell=np.eye(3) * 10., pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(rng.random((nstep, 4, 3)) * 10.)
+        return t
+
+    def _rdf(self):
+        from samos.analysis.rdf import RDF
+        return RDF(trajectory=self._trajectory())
+
+    def test_radius_is_required(self):
+        with self.assertRaises(TypeError):
+            self._rdf().run()
+
+    def test_istop_equal_to_length_is_accepted(self):
+        """len(positions) is exactly what istop=None resolves to, so it
+        must not be rejected."""
+        res = self._rdf().run(radius=4.0, istop=8)
+        self.assertIn('rdf_H_H', res.get_arraynames())
+
+    def test_istop_beyond_length_still_rejected(self):
+        with self.assertRaises(ValueError):
+            self._rdf().run(radius=4.0, istop=9)
+
+    def test_absent_species_is_skipped_not_crashed(self):
+        res = self._rdf().run(radius=4.0, species_pairs=[('H', 'N'),
+                                                         ('H', 'O')])
+        # the impossible pair is dropped, the valid one survives
+        self.assertNotIn('rdf_H_N', res.get_arraynames())
+        self.assertIn('rdf_H_O', res.get_arraynames())
+
+    def test_shortest_distance_is_per_pair_and_global(self):
+        import numpy as np
+        res = self._rdf().run(radius=4.0)
+        per_pair = [res.get_attr('shortest_distance_{}'.format(lbl))
+                    for lbl in ('H_H', 'H_O', 'O_O')]
+        self.assertTrue(all(np.isfinite(d) for d in per_pair))
+        # the global value is the minimum over every pair, not the
+        # running minimum at whichever pair happened to be last
+        self.assertAlmostEqual(res.get_attr('shortest_distance'),
+                               min(per_pair))
+
+
+class TestSpeciesPairHelper(unittest.TestCase):
+    """Both call sites built these pairs from the per-atom symbol list,
+    so each pair appeared once per atom."""
+
+    def _trajectory(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        # 6 atoms but only 3 species
+        atoms = Atoms('H3OFe2', cell=np.eye(3) * 10., pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(np.zeros((2, 6, 3)))
+        return t
+
+    def test_pairs_are_deduplicated(self):
+        from samos.analysis.rdf import pairs_with_other_species
+        pairs = pairs_with_other_species(self._trajectory(), ['H'])
+        self.assertEqual(pairs, [('H', 'Fe'), ('H', 'O')])
+
+    def test_requested_species_excluded_from_others(self):
+        from samos.analysis.rdf import pairs_with_other_species
+        pairs = pairs_with_other_species(self._trajectory(), ['H', 'O'])
+        self.assertEqual(sorted(pairs),
+                         [('H', 'Fe'), ('O', 'Fe')])
+
+
+class TestWritersLeaveStdoutOpen(unittest.TestCase):
+    """write_xsf / write_grid / write_xsf_header default to
+    outfilename=None, i.e. sys.stdout, and then closed it."""
+
+    def _capture(self, func, *args, **kwargs):
+        import io
+        import sys
+        buf = io.StringIO()
+        real = sys.stdout
+        sys.stdout = buf
+        try:
+            func(*args, **kwargs)
+        finally:
+            closed = sys.stdout.closed
+            sys.stdout = real
+        return buf, closed
+
+    def _grid(self):
+        import numpy as np
+        return np.arange(8.).reshape(2, 2, 2)
+
+    def test_write_xsf_leaves_stdout_open(self):
+        import numpy as np
+        from samos.io.xsf import write_xsf
+        buf, closed = self._capture(
+            write_xsf, ['H'], [[0., 0., 0.]], np.eye(3), self._grid())
+        self.assertFalse(closed)
+        self.assertIn('BEGIN_BLOCK_DATAGRID_3D', buf.getvalue())
+        # the embedded header literal must stay flush left
+        self.assertIn('\n3D_PWSCF\n', buf.getvalue())
+
+    def test_write_grid_leaves_stdout_open(self):
+        from samos.io.xsf import write_grid
+        _, closed = self._capture(write_grid, self._grid())
+        self.assertFalse(closed)
+
+    def test_bad_outfilename_type_rejected(self):
+        import numpy as np
+        from samos.io.xsf import write_xsf
+        with self.assertRaises(TypeError):
+            write_xsf(['H'], [[0., 0., 0.]], np.eye(3), self._grid(),
+                      outfilename=42)
+
+    def test_named_file_is_closed(self):
+        import numpy as np
+        import tempfile
+        import os
+        from samos.io.xsf import write_grid
+        fd, path = tempfile.mkstemp(suffix='.xsf')
+        os.close(fd)
+        self.addCleanup(os.unlink, path)
+        write_grid(self._grid(), outfilename=path)
+        with open(path) as fh:
+            self.assertTrue(fh.read().strip())
+
+
+class TestBaseAnalyzerWithoutTrajectory(unittest.TestCase):
+    """BaseAnalyzer never initialised _trajectory, so calling run()
+    before set_trajectory() raised AttributeError from deep inside."""
+
+    def test_rdf_without_trajectory(self):
+        from samos.analysis.rdf import RDF
+        with self.assertRaises(ValueError) as cm:
+            RDF().run(radius=4.0)
+        self.assertIn('set_trajectory', str(cm.exception))
+
+    def test_adf_without_trajectory(self):
+        from samos.analysis.rdf import ADF
+        with self.assertRaises(ValueError) as cm:
+            ADF().run(bonds={'Si-O': (1.0, 2.0)})
+        self.assertIn('set_trajectory', str(cm.exception))
+
+    def test_set_trajectory_type_checked(self):
+        from samos.analysis.rdf import RDF
+        with self.assertRaises(TypeError):
+            RDF(trajectory='not a trajectory')
+
+
+class TestWriteXsfHeaderOnly(unittest.TestCase):
+    """get_gaussian_density carried a near-verbatim copy of write_xsf
+    that could emit a header with no data block.  write_xsf now does
+    that itself with data=None."""
+
+    def _capture(self, **kwargs):
+        import io
+        import sys
+        import numpy as np
+        from samos.io.xsf import write_xsf
+        buf = io.StringIO()
+        real = sys.stdout
+        sys.stdout = buf
+        try:
+            write_xsf(['H'], [[0., 0., 0.]], np.eye(3), **kwargs)
+        finally:
+            sys.stdout = real
+        return buf.getvalue()
+
+    def test_header_only_leaves_the_datagrid_open(self):
+        out = self._capture(data=None, shape=(2, 2, 2))
+        self.assertIn('BEGIN_BLOCK_DATAGRID_3D', out)
+        self.assertIn('DATAGRID_3D_UNKNOWN', out)
+        # dimensions are written as npoints+1, as xsf wants
+        self.assertIn('3         3         3', out)
+        # a caller appends the grid and closes the block
+        self.assertNotIn('END_DATAGRID_3D', out)
+
+    def test_full_write_still_closes_the_block(self):
+        import numpy as np
+        out = self._capture(data=np.arange(8.).reshape(2, 2, 2))
+        self.assertIn('END_DATAGRID_3D', out)
+        self.assertIn('END_BLOCK_DATAGRID_3D', out)
+
+    def test_header_only_requires_shape(self):
+        with self.assertRaises(ValueError):
+            self._capture(data=None)
+
+    def test_gaussian_density_uses_the_shared_writer(self):
+        import samos.analysis.get_gaussian_density as g
+        self.assertFalse(hasattr(g, 'write_xsf_header'))
+        self.assertTrue(hasattr(g, 'write_xsf'))
+
+
+class TestADFPlotting(unittest.TestCase):
+    """ADF results had no plotter of their own: the CLI carried an
+    inline copy, and the only angular plotter belonged to the Fortran
+    AngularSpectrum, since removed."""
+
+    def _result(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        from samos.analysis.rdf import ADF
+        atoms = Atoms('OSiO', cell=np.eye(3) * 10., pbc=True)
+        pos = np.tile(np.array([[0., 0., 0.],
+                                [1.6, 0., 0.],
+                                [3.2, 0., 0.]]), (3, 1, 1))
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(pos)
+        return ADF(trajectory=t).run(species_triplets=[('O', 'Si', 'O')],
+                                     bonds={'Si-O': (1.0, 2.0)}, nbins=180)
+
+    def _axes(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib import pyplot as plt
+        fig = plt.figure()
+        self.addCleanup(plt.close, fig)
+        return fig.add_subplot(1, 1, 1)
+
+    def test_plot_adf_draws_each_triplet(self):
+        from samos.plotting.plot_rdf import plot_adf
+        res = self._result()
+        handles = plot_adf(res, ax=self._axes())
+        self.assertEqual(len(handles), 1)
+        self.assertEqual(handles[0].get_label(), 'O-Si-O')
+
+
+class TestBondCutoffGuard(unittest.TestCase):
+    """A bond cutoff past half the shortest lattice vector means an
+    atom has more than one image in range while only the nearest is
+    kept, so bonds go missing."""
+
+    def _traj(self, nstep=4, seed=6):
+        import numpy as np
+        cell = np.eye(3) * 10.0
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H8O8', cell=cell, pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(rng.random((nstep, 16, 3)) @ cell)
+        return t
+
+    def test_short_cutoff_is_quiet(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            ADF(trajectory=self._traj()).run(
+                nbins=20, bonds={'H-O': (0.0, 2.0)})
+        self.assertEqual([str(w.message) for w in caught], [])
+
+    def test_long_cutoff_warns_once_for_the_whole_run(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            ADF(trajectory=self._traj()).run(
+                nbins=20, bonds={'H-O': (0.0, 6.0)})
+        self.assertEqual(len(caught), 1)
+        self.assertIn('biased low', str(caught[0].message))
+
+
+class TestBondDetectionAcrossBases(unittest.TestCase):
+    """Wrapping each fractional component to (-0.5, 0.5] commits to one
+    periodic image without comparing it to the others, so it depends on
+    which basis describes the lattice.  Bonds went missing."""
+
+    CUBIC = np.eye(3) * 6.0
+    # Same lattice: b sheared by three a.  No atom moves.
+    SHEARED = np.array([[6., 0., 0.], [18., 6., 0.], [0., 0., 6.]])
+
+    def _traj(self, cell, seed=8):
+        rng = np.random.default_rng(seed)
+        positions = rng.random((1, 24, 3)) @ self.CUBIC
+        atoms = Atoms('H12O12', cell=cell, pbc=True)
+        t = Trajectory(atoms=atoms, timestep=1.)
+        t.set_positions(positions)
+        return t
+
+    def _brute(self, traj, cutoff):
+        pos = traj.get_positions()[0]
+        r = range(-3, 4)
+        shifts = np.array([i*self.CUBIC[0] + j*self.CUBIC[1]
+                           + k*self.CUBIC[2]
+                           for i in r for j in r for k in r])
+        types = traj.get_types()
+        found = set()
+        for i in np.where(types == 'H')[0]:
+            for j in np.where(types == 'O')[0]:
+                d = np.linalg.norm(pos[j] - pos[i] - shifts, axis=1).min()
+                if d <= cutoff:
+                    found.add((min(int(i), int(j)), max(int(i), int(j))))
+        return found
+
+    def _detected(self, cell, cutoff):
+        ba = _bare_ba(self._traj(cell))
+        bonds = ba._detect_bonds({'H-O': (0.0, cutoff)}, 0)
+        return {(int(i), int(j)) for i, j in bonds}
+
+    def test_same_bonds_from_either_basis(self):
+        """The old scheme found 27 of these 50 bonds from the sheared
+        basis and all 50 from the cubic one."""
+        cutoff = 2.5
+        expected = self._brute(self._traj(self.CUBIC), cutoff)
+        self.assertTrue(expected, 'fixture found no bonds at all')
+        self.assertEqual(self._detected(self.CUBIC, cutoff), expected)
+        self.assertEqual(self._detected(self.SHEARED, cutoff), expected)
 
 
 if __name__ == '__main__':

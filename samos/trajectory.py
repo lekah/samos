@@ -11,8 +11,9 @@ class IncompatibleTrajectoriesException(Exception):
 def check_trajectory_compatibility(trajectories):
     """
     Check whether the trajectories passed are compatible.
-    They are compatible if they have the same order of atoms,
-    and the same cell, and store the same arrays
+    They are compatible if they store the same arrays, the same
+    chemical symbols in the same order, and the same timestep.
+    The cells are not compared.
     """
 
     assert len(trajectories) >= 1, 'No trajectories passed'
@@ -60,13 +61,60 @@ class Trajectory(AttributedArray):
     _ATOMS_FILENAME = 'atoms.traj'
     _TYPES_KEY = 'types'
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, atoms=None, types=None, timestep=None,
+                 positions=None, velocities=None, forces=None,
+                 stress=None, pot_energies=None, cells=None, **kwargs):
         """
-        Instantiating a trajectory class.
-        Optional keyword-arguments are everything with a set-method.
+        Instantiate a trajectory.  Every keyword corresponds to the
+        set-method of the same name and may be given in any
+        combination; all are optional.
+
+        The setters are applied in the fixed order below because two of
+        them depend on earlier ones, and the caller should not have to
+        know that.  ``positions``, ``velocities`` and ``forces`` are
+        checked against the number of atoms, which comes from *atoms*
+        or *types*; and a bare 3x3 *cells* entry is broadcast over all
+        steps, so it needs a per-step array to have set the step count
+        first.  Passing the keywords in the wrong order used to raise
+        from deep inside the check that tripped.
+
+        :param ase.Atoms atoms: Reference structure; supplies masses,
+            chemical symbols and the fixed cell.
+        :param array-like types: Chemical symbols, one per atom,
+            overriding those of *atoms*.
+        :param float timestep: Timestep in femtoseconds.
+        :param array-like positions: Shape (nstep, nat, 3), Angstrom.
+        :param array-like velocities: Shape (nstep, nat, 3), Ang/fs.
+        :param array-like forces: Shape (nstep, nat, 3), eV/Angstrom.
+        :param array-like stress: Shape (nstep, 6), Voigt order,
+            eV/Angstrom^3.
+        :param array-like pot_energies: Shape (nstep,), eV.
+        :param array-like cells: Shape (nstep, 3, 3), or a single
+            (3, 3) cell to broadcast over all steps, in Angstrom.
+        :raises TypeError: On an unrecognised keyword argument.
         """
         self._atoms = None
-        super(Trajectory, self).__init__(**kwargs)
+        # Runs first so that the array store exists and an unknown
+        # keyword is reported before any of it is populated.
+        super().__init__(**kwargs)
+        if atoms is not None:
+            self.set_atoms(atoms)
+        if types is not None:
+            self.set_types(types)
+        if timestep is not None:
+            self.set_timestep(timestep)
+        if positions is not None:
+            self.set_positions(positions)
+        if velocities is not None:
+            self.set_velocities(velocities)
+        if forces is not None:
+            self.set_forces(forces)
+        if stress is not None:
+            self.set_stress(stress)
+        if pot_energies is not None:
+            self.set_pot_energies(pot_energies)
+        if cells is not None:
+            self.set_cells(cells)
 
     @classmethod
     def from_atoms(cls, atoms_list, timestep_fs=None, add_arrays=None):
@@ -113,7 +161,7 @@ class Trajectory(AttributedArray):
             if (velocities**2).sum() > 1e-12:
                 new.set_velocities(velocities)
         except TypeError:
-            pass  # velocities are returned as none if not existen
+            pass  # velocities are returned as None if not existent
         if forces is not None and (forces**2).sum() > 1e-12:
             new.set_forces(forces)
         if (cells.std(axis=0).sum()) > 1e-12:
@@ -135,8 +183,20 @@ class Trajectory(AttributedArray):
             from ase.io import write
             write(join(folder_name, self._ATOMS_FILENAME), self._atoms)
 
+    def _load_extra(self, folder_name, files_in_tar):
+        """Restore the ase.Atoms written by :meth:`_save_atoms`."""
+        from os.path import join
+        if self._ATOMS_FILENAME in files_in_tar:
+            from ase.io import read
+            self.set_atoms(read(join(folder_name, self._ATOMS_FILENAME)))
+            files_in_tar.remove(self._ATOMS_FILENAME)
+
     def get_timestep(self):
-        """Return the MD timestep in femtoseconds, or None if not set."""
+        """
+        Return the MD timestep in femtoseconds.
+
+        :raises KeyError: If the timestep has not been set.
+        """
         return self.get_attr(self._TIMESTEP_KEY)
 
     def set_timestep(self, timestep_fs):
@@ -211,7 +271,13 @@ class Trajectory(AttributedArray):
     def nat(self):
         types = self.get_types()
         if types is None:
-            raise ValueError('Types have not been set')
+            # Reached from set_positions / set_velocities / set_forces,
+            # which pass check_nat=self.nat.  Naming the two ways out
+            # saves the caller from tracing the failure back here.
+            raise ValueError(
+                'The number of atoms is not known. Call set_atoms() or '
+                'set_types() first, or pass atoms= or types= to the '
+                'constructor.')
         else:
             return len(types)
 
@@ -225,6 +291,14 @@ class Trajectory(AttributedArray):
 
         array = np.array(array)
         if array.shape == (3, 3):
+            # nstep is fixed by the first per-step array stored, so a
+            # cell given on its own has nothing to be broadcast over.
+            if self.nstep is None:
+                raise ValueError(
+                    'A single 3x3 cell is broadcast over all steps, but '
+                    'the number of steps is not known yet. Set '
+                    'positions (or another per-step array) first, or '
+                    'pass a cell array of shape (nstep, 3, 3).')
             array = np.tile(array, (self.nstep, 1, 1))
         self.set_array(self._CELL_KEY, array,
                        check_existing=check_existing,
@@ -291,7 +365,7 @@ class Trajectory(AttributedArray):
         :param array:
             A numpy array with the positions in absolute
             values in units of angstrom
-        :param bool check_exising:
+        :param bool check_existing:
             Check if the positions have been set, and
             raise in such case. Defaults to False.
         """
@@ -309,7 +383,7 @@ class Trajectory(AttributedArray):
         :param array:
             A numpy array with the velocites in absolute
             values in units of angstrom/femtoseconds
-        :param bool check_exising:
+        :param bool check_existing:
             Check if the velocities have been set, and
             raise in such case. Defaults to False.
         """
@@ -396,7 +470,7 @@ class Trajectory(AttributedArray):
         :param array:
             A numpy array with the forces in absolute
             values in units of eV/angstrom
-        :param bool check_exising:
+        :param bool check_existing:
             Check if the forces have been set, and raise in
             such case. Defaults to False.
         """
@@ -441,7 +515,7 @@ class Trajectory(AttributedArray):
         :param float v_conv: velocity factor (multiply to get A/fs)
         :param float f_conv: force factor (multiply to get eV/A)
         :param float e_conv: energy factor (multiply to get eV)
-        :param float s_conv: stress factor
+        :param float s_conv: stress factor to eV/Angstrom^3
         """
         names = self.get_arraynames()
         if l_conv != 1.0:
@@ -518,6 +592,52 @@ class Trajectory(AttributedArray):
             # replace with atoms.calc = calc at somepoint
 
         return atoms
+
+    def slice_steps(self, index):
+        """
+        Return a new trajectory holding only the steps selected by
+        *index*.  The instance this is called on is left unchanged.
+
+        Every per-step array is sliced.  The ``types`` override is
+        per-atom rather than per-step and is carried over untouched, as
+        is the reference atoms object.
+
+        A stride of n multiplies the timestep by n.  The analyzers build
+        their time axis from ``timestep_fs`` alone (see the
+        ``timestep_fs * stepsize_t`` factor in
+        :meth:`~samos.analysis.dynamics.DynamicsAnalyzer.get_msd`), so
+        without that factor every time axis derived from a strided
+        trajectory would come out short by exactly the stride.
+
+        :param slice index: The steps to keep, e.g. ``slice(0, 500, 2)``.
+        :returns: A new :class:`Trajectory`.
+        :raises TypeError: If *index* is not a slice.
+        :raises ValueError: If the slice selects no steps.
+        """
+        if not isinstance(index, slice):
+            raise TypeError(
+                'index has to be a slice, got {}'.format(type(index)))
+        new = self.__class__()
+        if self._atoms is not None:
+            new.set_atoms(self._atoms.copy())
+        for name, array in self._arrays.items():
+            if name == self._TYPES_KEY:
+                new.set_array(name, array)
+                continue
+            sliced = array[index]
+            if not len(sliced):
+                raise ValueError(
+                    'Slicing {} steps with {} leaves nothing to '
+                    'analyse'.format(len(array), index))
+            new.set_array(name, sliced, check_nstep=True)
+        for key, value in self._attrs.items():
+            new.set_attr(key, value)
+        if (index.step is not None and abs(index.step) != 1
+                and self._TIMESTEP_KEY in self._attrs):
+            # A trajectory with no timestep has no time axis to get
+            # wrong, so there is nothing to rescale in that case.
+            new.set_timestep(self.get_timestep() * abs(index.step))
+        return new
 
     def get_ase_trajectory(self, start=0, end=None, stepsize=1):
         """

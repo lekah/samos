@@ -33,11 +33,11 @@ def calculate_plot_vdos(traj):
     fig = plt.figure(figsize=(4, 3))
     ax = fig.add_subplot(
         GridSpec(1, 1, left=0.15, top=0.95, bottom=0.2, right=0.95)[0])
-    for smothening in [1, 10, 100]:
-        res = da.get_power_spectrum(smothening=smothening)
+    for smoothing in [1, 10, 100]:
+        res = da.get_power_spectrum(smoothing=smoothing)
         freq_THz = res.get_array('frequency_0')
         vdos = res.get_array('periodogram_Al_mean')
-        ax.plot(freq_THz, vdos, label='{}'.format(smothening))
+        ax.plot(freq_THz, vdos, label='{}'.format(smoothing))
     ax.legend()
     ax.set_yticks([])
     ax.set_ylabel('Signal')

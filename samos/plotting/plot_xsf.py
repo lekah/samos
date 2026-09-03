@@ -11,11 +11,11 @@ from ase import Atoms
 
 
 from samos.io.xsf import read_xsf
+from samos.utils.constants import bohr_to_ang
 
 covalent_radii[3] *= 0.66
 
 EPSILON = 1e-8
-bohr_to_ang = 0.52917720859
 
 POS_REGEX_DECOMPOSED = re.compile(r"""
 ^                                                   # Linestart

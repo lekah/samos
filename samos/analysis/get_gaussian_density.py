@@ -3,62 +3,8 @@
 
 import sys
 import numpy as np
+from samos.io.xsf import write_xsf
 from samos.utils.terminal import get_terminal_width
-
-bohr_to_ang = 0.52917720859
-
-
-def write_xsf_header(
-        atoms, positions, cell, data,
-        vals_per_line=6, outfilename=None, **kwargs):
-    if isinstance(outfilename, str):
-        f = open(outfilename, 'w')
-    elif outfilename is None:
-        f = sys.stdout
-    else:
-        raise Exception('No file')
-    if data is not None:
-        xdim, ydim, zdim = data.shape
-    else:
-        xdim = kwargs.get('xdim')
-        ydim = kwargs.get('ydim')
-        zdim = kwargs.get('zdim')
-    f.write(' CRYSTAL\n PRIMVEC\n')
-    for row in cell:
-        f.write('    {}\n'.format('    '.join(
-            ['{:.9f}'.format(r) for r in row])))
-    f.write('PRIMCOORD\n       {}        1\n'.format(len(atoms)))
-    for atom, pos in zip(atoms, positions):
-        f.write('{:<3}     {}\n'.format(
-            atom, '   '.join(['{:.9f}'.format(v) for v in pos])))
-
-    f.write("""BEGIN_BLOCK_DATAGRID_3D
-3D_PWSCF
-DATAGRID_3D_UNKNOWN
-        {}         {}         {}
-  0.000000  0.000000  0.000000
-""".format(*[i+1 for i in (xdim, ydim, zdim)]))
-
-    for row in cell:
-        f.write('    {}\n'.format('    '.join(
-            ['{:.9f}'.format(item) for item in row])))
-
-    if data is not None:
-        col = 1
-        for z in range(zdim+1):
-            for y in range(ydim+1):
-                for x in range(xdim+1):
-                    f.write('  {:0.4E}'.format(
-                        data[x % xdim, y % ydim, z % zdim]))
-                    if col < vals_per_line:
-                        col += 1
-                    else:
-                        f.write('\n')
-                        col = 1
-        if col:
-            f.write('\n')
-        f.write('END_DATAGRID_3D\nEND_BLOCK_DATAGRID_3D\n')
-    f.close()
 
 
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
@@ -66,28 +12,32 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
                          istart=1, istop=None, stepsize=1,
                          indices_i_care=None, indices_exclude_from_plot=None):
     """
-    :param str positionsf: Where to read the positions from.
-    :param str pos_units:
-        The units of the positions (implemented so far: angstrom, bohr).
-    :param str outputfile: The xsf outputfile
-    :param bool with_symbols:
-        Whether symbols are printed in front
-        of positions (will be ignored)
-    :param list cell: the 3x3 cell,
+    Write the gaussian-broadened probability density of an atomic
+    species to an xsf file.
+
+    :param trajectory:
+        The :class:`~samos.trajectory.Trajectory` to read positions and
+        the cell from. Requires an ase.Atoms to be set.
     :param str element:
-        The to calculate the density for,
-        has to be present in symbols
-    :param int nat:
-        The number of atoms written in the positionsfile
-        per atomic step
-    :param float sigma: The gaussian broadening to apply
+        The species to calculate the density for, has to be present in
+        the chemical symbols. Ignored if indices_i_care is given.
+    :param str outputfile:
+        The xsf outputfile, '.xsf' is appended if missing.
+    :param float sigma: The gaussian broadening to apply, in angstrom
     :param float n_sigma:
         the multiple of sigma for which to
         create the bounding box.
-    :param float density: The density for the grid
+    :param float density: The grid spacing in angstrom
     :param int istart: Index to start reading positions
     :param int istop: Index to stop reading positions
-    :param bool recenter: Whether to recenter
+    :param int stepsize: Take every stepsize-th step of the trajectory
+    :param indices_i_care:
+        The atom indices to accumulate the density over, 1-based for
+        fortran. Defaults to all atoms of element, or to all atoms.
+    :param indices_exclude_from_plot:
+        The atom indices not written to the xsf file, 1-based.
+        Defaults to indices_i_care, so that the mobile species is not
+        drawn on top of its own density.
     """
     from samos.lib.gaussian_density import make_gaussian_density
 
@@ -138,24 +88,26 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     print(
         '(get_gaussian_density) We do not show these atoms in the xsf file: '
         f'{indices_exclude_from_plot}')
-    write_xsf_header(
+    # data=None writes the header and grid dimensions only;
+    # make_gaussian_density appends the grid itself below.
+    write_xsf(
         [s for i, s in enumerate(symbols, start=1)
          if i not in indices_exclude_from_plot],
         [p for i, p in enumerate(starting_pos, start=1)
          if i not in indices_exclude_from_plot],
-        cell, None, outfilename=outputfile, xdim=n1, ydim=n2, zdim=n3)
+        cell, data=None, outfilename=outputfile, shape=(n1, n2, n3))
 
-    S = np.matrix(np.diag([1, 1, 1, -(sigma*n_sigma/density)**2]))
+    S = np.diag([1., 1., 1., -(sigma*n_sigma/density)**2])
     cellT = cell.T
-    cellTI = np.matrix(cellT).I
+    cellTI = np.linalg.inv(cellT)
     #  I describe the move from atomic to crystal
     # coordinates with an affine transformation M:
-    M = np.matrix(np.r_[np.c_[np.matrix(cellTI), np.zeros(3)], [[0, 0, 0, 1]]])
+    M = np.r_[np.c_[cellTI, np.zeros(3)], [[0., 0., 0., 1.]]]
     # Q is a check, but not used. Check is orthogonality
     # Q is the sphere transformed by transformation M
-    # Q = M.I.T * S * M.I
+    # Q = M.I.T @ S @ M.I
     # Now, as defined in the source, I calculate R = Q^(-1)
-    R = M * S.I * M.T
+    R = M @ np.linalg.inv(S) @ M.T
     # The boundaries are given by:
     # ~ xmax = (R[0,3] - np.sqrt(R[0,3]**2 - R[0,0]*R[3,3])) / R[3,3]
     # ~ xmin = (R[0,3] + np.sqrt(R[0,3]**2 - R[0,0]*R[3,3])) / R[3,3]
@@ -197,7 +149,6 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     from ase.io import read
     from samos.trajectory import Trajectory
-    from samos.io.ase_io import read_positions_with_ase
     ap = ArgumentParser()
 
     ap.add_argument('cif', help='Cif file with structure')
@@ -223,6 +174,9 @@ if __name__ == '__main__':
 
     t = Trajectory()
     t.set_atoms(read(parsed_args.pop('cif')))
-    t.set_array(t._POSITIONS_KEY, read_positions_with_ase(
-        parsed_args.pop('positions')), check_nat=False)
+    # Any format ase can read as a list of frames
+    atoms_list = read(parsed_args.pop('positions'), index=':')
+    t.set_array(t._POSITIONS_KEY,
+                np.array([a.get_positions() for a in atoms_list]),
+                check_nat=False)
     get_gaussian_density(t, **parsed_args)

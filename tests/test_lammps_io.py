@@ -122,5 +122,122 @@ class TestLGPS(unittest.TestCase):
                          (self._NSTEP, self._NAT, 3))
 
 
+class TestDumpErrorPaths(unittest.TestCase):
+    """The parser used to fail in ways that hid the real cause: a
+    sys.exit(1) inside a library function, and an except handler that
+    raised NameError on its own message."""
+
+    _ORTHO_BOX = ('ITEM: BOX BOUNDS pp pp pp\n'
+                  '0.0 10.0\n0.0 10.0\n0.0 10.0\n')
+
+    def _write(self, body_header, box=None, body=None):
+        import tempfile
+        box = self._ORTHO_BOX if box is None else box
+        body = '1 1 0.0 0.0 0.0\n2 1 1.0 1.0 1.0\n' if body is None else body
+        text = ('ITEM: TIMESTEP\n0\n'
+                'ITEM: NUMBER OF ATOMS\n2\n'
+                + box + body_header + body)
+        fh = tempfile.NamedTemporaryFile('w', suffix='.lammpstrj',
+                                         delete=False)
+        fh.write(text)
+        fh.close()
+        self.addCleanup(os.unlink, fh.name)
+        return fh.name
+
+    def test_valid_minimal_dump(self):
+        """The fixture itself must parse, so the tests below fail for
+        the reason they claim to."""
+        traj = read_lammps_dump(
+            self._write('ITEM: ATOMS id type xu yu zu\n'),
+            types=['H'], quiet=True)
+        self.assertEqual(traj.nat, 2)
+        self.assertEqual(traj.nstep, 1)
+
+    def test_missing_positions_raises_instead_of_exiting(self):
+        """Regression: this called sys.exit(1), killing the interpreter
+        of any program that imported the module."""
+        path = self._write('ITEM: ATOMS id type vx vy vz\n')
+        with self.assertRaises(TypeError) as cm:
+            read_lammps_dump(path, types=['H'], quiet=True)
+        # the message must name what was missing and what was found
+        self.assertIn('position', str(cm.exception).lower())
+        self.assertIn('vx', str(cm.exception))
+
+    def test_malformed_triclinic_box_reports_parse_error(self):
+        """Regression: the handler printed an unbound `idim`, so it
+        raised NameError and masked the real parse failure."""
+        box = ('ITEM: BOX BOUNDS xy xz yz pp pp pp\n'
+               '0.0 10.0 0.0\n'
+               '0.0 10.0\n'          # missing the tilt factor
+               '0.0 10.0 0.0\n')
+        path = self._write('ITEM: ATOMS id type xu yu zu\n', box=box)
+        with self.assertRaises(ValueError):
+            read_lammps_dump(path, types=['H'], quiet=True)
+
+    def test_triclinic_box_is_read(self):
+        box = ('ITEM: BOX BOUNDS xy xz yz pp pp pp\n'
+               '0.0 10.0 1.0\n0.0 10.0 2.0\n0.0 10.0 3.0\n')
+        path = self._write('ITEM: ATOMS id type xu yu zu\n', box=box)
+        traj = read_lammps_dump(path, types=['H'], quiet=True)
+        cell = traj.get_cells()[0]
+        np.testing.assert_allclose(np.diag(cell), [10., 10., 10.])
+        self.assertAlmostEqual(cell[1, 0], 1.0)   # xy
+        self.assertAlmostEqual(cell[2, 0], 2.0)   # xz
+        self.assertAlmostEqual(cell[2, 1], 3.0)   # yz
+
+
+class TestDumpParsingRobustness(unittest.TestCase):
+    """The float pattern demanded a decimal point and a lowercase e, and
+    a truncated file surfaced as numpy's inhomogeneous-shape error."""
+
+    def _write(self, text):
+        import tempfile
+        fh = tempfile.NamedTemporaryFile('w', suffix='.lammpstrj',
+                                         delete=False)
+        fh.write(text)
+        fh.close()
+        self.addCleanup(os.unlink, fh.name)
+        return fh.name
+
+    def _dump(self, box, body='1 1 0.0 0.0 0.0\n2 1 1.0 1.0 1.0\n'):
+        return self._write('ITEM: TIMESTEP\n0\n'
+                           'ITEM: NUMBER OF ATOMS\n2\n'
+                           + box
+                           + 'ITEM: ATOMS id type xu yu zu\n' + body)
+
+    def test_integer_box_bounds(self):
+        """LAMMPS can write bounds with no decimal point at all."""
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0 10\n0 10\n0 10\n')
+        traj = read_lammps_dump(path, types=['H'], quiet=True)
+        np.testing.assert_allclose(np.diag(traj.get_cells()[0]),
+                                   [10., 10., 10.])
+
+    def test_uppercase_exponent_box_bounds(self):
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0.0E+00 1.0E+01\n'
+                          '0.0E+00 1.0E+01\n'
+                          '0.0E+00 1.0E+01\n')
+        traj = read_lammps_dump(path, types=['H'], quiet=True)
+        np.testing.assert_allclose(np.diag(traj.get_cells()[0]),
+                                   [10., 10., 10.])
+
+    def test_truncated_frame_names_the_line(self):
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0.0 10.0\n0.0 10.0\n0.0 10.0\n',
+                          body='1 1 0.0 0.0 0.0\n')   # second atom missing
+        with self.assertRaises(ValueError) as cm:
+            read_lammps_dump(path, types=['H'], quiet=True)
+        self.assertIn('atom lines', str(cm.exception))
+
+    def test_ragged_frame_names_the_line(self):
+        path = self._dump('ITEM: BOX BOUNDS pp pp pp\n'
+                          '0.0 10.0\n0.0 10.0\n0.0 10.0\n',
+                          body='1 1 0.0 0.0 0.0\n2 1 1.0 1.0\n')
+        with self.assertRaises(ValueError) as cm:
+            read_lammps_dump(path, types=['H'], quiet=True)
+        self.assertIn('columns', str(cm.exception))
+
+
 if __name__ == '__main__':
     unittest.main()
