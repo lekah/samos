@@ -605,7 +605,17 @@ class DynamicsAnalyzer:
             t_long_end=t_long_end, t_long_factor=t_long_factor,
             require_fitting=True,
         )
+        # A scalar fit window is a list of one window from here on, so
+        # that the fitting below has a single code path.  The extra
+        # leading axis is taken off again where the results are stored,
+        # to keep the shape a scalar window has always produced.
         multiple_params_fit = not isinstance(p.t_start_fit_dt, int)
+        if multiple_params_fit:
+            fit_starts = np.asarray(p.t_start_fit_dt)
+            fit_ends = np.asarray(p.t_end_fit_dt)
+        else:
+            fit_starts = np.array([p.t_start_fit_dt])
+            fit_ends = np.array([p.t_end_fit_dt])
 
         msd = TimeSeries()
         # list of t at which MSD will be computed
@@ -699,68 +709,38 @@ class DynamicsAnalyzer:
 
                 #
                 # linear regression of MSD
-                if multiple_params_fit:
-                    # using lists of (t_start_fit_dt, t_end_fit_dt):
-                    # we will loop over them
-                    if decomposed:
-                        slopes_intercepts = np.empty(
-                            (len(p.t_start_fit_dt),
-                             nr_of_blocks_this_traj, 3, 3, 2))
-                    else:
-                        slopes_intercepts = np.empty(
-                            (len(p.t_start_fit_dt),
-                             nr_of_blocks_this_traj, 2))
-                    for istart, (start_dt, end_dt) in enumerate(
-                            zip(p.t_start_fit_dt, p.t_end_fit_dt)):
-                        # Does not vary per block, so hoisted out of
-                        # the loop below.
-                        fit = slice(
-                            (start_dt - p.t_start_dt) // p.stepsize_t,
-                            end_dt // p.stepsize_t)
-                        t_list_fit_fs = (
-                            timestep_fs * p.stepsize_t
-                            * np.arange(start_dt // p.stepsize_t,
-                                        end_dt // p.stepsize_t))
-                        for iblock, block in enumerate(
-                                msd_this_species_this_traj):
-                            slopes_intercepts[istart, iblock] = _fit_block(
-                                block, fit, t_list_fit_fs, decomposed)
-                    for iblock, block in enumerate(msd_this_species_this_traj):
-                        if decomposed:
-                            slopes.append(
-                                slopes_intercepts[:, iblock, :, :, 0])
-                        else:
-                            slopes.append(slopes_intercepts[:, iblock, 0])
-                else:
-                    # just one value of (t_start_fit_dt, t_end_fit_dt)
-                    # TODO: we could avoid this special case by defining
-                    # t_start_fit_dt as a length-1 list instead of int.
-                    if decomposed:
-                        slopes_intercepts = np.empty(
-                            (nr_of_blocks_this_traj, 3, 3, 2))
-                    else:
-                        slopes_intercepts = np.empty(
-                            (nr_of_blocks_this_traj, 2))
+                per_window_shape = (3, 3, 2) if decomposed else (2,)
+                slopes_intercepts = np.empty(
+                    (len(fit_starts), nr_of_blocks_this_traj)
+                    + per_window_shape)
+                for istart, (start_dt, end_dt) in enumerate(
+                        zip(fit_starts, fit_ends)):
+                    # Neither varies per block, so both are hoisted out
+                    # of the loop below.
                     fit = slice(
-                        (p.t_start_fit_dt - p.t_start_dt) // p.stepsize_t,
-                        p.t_end_fit_dt // p.stepsize_t)
+                        (start_dt - p.t_start_dt) // p.stepsize_t,
+                        end_dt // p.stepsize_t)
                     t_list_fit_fs = (
                         timestep_fs * p.stepsize_t
-                        * np.arange(
-                            p.t_start_fit_dt // p.stepsize_t,
-                            p.t_end_fit_dt // p.stepsize_t))
-                    for iblock, block in enumerate(msd_this_species_this_traj):
-                        slopes_intercepts[iblock] = _fit_block(
+                        * np.arange(start_dt // p.stepsize_t,
+                                    end_dt // p.stepsize_t))
+                    for iblock, block in enumerate(
+                            msd_this_species_this_traj):
+                        slopes_intercepts[istart, iblock] = _fit_block(
                             block, fit, t_list_fit_fs, decomposed)
-                        if decomposed:
-                            slopes.append(slopes_intercepts[iblock, :, :, 0])
-                        else:
-                            slopes.append(slopes_intercepts[iblock, 0])
+
+                # Ellipsis spans the (3, 3) tensor axes when decomposed
+                # and nothing otherwise, so one expression covers both.
+                for iblock in range(nr_of_blocks_this_traj):
+                    block_slopes = slopes_intercepts[:, iblock, ..., 0]
+                    slopes.append(block_slopes if multiple_params_fit
+                                  else block_slopes[0])
 
                 msd.set_array('slopes_intercepts_{}_{}_{}'.format(
                     'decomposed' if decomposed else 'isotropic',
                     atomic_species, itraj),
-                    slopes_intercepts)
+                    slopes_intercepts if multiple_params_fit
+                    else slopes_intercepts[0])
 
                 #
                 # compute MSD with maximal statistics (whole trajectory,

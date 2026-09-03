@@ -577,6 +577,35 @@ class TestMSDPlottingFitWindows(unittest.TestCase):
                         t_start_fit=[10, 50], t_end_fit=[100, 150])
         plot_msd_anisotropic(msd, ax=self._axes(), diagonal_only=True)
 
+    def test_scalar_window_keeps_its_result_shape(self):
+        """The fit is built one way now, with a leading window axis.
+        For a scalar fit window that axis is taken off again, so the
+        stored shapes stay what a scalar window always produced."""
+        iso = self._msd(t_start_fit=10, t_end_fit=100)
+        self.assertEqual(
+            iso.get_array('slopes_intercepts_isotropic_H_0').shape,
+            (3, 2))
+        dec = self._msd(decomposed=True, t_start_fit=10, t_end_fit=100)
+        self.assertEqual(
+            dec.get_array('slopes_intercepts_decomposed_H_0').shape,
+            (3, 3, 3, 2))
+        # One number per species, not a one-element array.
+        self.assertEqual(
+            np.shape(iso.get_attr('H')['diffusion_mean_cm2_s']), ())
+
+    def test_list_window_adds_a_leading_axis(self):
+        iso = self._msd(t_start_fit=[10, 50], t_end_fit=[100, 150])
+        self.assertEqual(
+            iso.get_array('slopes_intercepts_isotropic_H_0').shape,
+            (2, 3, 2))
+        dec = self._msd(decomposed=True,
+                        t_start_fit=[10, 50], t_end_fit=[100, 150])
+        self.assertEqual(
+            dec.get_array('slopes_intercepts_decomposed_H_0').shape,
+            (2, 3, 3, 3, 2))
+        self.assertEqual(
+            len(iso.get_attr('H')['diffusion_mean_cm2_s']), 2)
+
 
 class TestPowerSpectrumSpread(unittest.TestCase):
     """
