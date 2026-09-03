@@ -277,9 +277,24 @@ samos-rdf traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
     --radius 6 --savefig rdf.png
 ```
 
+```bash
+# Force the exact-for-any-cell algorithm, as a check on the fast one
+samos-rdf traj.extxyz --species-pairs Li-O --method skew
+```
+
 Command options: `-s/--stepsize N`, `-r/--radius A`, `-b/--bins N`,
-`--species-pairs A-B ...`, `--no-int`.  `--species` and
+`--species-pairs A-B ...`, `--no-int`,
+`--method {auto,ortho,skew}`.  `--species` and
 `--species-pairs` are mutually exclusive.
+
+`--method` chooses how pairs are found.  `auto` (the default) uses a
+periodic k-d tree wherever the cell is orthorhombic, which is orders
+of magnitude faster and lighter on memory for large systems, and falls
+back to testing all 27 neighbour images otherwise.  `ortho` demands
+the fast one and fails on a skewed cell; `skew` forces the slow one
+even for an orthorhombic cell.  Both compute the distance to the
+nearest periodic image, so they agree to rounding -- `skew` is there
+as a check on `ortho`.
 
 ### ADF
 
@@ -354,6 +369,19 @@ the default.
 ## Backwards-incompatible changes
 
 The following changes break existing call sites.
+
+### `shortest_distance` is now measured within the RDF radius
+
+`RDF.run` reports `shortest_distance` and `shortest_distance_<pair>`.
+These used to be the shortest distance between any two atoms of the
+pair, ignoring the requested `radius`, because the old code computed
+every distance anyway.  The fast `ortho` algorithm only ever sees
+pairs inside `radius`, so both algorithms now report the shortest
+distance **within `radius`**, and `inf` when nothing is in range.
+
+The two definitions differ only when a species pair has no neighbour
+inside the whole RDF radius, in which case g(r) is zero everywhere and
+the number was not describing anything useful.
 
 ### Time-parameter API (dynamics module)
 

@@ -121,6 +121,16 @@ class TestFlags(CLITestCase):
             [self.traj_path, '--backend', 'cpp'])
         self.assertEqual(args.backend, 'cpp')
 
+    def test_rdf_method_defaults_to_auto(self):
+        args = cli._parser_rdf().parse_args([self.traj_path])
+        self.assertEqual(args.method, 'auto')
+        for choice in ('auto', 'ortho', 'skew'):
+            args = cli._parser_rdf().parse_args(
+                [self.traj_path, '--method', choice])
+            self.assertEqual(args.method, choice)
+        with self.assertRaises(SystemExit):
+            cli._parser_rdf().parse_args([self.traj_path, '--method', 'fast'])
+
     def test_b_is_bins(self):
         rdf = cli._parser_rdf().parse_args([self.traj_path, '-b', '33'])
         self.assertEqual(rdf.bins, 33)
@@ -205,6 +215,19 @@ class TestCommands(CLITestCase):
                       '--write', self.out('rdf.csv')])
         self.assert_csv(self.out('rdf.csv'),
                         'radius_A,rdf_Li_O,int_Li_O')
+
+    def test_rdf_method_reaches_the_analyzer(self):
+        """The two algorithms agree, so the same CSV must come out
+        whichever one the flag selects."""
+        for choice in ('ortho', 'skew'):
+            cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
+                          '-b', '20', '--species-pairs', 'Li-O',
+                          '--method', choice,
+                          '--write', self.out(choice + '.csv')])
+        with open(self.out('ortho.csv')) as f:
+            ortho = f.read()
+        with open(self.out('skew.csv')) as f:
+            self.assertEqual(ortho, f.read())
 
     def test_adf(self):
         cli.main_adf([self.traj_path, '--timestep', '1', '-r', '3',

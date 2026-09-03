@@ -413,7 +413,7 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
 
 
 def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
-            radius=5.0, bins=100, no_int=False,
+            radius=5.0, bins=100, no_int=False, method='auto',
             plot=False, savefig=None, write=None):
     """
     Compute the radial distribution function for *traj* and optionally
@@ -436,6 +436,9 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
         Number of histogram bins (default 100).
     :param bool no_int:
         Suppress the running integral from the plot.
+    :param str method:
+        Pair-finding algorithm: ``'auto'`` (default), ``'ortho'`` or
+        ``'skew'``.  See :meth:`~samos.analysis.rdf.RDF.run`.
     :param bool plot:
         Show the RDF plot interactively (requires a display).
     :param str savefig:
@@ -459,7 +462,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
     rdf_analyzer = RDF(trajectory=traj)
     res = rdf_analyzer.run(
         radius=radius, stepsize=stepsize, nbins=bins,
-        species_pairs=pairs)
+        species_pairs=pairs, method=method)
 
     if write:
         computed_pairs = res.get_attr('species_pairs')
@@ -839,6 +842,12 @@ def _parser_rdf():
     p.add_argument(
         '--no-int', action='store_true', dest='no_int',
         help='Suppress the running integral from the plot.')
+    p.add_argument(
+        '--method', default='auto', choices=['auto', 'ortho', 'skew'],
+        help='Pair-finding algorithm. auto (default) uses the faster '
+             'ortho one wherever the cell is orthorhombic; ortho '
+             'demands it; skew forces the slower exact-for-any-cell '
+             'one, which is useful as a check on ortho.')
     return p
 
 
@@ -967,7 +976,8 @@ def main_rdf(argv=None):
     args = _parser_rdf().parse_args(argv)
     run_rdf(_prepare(args), stepsize=args.stepsize,
             species_pairs=args.species_pairs, radius=args.radius,
-            bins=args.bins, no_int=args.no_int, **_output_kwargs(args))
+            bins=args.bins, no_int=args.no_int, method=args.method,
+            **_output_kwargs(args))
 
 
 def main_adf(argv=None):
