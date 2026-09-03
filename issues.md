@@ -132,47 +132,13 @@ The `extra_compile_args=['-O3', '-fopenmp']` and
 constructor and go with it. The f2py path never sees them: `setup.py`
 shells out to `python -m numpy.f2py -c ...` with no compiler flags at
 all, so removing the C++ extension removes the only OpenMP dependency
-in the project. That also fixes issue #5.
+in the project -- the macOS build breaks on `-fopenmp` specifically,
+so this also removes that failure mode. (The `Operating System ::
+MacOS` classifier, which claimed a working build that did not exist,
+has already been dropped as an interim fix.)
 
 Worth doing whether or not #1 happens, but if #1 lands first this is
 a straight deletion with nothing to replace.
-
----
-
-## 4. `plot_xsf.py` is dead and imports an undeclared dependency
-
-**Fix difficulty: 1**
-
-`samos/plotting/plot_xsf.py:4`
-
-`from mayavi import mlab` at module import. Mayavi is not in
-`pyproject.toml` dependencies, is not installed in the development
-environment, is imported by nothing else in samos, and has no tests.
-380 lines that cannot run as shipped.
-
-**Fix:** delete it, or move it to `examples/` as a standalone script
-with its own install note. If it is kept in the package, mayavi has
-to become a declared optional dependency and the import has to move
-inside the function that needs it, so that importing
-`samos.plotting` does not fail.
-
----
-
-## 5. The macOS build is broken, and the metadata claims it works
-
-**Fix difficulty: 2**
-
-`setup.py:66-67`, `pyproject.toml` classifiers
-
-`extra_compile_args=['-O3', '-fopenmp']` fails with Apple's clang,
-which ships no libomp unless the user installs it separately. The
-`Operating System :: MacOS` classifier says the package supports
-macOS. CI only builds on `ubuntu-latest`, so nothing catches it.
-
-**Fix:** issue #2 removes the flag entirely and the problem with it.
-Until then, either make OpenMP optional (probe for it and fall back
-to a serial build) or drop the macOS classifier. Adding
-`macos-latest` to the CI matrix would have surfaced this.
 
 ---
 
@@ -193,48 +159,6 @@ makes results noisier.
 other than 1 and ignore it, rather than emulating the subsampling --
 emulating it would mean keeping a slow path alive for a parameter
 nobody wants.
-
----
-
-## 7. `constants.py` redefines what ase already provides
-
-**Fix difficulty: 1**
-
-`samos/utils/constants.py`
-
-`bohr_to_ang = 0.52917721092` and `kB_ev = 8.6173303e-5` duplicate
-`ase.units.Bohr` and `ase.units.kB`, with slightly older CODATA
-values. `ase` is already a hard dependency.
-
-**Fix:** import from `ase.units` and keep only the constants ase does
-not carry (`ANG2_FS_TO_CM2_S`). Note that the values change in the
-12th digit, so any reference JSON in `tests/ref/` that was produced
-through `bohr_to_ang` needs re-checking, not blind regeneration.
-
----
-
-## 8. `samos/lib/__init__.py` imports itself
-
-**Fix difficulty: 1**
-
-`samos/lib/__init__.py:8`
-
-```python
-from . import *  # noqa: F403
-```
-
-A package importing itself with a star. It does nothing beyond what
-the two lines above it already did, and the `# noqa` markers hide
-that the linter noticed.
-
-The star imports also mean that touching `samos.lib` at all pulls in
-both compiled modules, so a user with no Fortran compiler cannot
-import the package even to reach a routine that does not need it.
-(In practice `dynamics.py` and `get_gaussian_density.py` import the
-submodules directly, so nothing depends on the star imports.)
-
-**Fix:** reduce the file to a docstring. If #1 lands, `mdutils` is
-gone and only `gaussian_density` is left to mention.
 
 ---
 
@@ -280,8 +204,13 @@ more than 2.5x on a rarely used routine.
 
 ## Summary of what could go
 
-Deleting #2 and #4 loses nothing at all: 561 lines, one language, and
-the pybind11 and OpenMP dependencies.
+`plot_xsf.py` (issue #4, dead mayavi import) is gone, and the macOS
+classifier (issue #5) has been dropped as an interim fix pending #2.
+
+Deleting #2 loses nothing at all: 181 lines, and the pybind11 and
+OpenMP dependencies -- including the `-fopenmp` flag that made the
+macOS classifier a lie in the first place, so #5 is then fixed for
+real rather than papered over.
 
 Doing #1 as well replaces 374 lines of Fortran with about 80 lines of
 Python that runs 10-85x faster, and leaves `gaussian_density.f90` as
