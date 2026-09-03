@@ -3,6 +3,17 @@
 #include <omp.h>
 #include <vector>
 
+// NOT BUILT. setup.py no longer compiles this file, and nothing in
+// samos imports it -- get_msd lost its backend='cpp' option, which
+// was the only caller. Kept here for reference and in case a future
+// contributor wants the OpenMP version back. See README.md, "The C++
+// backend is disabled", for why it was dropped: it duplicated only 4
+// of the 6 Fortran routines (no get_com_velocities, no VAF), so the
+// option silently fell back to Fortran for the two it lacked, and it
+// had drifted from the Fortran it duplicated -- the comment below
+// claims a different averaging method for the max-stats routine that,
+// on inspection, the Fortran uses too.
+//
 // Contains calculate_msd functions and get_com_positions, matching the
 // Fortran API in mdutils.f90 for drop-in switching between backends.
 // Most functions are direct ports of the Fortran logic. Exception:
