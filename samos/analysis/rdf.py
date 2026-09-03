@@ -110,10 +110,18 @@ class MinimumImage:
 
 
 class BaseAnalyzer(metaclass=ABCMeta):
-    def __init__(self, **kwargs):
+    def __init__(self, *, trajectory=None, **kwargs):
+        """
+        :param Trajectory trajectory: The trajectory to analyse.
+        :raises TypeError: On an unrecognised keyword argument.
+        """
         self._trajectory = None
-        for key, val in list(kwargs.items()):
-            getattr(self, 'set_{}'.format(key))(val)
+        if kwargs:
+            raise TypeError(
+                '{} got unexpected keyword argument(s): {}'.format(
+                    type(self).__name__, ', '.join(sorted(kwargs))))
+        if trajectory is not None:
+            self.set_trajectory(trajectory)
 
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
@@ -387,9 +395,15 @@ class BondAnalyzer(BaseAnalyzer):
          set_bonds() before the main loop.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, bonds=None, **kwargs):
+        """
+        :param array-like bonds: Explicit bond topology, shape
+            (N_bonds, 2), 0-based atom indices.  See :meth:`set_bonds`.
+        """
         self._bonds = None
         super().__init__(**kwargs)
+        if bonds is not None:
+            self.set_bonds(bonds)
 
     def set_bonds(self, bonds):
         """

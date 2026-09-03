@@ -450,6 +450,37 @@ image in range while minimum-image counting keeps only the nearest, so
 the histogram is biased low.  It is a warning, not an error: the
 results are biased rather than meaningless.
 
+### Constructor keywords are explicit and order-independent
+
+`Trajectory`, `DynamicsAnalyzer`, `RDF`, `ADF` and the other analyzers
+took `**kwargs` and called `set_<keyword>` for each entry in the order
+the keywords were typed.  That made correctness depend on argument
+order, because two of the setters depend on earlier ones:
+
+    Trajectory(atoms=a, positions=p)      # worked
+    Trajectory(positions=p, atoms=a)      # ValueError: Types have
+                                          # not been set
+    Trajectory(atoms=a, cells=c, positions=p)   # TypeError from
+                                                # inside np.tile
+
+Each constructor now names its keywords explicitly, so they are
+tab-completable and appear in the API documentation, and applies them
+in dependency order regardless of how they were passed.  All three
+lines above now work.
+
+Two consequences for callers:
+
+* An unrecognised keyword raises `TypeError: Trajectory got unexpected
+  keyword argument(s): postions` instead of `AttributeError:
+  'Trajectory' object has no attribute 'set_postions'`.
+* The keywords are keyword-only.  No call site in samos passed them
+  positionally, since that was never possible.
+
+Two error messages were improved at the same time.  `Trajectory.nat`
+now says which methods supply the atom count rather than `Types have
+not been set`, and `set_cells` explains that a bare 3x3 cell needs a
+step count to be broadcast over, instead of failing inside `np.tile`.
+
 ### `atom_indices` is ignored when `do_com` is set
 
 `get_msd(do_com=True, atom_indices=[...])` used to intersect

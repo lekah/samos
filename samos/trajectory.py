@@ -61,13 +61,60 @@ class Trajectory(AttributedArray):
     _ATOMS_FILENAME = 'atoms.traj'
     _TYPES_KEY = 'types'
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, atoms=None, types=None, timestep=None,
+                 positions=None, velocities=None, forces=None,
+                 stress=None, pot_energies=None, cells=None, **kwargs):
         """
-        Instantiating a trajectory class.
-        Optional keyword-arguments are everything with a set-method.
+        Instantiate a trajectory.  Every keyword corresponds to the
+        set-method of the same name and may be given in any
+        combination; all are optional.
+
+        The setters are applied in the fixed order below because two of
+        them depend on earlier ones, and the caller should not have to
+        know that.  ``positions``, ``velocities`` and ``forces`` are
+        checked against the number of atoms, which comes from *atoms*
+        or *types*; and a bare 3x3 *cells* entry is broadcast over all
+        steps, so it needs a per-step array to have set the step count
+        first.  Passing the keywords in the wrong order used to raise
+        from deep inside the check that tripped.
+
+        :param ase.Atoms atoms: Reference structure; supplies masses,
+            chemical symbols and the fixed cell.
+        :param array-like types: Chemical symbols, one per atom,
+            overriding those of *atoms*.
+        :param float timestep: Timestep in femtoseconds.
+        :param array-like positions: Shape (nstep, nat, 3), Angstrom.
+        :param array-like velocities: Shape (nstep, nat, 3), Ang/fs.
+        :param array-like forces: Shape (nstep, nat, 3), eV/Angstrom.
+        :param array-like stress: Shape (nstep, 6), Voigt order,
+            eV/Angstrom^3.
+        :param array-like pot_energies: Shape (nstep,), eV.
+        :param array-like cells: Shape (nstep, 3, 3), or a single
+            (3, 3) cell to broadcast over all steps, in Angstrom.
+        :raises TypeError: On an unrecognised keyword argument.
         """
         self._atoms = None
+        # Runs first so that the array store exists and an unknown
+        # keyword is reported before any of it is populated.
         super().__init__(**kwargs)
+        if atoms is not None:
+            self.set_atoms(atoms)
+        if types is not None:
+            self.set_types(types)
+        if timestep is not None:
+            self.set_timestep(timestep)
+        if positions is not None:
+            self.set_positions(positions)
+        if velocities is not None:
+            self.set_velocities(velocities)
+        if forces is not None:
+            self.set_forces(forces)
+        if stress is not None:
+            self.set_stress(stress)
+        if pot_energies is not None:
+            self.set_pot_energies(pot_energies)
+        if cells is not None:
+            self.set_cells(cells)
 
     @classmethod
     def from_atoms(cls, atoms_list, timestep_fs=None, add_arrays=None):
@@ -224,7 +271,13 @@ class Trajectory(AttributedArray):
     def nat(self):
         types = self.get_types()
         if types is None:
-            raise ValueError('Types have not been set')
+            # Reached from set_positions / set_velocities / set_forces,
+            # which pass check_nat=self.nat.  Naming the two ways out
+            # saves the caller from tracing the failure back here.
+            raise ValueError(
+                'The number of atoms is not known. Call set_atoms() or '
+                'set_types() first, or pass atoms= or types= to the '
+                'constructor.')
         else:
             return len(types)
 
@@ -238,6 +291,14 @@ class Trajectory(AttributedArray):
 
         array = np.array(array)
         if array.shape == (3, 3):
+            # nstep is fixed by the first per-step array stored, so a
+            # cell given on its own has nothing to be broadcast over.
+            if self.nstep is None:
+                raise ValueError(
+                    'A single 3x3 cell is broadcast over all steps, but '
+                    'the number of steps is not known yet. Set '
+                    'positions (or another per-step array) first, or '
+                    'pass a cell array of shape (nstep, 3, 3).')
             array = np.tile(array, (self.nstep, 1, 1))
         self.set_array(self._CELL_KEY, array,
                        check_existing=check_existing,

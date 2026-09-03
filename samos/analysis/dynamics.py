@@ -201,11 +201,28 @@ class DynamicsAnalyzer:
     for dynamic properties (MSD, VAF, etc)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, trajectories=None, species_of_interest=None,
+                 verbosity=None, **kwargs):
+        """
+        :param list trajectories: Trajectories to analyse; a single
+            :class:`~samos.trajectory.Trajectory` is also accepted.
+        :param species_of_interest: Chemical symbol, or list of them,
+            to restrict every analysis to.
+        :param int verbosity: 0 silences the progress printing.
+        :raises TypeError: On an unrecognised keyword argument.
+        """
         self._species_of_interest = None
         self._verbosity = 1
-        for key, val in kwargs.items():
-            getattr(self, 'set_{}'.format(key))(val)
+        if kwargs:
+            raise TypeError(
+                '{} got unexpected keyword argument(s): {}'.format(
+                    type(self).__name__, ', '.join(sorted(kwargs))))
+        if trajectories is not None:
+            self.set_trajectories(trajectories)
+        if species_of_interest is not None:
+            self.set_species_of_interest(species_of_interest)
+        if verbosity is not None:
+            self.set_verbosity(verbosity)
 
     def set_trajectories(self, trajectories):
         """

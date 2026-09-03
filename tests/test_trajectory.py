@@ -304,5 +304,114 @@ class TestSliceSteps(unittest.TestCase):
             t.slice_steps(3)
 
 
+class TestConstructorArguments(unittest.TestCase):
+    """The constructor used to apply setters in whatever order the
+    keywords were typed, so correctness depended on argument order:
+    positions before atoms raised 'Types have not been set', and a bare
+    3x3 cell before positions raised a TypeError from inside np.tile.
+    The keywords are explicit now and applied in dependency order."""
+
+    NAT = 4
+    NSTEP = 5
+
+    def _kwargs(self):
+        import numpy as np
+        from ase import Atoms
+        np.random.seed(7)
+        return dict(
+            atoms=Atoms('H2O2'),
+            positions=np.random.random((self.NSTEP, self.NAT, 3)),
+            cells=np.eye(3) * 10.,
+            timestep=1.5,
+        )
+
+    def _fingerprint(self, traj):
+        return (
+            sorted(traj.get_arraynames()),
+            {k: traj.get_array(k).tobytes()
+             for k in traj.get_arraynames()},
+            traj.get_attrs(),
+            list(traj.get_types()),
+            traj.nat,
+            traj.nstep,
+        )
+
+    def test_result_is_independent_of_keyword_order(self):
+        """The property the explicit signature establishes.  Only nine
+        setters exist, so the four with a dependency between them can
+        be tested exhaustively."""
+        from itertools import permutations
+        from samos.trajectory import Trajectory
+        kwargs = self._kwargs()
+        reference = None
+        for order in permutations(kwargs):
+            ordered = {key: kwargs[key] for key in order}
+            fingerprint = self._fingerprint(Trajectory(**ordered))
+            if reference is None:
+                reference = fingerprint
+            else:
+                self.assertEqual(reference, fingerprint, msg=str(order))
+
+    def test_positions_before_atoms(self):
+        """The original report: this raised, the reverse worked."""
+        from samos.trajectory import Trajectory
+        kwargs = self._kwargs()
+        traj = Trajectory(positions=kwargs['positions'],
+                          atoms=kwargs['atoms'])
+        self.assertEqual(traj.nat, self.NAT)
+        self.assertEqual(traj.nstep, self.NSTEP)
+
+    def test_fixed_cell_before_positions(self):
+        """A bare 3x3 cell is broadcast over nstep, which positions
+        establish, so this is the dependency running the other way."""
+        from samos.trajectory import Trajectory
+        kwargs = self._kwargs()
+        traj = Trajectory(atoms=kwargs['atoms'], cells=kwargs['cells'],
+                          positions=kwargs['positions'])
+        self.assertEqual(traj.get_cells().shape, (self.NSTEP, 3, 3))
+
+    def test_fixed_cell_without_any_per_step_array(self):
+        """Unsatisfiable at any order: there is no step count to
+        broadcast over.  Used to raise a TypeError from inside
+        np.tile."""
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        with self.assertRaises(ValueError) as ctx:
+            Trajectory(atoms=Atoms('H2'), cells=np.eye(3) * 10.)
+        self.assertIn('number of steps', str(ctx.exception))
+
+    def test_missing_atom_count_names_the_way_out(self):
+        import numpy as np
+        from samos.trajectory import Trajectory
+        with self.assertRaises(ValueError) as ctx:
+            Trajectory(positions=np.zeros((self.NSTEP, self.NAT, 3)))
+        self.assertIn('set_atoms', str(ctx.exception))
+
+    def test_misspelled_keyword(self):
+        """Was AttributeError naming set_postions, a private method the
+        caller never asked for."""
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        with self.assertRaises(TypeError) as ctx:
+            Trajectory(atoms=Atoms('H2'),
+                       postions=np.zeros((2, 2, 3)))
+        self.assertIn('postions', str(ctx.exception))
+
+    def test_analyzers_reject_unknown_keywords(self):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        from samos.analysis.rdf import RDF, ADF
+        for cls in (DynamicsAnalyzer, RDF, ADF):
+            with self.assertRaises(TypeError, msg=cls.__name__) as ctx:
+                cls(trajectroy=None)
+            self.assertIn('trajectroy', str(ctx.exception))
+
+    def test_attributed_array_takes_no_keywords(self):
+        from samos.utils.attributed_array import AttributedArray
+        with self.assertRaises(TypeError):
+            AttributedArray(array=[1, 2, 3])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -9,12 +9,24 @@ class AttributedArray:
     _ATTRIBUTE_FILENAME = 'attributes.json'
 
     def __init__(self, **kwargs):
+        """
+        Subclasses name their own constructor keywords explicitly and
+        forward whatever they do not recognise here, so this is the end
+        of the chain: anything still left is a keyword nothing knows
+        how to apply, and is reported rather than ignored.
+
+        The base class itself takes no keywords -- its only setters,
+        :meth:`set_array` and :meth:`set_attr`, need a name as well as
+        a value and so cannot be driven from a single keyword.
+        """
         self._arrays = {}
         self._attrs = {}
 
         self._nstep = None
-        for key, val in list(kwargs.items()):
-            getattr(self, 'set_{}'.format(key))(val)
+        if kwargs:
+            raise TypeError(
+                '{} got unexpected keyword argument(s): {}'.format(
+                    type(self).__name__, ', '.join(sorted(kwargs))))
 
     def set_array(
         self, name, array, check_existing=False,
