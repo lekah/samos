@@ -197,7 +197,7 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
 
 def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
             t_start_fit=5., t_end_fit=10., t_unit='ps', nblocks=1,
-            backend='fortran', num_threads=None, write=None):
+            write=None):
     """
     Compute the MSD for *traj* and optionally display or save a plot.
 
@@ -221,11 +221,6 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         (``'fs'``, ``'ps'``, or ``'dt'``; default ``'ps'``).
     :param int nblocks:
         Number of blocks to split the trajectory into (default 1).
-    :param str backend:
-        Compute kernel: ``'fortran'`` (default) or ``'cpp'`` (OpenMP).
-    :param int num_threads:
-        Number of OpenMP threads for the C++ backend. Ignored when
-        backend is ``'fortran'``.
     :param str write:
         If given, write the mean MSD for each species to this CSV file.
         Columns: ``t_fs``, then ``msd_{species}_A2`` per species.
@@ -241,8 +236,6 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
         t_end_fit=t_end_fit,
         t_unit=t_unit,
         nr_of_blocks=nblocks,
-        backend=backend,
-        num_threads=num_threads,
     )
 
     if write:
@@ -782,14 +775,6 @@ def _parser_msd():
     p = _make_parser('msd', 'Calculate and optionally plot the MSD.')
     _add_stepsize(p)
     _add_fit_window(p, 'linear-fit window')
-    p.add_argument(
-        '--backend', default='fortran', choices=['fortran', 'cpp'],
-        help='Compute kernel: fortran (default) or cpp (OpenMP).')
-    p.add_argument(
-        '-j', '--num-threads', type=int, default=None, metavar='N',
-        dest='num_threads',
-        help='OpenMP thread count for the cpp backend '
-             '(default: OMP_NUM_THREADS).')
     return p
 
 
@@ -948,8 +933,7 @@ def main_msd(argv=None):
     args = _parser_msd().parse_args(argv)
     run_msd(_prepare(args), stepsize=args.stepsize, nblocks=args.nblocks,
             t_start_fit=args.t_start_fit, t_end_fit=args.t_end_fit,
-            t_unit=args.t_unit, backend=args.backend,
-            num_threads=args.num_threads, **_output_kwargs(args))
+            t_unit=args.t_unit, **_output_kwargs(args))
 
 
 def main_vaf(argv=None):

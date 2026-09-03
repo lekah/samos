@@ -80,10 +80,10 @@ class TestOptionOrder(CLITestCase):
     def test_order_does_not_matter(self):
         parser = cli._parser_msd()
         orders = (
-            [self.traj_path, '-n', '3', '-s', '2', '--backend', 'cpp'],
-            [self.traj_path, '--backend', 'cpp', '-n', '3', '-s', '2'],
-            ['-n', '3', self.traj_path, '--backend', 'cpp', '-s', '2'],
-            ['-n', '3', '-s', '2', '--backend', 'cpp', self.traj_path],
+            [self.traj_path, '-n', '3', '-s', '2', '--t-unit', 'fs'],
+            [self.traj_path, '--t-unit', 'fs', '-n', '3', '-s', '2'],
+            ['-n', '3', self.traj_path, '--t-unit', 'fs', '-s', '2'],
+            ['-n', '3', '-s', '2', '--t-unit', 'fs', self.traj_path],
         )
         namespaces = [vars(parser.parse_args(a)) for a in orders]
         for other in namespaces[1:]:
@@ -107,19 +107,11 @@ class TestOptionOrder(CLITestCase):
 class TestFlags(CLITestCase):
     """The short flags that used to collide across parsers."""
 
-    def test_n_is_nblocks_and_j_is_threads(self):
-        args = cli._parser_msd().parse_args(
-            [self.traj_path, '-n', '7', '-j', '4'])
+    def test_n_is_nblocks(self):
+        # -n used to mean OpenMP threads in the old single-command
+        # CLI; it is always --nblocks now.
+        args = cli._parser_msd().parse_args([self.traj_path, '-n', '7'])
         self.assertEqual(args.nblocks, 7)
-        self.assertEqual(args.num_threads, 4)
-
-    def test_msd_backend_has_no_short_flag(self):
-        # -b used to mean --backend here and --bins elsewhere.
-        with self.assertRaises(SystemExit):
-            cli._parser_msd().parse_args([self.traj_path, '-b', 'cpp'])
-        args = cli._parser_msd().parse_args(
-            [self.traj_path, '--backend', 'cpp'])
-        self.assertEqual(args.backend, 'cpp')
 
     def test_rdf_method_defaults_to_auto(self):
         args = cli._parser_rdf().parse_args([self.traj_path])

@@ -24,9 +24,8 @@ pip install .
 
 Other dependencies: `ase`, `scipy`, `matplotlib`.
 
-The build compiles Fortran extensions with f2py and a C++ extension with
-pybind11 + OpenMP.  A Fortran compiler (gfortran) and a C++ compiler must
-be present before running `pip install .`.
+The build compiles a Fortran extension with f2py.  A Fortran compiler
+(gfortran) must be present before running `pip install .`.
 
 ```bash
 # conda
@@ -55,20 +54,6 @@ Common root causes:
 | `gfortran: command not found` | Install gfortran (see above) |
 | `meson: command not found` | `pip install meson ninja` |
 | Errors about `numpy.distutils` on Python 3.12+ | Upgrade numpy to 2.x (`pip install "numpy>=2.0"`) and ensure meson/ninja are installed |
-
-**C++ extension fails to compile (`-fopenmp` not found)**
-
-The C++ backend uses OpenMP.  On macOS with Apple Clang, `-fopenmp` is
-not available by default.  Install LLVM via Homebrew and set the
-compiler environment variables, or install gcc:
-
-```bash
-brew install gcc
-CC=gcc-14 CXX=g++-14 pip install .
-```
-
-The Fortran backend works without OpenMP and is used by default; the
-C++ backend is optional.
 
 ---
 
@@ -210,8 +195,8 @@ samos-msd traj.extxyz --t-start-fit 2000 --t-end-fit 4000 --t-unit fs
 # Fit window in timesteps
 samos-msd traj.extxyz --t-start-fit 160 --t-end-fit 320 --t-unit dt
 
-# C++ backend with 4 OpenMP threads; write results to CSV
-samos-msd traj.extxyz --backend cpp -j 4 --write msd.csv --savefig msd.png
+# write results to CSV and save a plot
+samos-msd traj.extxyz --write msd.csv --savefig msd.png
 
 # LAMMPS dump, Li species, 3 blocks
 samos-msd traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
@@ -219,8 +204,7 @@ samos-msd traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
 ```
 
 Command options: `-s/--stepsize N`, `-ts/--t-start-fit T`,
-`-te/--t-end-fit T`, `--t-unit UNIT`, `--backend {fortran,cpp}`,
-`-j/--num-threads N`.
+`-te/--t-end-fit T`, `--t-unit UNIT`.
 
 ### VAF
 
@@ -338,11 +322,6 @@ msd = d.get_msd(
     t_start_fit=2., t_end_fit=4., t_unit='ps',
     block_length=8., nr_of_blocks=None)
 
-# MSD with C++ backend
-msd_cpp = d.get_msd(
-    t_start_fit=2., t_end_fit=4., t_unit='ps',
-    nr_of_blocks=6, backend='cpp', num_threads=4)
-
 # VAF
 vaf = d.get_vaf(
     species_of_interest=['Li'],
@@ -359,10 +338,6 @@ Time parameters (`t_start`, `t_end`, `t_start_fit`, `t_end_fit`,
 `block_length`, `t_long_end`) all accept a plain numeric value; the
 unit is set once per call via `t_unit` (`'fs'`, `'ps'`, or `'dt'`).
 `stepsize_t` and `stepsize_tau` are always plain integer timestep counts.
-
-The C++ MSD backend supports OpenMP parallelisation.  Pass
-`backend='cpp'` and optionally `num_threads=N`.  The Fortran backend is
-the default.
 
 ---
 
@@ -549,9 +524,14 @@ things on either side of the command name:
 
 | Old | New |
 |---|---|
-| `msd -n N` (OpenMP threads) | `-j/--num-threads N`; `-n` is always `--nblocks` |
-| `msd -b BACKEND` | `--backend BACKEND`; `-b` is always `--bins` |
+| `msd -n N` (OpenMP threads) | `-n` is always `--nblocks` |
+| `msd -b BACKEND` | `-b` is always `--bins` |
 | `vaf -i METHOD` | `--integration METHOD` |
+
+`msd`'s `-n`/`-b` used to mean OpenMP threads and compute backend.
+Both moved to `-j/--num-threads` and `--backend` at the time, and both
+have since been removed entirely along with the C++ backend they
+controlled -- see "The C++ backend is gone" below.
 
 `-n/--nblocks` is no longer accepted by `samos-rdf` and `samos-adf`,
 which never used it.
@@ -604,3 +584,21 @@ every other writer in `samos.io.xsf`, rather than the Fortran's
 `%20.10f`, and the density itself is shifted by one grid cell (and,
 for skewed cells, correctly placed at all) relative to files written
 by the old code.
+
+### The C++ backend is gone
+
+`samos/lib/mdutils_cpp_omp.cpp` re-implemented 4 of the 6 Fortran
+routines with OpenMP, but never `get_com_velocities` or
+`calculate_vaf_specific_atoms` -- so `backend='cpp'` silently fell
+back to the (slower) Fortran path for VAF, with no warning that the
+faster backend a caller asked for was not actually used. It had also
+drifted from the Fortran it duplicated: a comment claimed a different
+averaging method that, on inspection, the Fortran used too.
+
+`get_msd`'s `backend` and `num_threads` keywords are gone, along with
+`samos-msd`'s `--backend` and `-j/--num-threads` flags -- the Fortran
+kernel is the only one now, so there is nothing left to pick between.
+`setup.py` no longer builds a C++ extension, so `pybind11` is no
+longer a build dependency and the `-fopenmp` compiler flag (the one
+that broke the macOS build, see "Removed: unreachable Fortran..."
+above) is gone from the project entirely.

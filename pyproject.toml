@@ -1,7 +1,7 @@
 [build-system]
 # meson + ninja are needed by numpy.f2py on Python >= 3.12 (meson backend replaces
 # numpy.distutils which was removed from numpy 2.x / Python 3.12).
-requires = ["setuptools>=61", "wheel", "pybind11>=2.6", "numpy", "meson>=1.1", "ninja"]
+requires = ["setuptools>=61", "wheel", "numpy", "meson>=1.1", "ninja"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -55,4 +55,4 @@ include = ["samos*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"samos.lib" = ["*.f90", "*.cpp"]
+"samos.lib" = ["*.f90"]

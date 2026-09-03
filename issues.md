@@ -24,12 +24,12 @@ numbers are labels, not an ordering contract.
 | file | lines | what it does | reached from |
 |---|---|---|---|
 | `samos/lib/mdutils.f90` | 374 | MSD x3, VAF, centre of mass x2 | `get_msd`, `get_vaf` |
-| `samos/lib/mdutils_cpp_omp.cpp` | 181 | 4 of those 6, with OpenMP | `get_msd(backend='cpp')` |
-| `setup.py` | 70 | hand-rolled build for both toolchains | every install |
+| `setup.py` | 54 | f2py build | every install |
 
-555 lines of compiled code, down from 737 now that
-`gaussian_density.f90` (issue #9) is gone. Everything else -- RDF,
-ADF, LAMMPS reading, CLI, plotting -- is pure Python.
+374 lines of compiled code, down from 737 now that
+`gaussian_density.f90` (issue #9) and `mdutils_cpp_omp.cpp` (issue #2)
+are gone. Everything else -- RDF, ADF, LAMMPS reading, CLI, plotting
+-- is pure Python.
 
 All timings below were measured on this machine against synthetic
 trajectories, comparing the shipped kernel with a prototype
@@ -94,54 +94,6 @@ should be roundoff (1e-13 relative), not a loose fit.
 
 ---
 
-## 2. The C++ backend is a partial duplicate of the Fortran
-
-**Fix difficulty: 3**
-
-`samos/lib/mdutils_cpp_omp.cpp`, `samos/analysis/dynamics.py:579-594`,
-`samos/cli.py:783-788`, `tests/test_dynamics.py:169-197`,
-`tests/test_cli.py:83-122`, `setup.py`
-
-`mdutils_cpp_omp.cpp` re-implements 4 of the 6 Fortran routines. It
-has no `get_com_velocities` and no `calculate_vaf_specific_atoms`, so
-`backend='cpp'` quietly applies to MSD only -- a user who sets it
-expecting a faster VAF gets the Fortran path with no warning.
-
-Two implementations of the same maths have to be kept in step, and
-they have already drifted. The header comment claims
-`calculate_msd_specific_atoms_max_stats` "uses Welford's online mean
-... rather than the Fortran accumulate-then-divide approach", but the
-Fortran uses a running mean too (`mdutils.f90:127-128`). The comment
-describes a difference that does not exist.
-
-The cost of the switch itself: about 36 lines across `dynamics.py`,
-`cli.py` and the tests, plus a duplicated test block that has to
-compare with a tolerance rather than exactly, because OpenMP
-reduction order changes the rounding.
-
-**Fix:** delete the file, the `backend=` and `num_threads=` arguments,
-the `--backend` CLI flag, and the duplicated tests. In `setup.py`,
-drop the `Pybind11Extension` entry, the `from pybind11.setup_helpers`
-import, and the whole `cpp_exts` / `f2py_exts` split in
-`CombinedBuild` -- with only f2py extensions left, `run()` no longer
-needs to partition anything. Drop `pybind11>=2.6` from
-`[build-system] requires` in `pyproject.toml`.
-
-The `extra_compile_args=['-O3', '-fopenmp']` and
-`extra_link_args=['-fopenmp']` belong to the `Pybind11Extension`
-constructor and go with it. The f2py path never sees them: `setup.py`
-shells out to `python -m numpy.f2py -c ...` with no compiler flags at
-all, so removing the C++ extension removes the only OpenMP dependency
-in the project -- the macOS build breaks on `-fopenmp` specifically,
-so this also removes that failure mode. (The `Operating System ::
-MacOS` classifier, which claimed a working build that did not exist,
-has already been dropped as an interim fix.)
-
-Worth doing whether or not #1 happens, but if #1 lands first this is
-a straight deletion with nothing to replace.
-
----
-
 ## 6. `stepsize_tau` is a speed knob that costs statistics
 
 **Fix difficulty: 2**
@@ -164,16 +116,15 @@ nobody wants.
 
 ## Summary of what could go
 
-`plot_xsf.py` (issue #4, dead mayavi import) is gone, and the macOS
-classifier (issue #5) has been dropped as an interim fix pending #2.
+`plot_xsf.py` (issue #4, dead mayavi import), `gaussian_density.f90`
+(issue #9) and `mdutils_cpp_omp.cpp` (issue #2) are all gone now.
+Deleting #2 also took the pybind11 and OpenMP dependencies with it --
+including the `-fopenmp` flag that made the macOS classifier (issue
+#5) a lie in the first place, so #5 is fixed for real now rather than
+papered over by dropping the classifier as an interim fix.
 
-Deleting #2 loses nothing at all: 181 lines, and the pybind11 and
-OpenMP dependencies -- including the `-fopenmp` flag that made the
-macOS classifier a lie in the first place, so #5 is then fixed for
-real rather than papered over.
-
-Doing #1 as well replaces 374 lines of Fortran with about 80 lines of
-Python that runs 10-85x faster, and removes the compiler requirement
-entirely: `gaussian_density.f90` (issue #9) is already gone, so once
-`mdutils.f90` follows it there is no compiled code left, and
-`setup.py`, gfortran, meson and ninja all drop out of the build.
+Only `mdutils.f90` remains compiled. Doing #1 replaces its 374 lines
+with about 80 lines of Python that runs 10-85x faster, and at that
+point removes the compiler requirement entirely: there would be no
+compiled code left, and `setup.py`, gfortran, meson and ninja all drop
+out of the build.

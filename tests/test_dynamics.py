@@ -141,14 +141,12 @@ class TestDynamics(unittest.TestCase):
             t_start_fit=2., t_end_fit=4.,
             # block_length_dt=640 @ 12.5 fs/step = 8 ps
             block_length=8., t_unit='ps',
-            species_of_interest=['O', 'H'],
-            backend='fortran')
+            species_of_interest=['O', 'H'])
 
         msd_iso_dec = d.get_msd(
             t_start_fit=2., t_end_fit=4., t_unit='ps',
             stepsize_tau=20,
-            nr_of_blocks=12, decomposed=True,
-            backend='fortran')
+            nr_of_blocks=12, decomposed=True)
 
         for attributed_array, name in ((msd_iso, 'msd_iso'),
                                        (msd_iso_dec, 'msd_iso_dec'),
@@ -165,36 +163,6 @@ class TestDynamics(unittest.TestCase):
                 result = compare_dicts(ref_attrs, attrs, name)
                 if not result:
                     self.fail(f"Attributes of {name} do not match reference.")
-
-        msd_iso = d.get_msd(
-            t_start_fit=2., t_end_fit=4.,
-            block_length=8., t_unit='ps',
-            species_of_interest=['O', 'H'],
-            backend='cpp')
-
-        msd_iso_dec = d.get_msd(
-            t_start_fit=2., t_end_fit=4., t_unit='ps',
-            stepsize_tau=20,
-            nr_of_blocks=12, decomposed=True,
-            backend='cpp')
-
-        for attributed_array, name in ((msd_iso, 'msd_iso'),
-                                       (msd_iso_dec, 'msd_iso_dec')):
-            attrs = attributed_array.get_attrs()
-            with open('ref/{}_H2O-64-300K.json'.format(name), 'r') as f:
-                ref_attrs = json.load(f)
-            for key in ref_attrs.keys():
-                try:
-                    self.assertEqual(ref_attrs[key], attrs[key])
-                except AssertionError:
-                    # the c++ values do not match bit for bit because
-                    # omp ordering can have slightly different
-                    # rounding, but it should still be extremely
-                    # close, so use numpy testing that can use tolerances
-                    for subkey in ref_attrs[key]:
-                        np.testing.assert_allclose(
-                            attrs[key][subkey], ref_attrs[key][subkey],
-                            rtol=1e-12)
 
 
 class TestMSDSingleBlock(unittest.TestCase):
