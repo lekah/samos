@@ -25,11 +25,11 @@ numbers are labels, not an ordering contract.
 |---|---|---|---|
 | `samos/lib/mdutils.f90` | 374 | MSD x3, VAF, centre of mass x2 | `get_msd`, `get_vaf` |
 | `samos/lib/mdutils_cpp_omp.cpp` | 181 | 4 of those 6, with OpenMP | `get_msd(backend='cpp')` |
-| `samos/lib/gaussian_density.f90` | 182 | paints gaussians on a 3-D grid | `get_gaussian_density` |
-| `setup.py` | 71 | hand-rolled build for both toolchains | every install |
+| `setup.py` | 70 | hand-rolled build for both toolchains | every install |
 
-737 lines of compiled code, about 10% of the project. Everything else
--- RDF, ADF, LAMMPS reading, CLI, plotting -- is pure Python.
+555 lines of compiled code, down from 737 now that
+`gaussian_density.f90` (issue #9) is gone. Everything else -- RDF,
+ADF, LAMMPS reading, CLI, plotting -- is pure Python.
 
 All timings below were measured on this machine against synthetic
 trajectories, comparing the shipped kernel with a prototype
@@ -162,46 +162,6 @@ nobody wants.
 
 ---
 
-## 9. The Fortran writes the output file that Python opened
-
-**Fix difficulty: 4**
-
-`samos/lib/gaussian_density.f90:144-161`,
-`samos/analysis/get_gaussian_density.py:140`
-
-Python writes the xsf header through `write_xsf`, then
-`make_gaussian_density` opens Fortran unit 21 on the same path with
-`status='old', access='append'` and writes the data grid itself,
-including the closing `END_DATAGRID_3D` / `END_BLOCK_DATAGRID_3D`
-lines. Two languages take turns appending to one file, and the format
-is defined half in each.
-
-This is the one routine where compiled code genuinely earns its keep.
-It is a scatter-add of gaussians onto a grid, which numpy is bad at: a
-vectorised numpy prototype (batched over atoms and frames,
-`np.bincount` for the scatter) came out **2.5x slower** than the
-Fortran -- 0.9 s vs 2.4 s for 200 frames x 20 atoms on a 120^3 grid.
-That is a real loss, unlike the 10-85x win in issue #1.
-
-**Fix:** keep the Fortran maths, but have it return the grid as an
-array and let Python write it. `make_gaussian_density` already
-allocates `counted(n1,n2,n3)` -- make it `intent(out)` instead of
-writing it to disk, and pass it to the existing `write_xsf`. That
-removes the filename argument, the append-mode coupling, and the
-duplicated xsf format knowledge, and makes the routine testable
-without a temporary file.
-
-**Alternative worth considering:** accept the 2.5x and go pure Python.
-That deletes `setup.py` entirely, drops gfortran, meson and ninja from
-the build, and turns samos into a pure-Python wheel that installs
-anywhere in a second -- including Windows and macOS, which currently
-need a working Fortran toolchain. The density is a niche feature: it
-is not exposed through the CLI and appears in one example notebook.
-This is a judgement call about whether the install experience is worth
-more than 2.5x on a rarely used routine.
-
----
-
 ## Summary of what could go
 
 `plot_xsf.py` (issue #4, dead mayavi import) is gone, and the macOS
@@ -213,8 +173,7 @@ macOS classifier a lie in the first place, so #5 is then fixed for
 real rather than papered over.
 
 Doing #1 as well replaces 374 lines of Fortran with about 80 lines of
-Python that runs 10-85x faster, and leaves `gaussian_density.f90` as
-the only compiled file in the project.
-
-Doing the alternative under #9 on top of that removes `setup.py`, the
-compiler requirement, and the whole f2py build path.
+Python that runs 10-85x faster, and removes the compiler requirement
+entirely: `gaussian_density.f90` (issue #9) is already gone, so once
+`mdutils.f90` follows it there is no compiled code left, and
+`setup.py`, gfortran, meson and ninja all drop out of the build.

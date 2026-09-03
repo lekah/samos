@@ -57,7 +57,6 @@ class CombinedBuild(build_ext):
 setup(
     ext_modules=[
         f2py_Extension('samos.lib.fortran_lib', [
-            'samos/lib/gaussian_density.f90',
             'samos/lib/mdutils.f90',
         ]),
         Pybind11Extension(

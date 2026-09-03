@@ -45,7 +45,7 @@ failing f2py command directly to see it:
 
 ```bash
 cd samos/lib
-python -m numpy.f2py -c gaussian_density.f90 -m gaussian_density
+python -m numpy.f2py -c mdutils.f90 -m mdutils
 ```
 
 Common root causes:
@@ -443,9 +443,11 @@ went too.  The remaining `recenter` tests assert the property directly
 -- the centre of mass ends up at zero -- rather than agreeing with
 another implementation.
 
-`samos/lib/rdf.f90` is gone entirely, so the Fortran extension now
-builds from `gaussian_density.f90` and `mdutils.f90` only.  **Rerun
-`pip install -e .`** after pulling this.
+`samos/lib/rdf.f90` is gone entirely, so at that point the Fortran
+extension built from `gaussian_density.f90` and `mdutils.f90` only.
+`gaussian_density.f90` has since been removed too (see below), so it
+now builds from `mdutils.f90` alone.  **Rerun `pip install -e .`**
+after pulling this.
 
 ### Minimum-image convention
 
@@ -575,3 +577,30 @@ The `--t-unit` flag is per command and defaults to `ps`.
 Previously returned a 14-element positional tuple.  Now returns a
 `RunningParams` namedtuple; callers must access fields by name
 (e.g. `rp.t_start_fit_dt` instead of `rp[5]`).
+
+### `get_gaussian_density` no longer needs a Fortran build
+
+`samos/lib/gaussian_density.f90` is gone; `get_gaussian_density` now
+bins the density onto the grid in pure numpy and hands the array to
+`write_xsf` directly, instead of writing the header in Python and
+having Fortran open the same file again in append mode to finish it.
+
+The Fortran carried two bugs, both fixed rather than ported over:
+
+* It folded an atom into the cell with `inv(cell.T)` but converted
+  back with `cell` instead of `cell.T`.  That round trip only returns
+  to where it started for a symmetric cell, so density written for a
+  skewed cell was placed at the wrong position relative to the atoms
+  in the same file.
+* Every grid candidate's weight was computed one grid step further
+  along each axis than the storage cell it was written to -- for any
+  cell shape, not just skewed ones. Invisible only because the
+  gaussian is usually broader than one grid spacing, so the shift
+  didn't stand out.
+
+`get_gaussian_density`'s own arguments and defaults are unchanged.
+The output `.xsf` file now uses the same `%.4E` grid formatting as
+every other writer in `samos.io.xsf`, rather than the Fortran's
+`%20.10f`, and the density itself is shifted by one grid cell (and,
+for skewed cells, correctly placed at all) relative to files written
+by the old code.
