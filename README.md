@@ -450,6 +450,15 @@ image in range while minimum-image counting keeps only the nearest, so
 the histogram is biased low.  It is a warning, not an error: the
 results are biased rather than meaningless.
 
+### `atom_indices` is ignored when `do_com` is set
+
+`get_msd(do_com=True, atom_indices=[...])` used to intersect
+*atom_indices* with the single pseudo-atom that `do_com` produces.
+That silently emptied the selection whenever *atom_indices* did not
+contain index 1, and the Fortran kernel was then handed zero atoms and
+returned uninitialised memory.  *atom_indices* selects individual
+atoms, and `do_com` leaves none, so it is now skipped in that case.
+
 ### Stress units
 
 The internal stress unit is now `eV/A^3` (1 eV/A^3 = 160.2177 GPa), and

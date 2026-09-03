@@ -274,6 +274,21 @@ class TestCenterOfMassAndKineticEnergies(unittest.TestCase):
         self.assertFalse(np.allclose(h, o))
         self.assertGreater(h[-1], o[-1])
 
+    def test_do_com_ignores_atom_indices(self):
+        """atom_indices picks out individual atoms, and do_com leaves
+        none -- the species has been collapsed onto a single centre of
+        mass.  The filter used to run anyway and emptied the selection
+        whenever atom_indices did not happen to contain index 1, which
+        handed the Fortran kernel zero atoms."""
+        d = self._analyzer()
+        kw = dict(t_end_fit=100, t_unit='dt', nr_of_blocks=4, do_com=True)
+        plain = d.get_msd(**kw)
+        filtered = d.get_msd(atom_indices=[2, 3], **kw)
+        for species in ('H', 'O'):
+            key = 'msd_isotropic_{}_mean'.format(species)
+            np.testing.assert_array_equal(
+                plain.get_array(key), filtered.get_array(key))
+
     def test_do_com_vaf_runs(self):
         d = self._analyzer()
         vaf = d.get_vaf(t_end_fit=50, t_end=100, t_unit='dt',

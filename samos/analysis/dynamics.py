@@ -175,6 +175,26 @@ def _species_factors(trajectory, atomic_species):
     return factors, len(indices)
 
 
+def _com_array(trajectory, atomic_species, array, kernel):
+    """
+    Collapse *array* onto the centre of mass of *atomic_species*.
+
+    This is what ``do_com`` does for collective (charge) diffusion: the
+    quantity of interest is the motion of a species as a whole, not of
+    its individual atoms.  *kernel* is ``get_com_positions`` or
+    ``get_com_velocities``; they take the same arguments, so the choice
+    of kernel is the only thing that differs between MSD and VAF.
+
+    :returns:
+        ``(com_array, indices_of_interest, prefactor)``.  The result
+        holds a single pseudo-atom, hence the fixed index list, and
+        *prefactor* rescales by the number of atoms that went into it.
+    """
+    masses = _get_masses(trajectory)
+    factors, prefactor = _species_factors(trajectory, atomic_species)
+    return kernel(array, masses, factors), [1], prefactor
+
+
 class DynamicsAnalyzer:
     """
     This class serves as the main analyzer
@@ -460,6 +480,8 @@ class DynamicsAnalyzer:
         :param list atom_indices:
             Subset of atom indices to include.  The intersection with
             *species_of_interest* is used, so this narrows the selection.
+            Ignored when *do_com* is set, which leaves no individual
+            atoms to select from.
         :param str backend:
             Compute kernel: ``'fortran'`` (default) or ``'cpp'`` (OpenMP).
         :param int num_threads:
@@ -562,22 +584,20 @@ class DynamicsAnalyzer:
             for itraj, trajectory in enumerate(trajectories):
                 positions = trajectory.get_positions()
                 if p.do_com:
-                    # Collective (charge) diffusion: replace the
-                    # per-atom positions by the centre of mass of this
-                    # species, and rescale by the number of atoms that
-                    # went into it.
-                    masses = _get_masses(trajectory)
-                    factors, prefactor = _species_factors(
-                        trajectory, atomic_species)
-                    positions = get_com_positions(positions, masses, factors)
-                    indices_of_interest = [1]
+                    positions, indices_of_interest, prefactor = _com_array(
+                        trajectory, atomic_species, positions,
+                        get_com_positions)
                 else:
                     indices_of_interest = trajectory.get_indices_of_species(
                         atomic_species, start=1)
                     prefactor = 1
-                if atom_indices is not None:
-                    indices_of_interest = [
-                        i for i in indices_of_interest if i in atom_indices]
+                    # Only meaningful per atom: do_com has already
+                    # replaced the atoms by a single pseudo-atom, so
+                    # there is nothing left for atom_indices to select.
+                    if atom_indices is not None:
+                        indices_of_interest = [
+                            i for i in indices_of_interest
+                            if i in atom_indices]
 
                 # make blocks
                 nstep, nat, _ = positions.shape
@@ -921,16 +941,9 @@ class DynamicsAnalyzer:
                     velocities = trajectory.get_velocities(
                         remove_angular_momentum=remove_angular_momentum)
                 if p.do_com:
-                    # Collective (charge) diffusion: replace the
-                    # per-atom velocities by the centre-of-mass velocity
-                    # of this species, and rescale by the number of
-                    # atoms that went into it.
-                    masses = _get_masses(trajectory)
-                    factors, prefactor = _species_factors(
-                        trajectory, atomic_species)
-                    velocities = get_com_velocities(
-                        velocities, masses, factors)
-                    indices_of_interest = [1]
+                    velocities, indices_of_interest, prefactor = _com_array(
+                        trajectory, atomic_species, velocities,
+                        get_com_velocities)
                 else:
                     indices_of_interest = trajectory.get_indices_of_species(
                         atomic_species, start=1)
