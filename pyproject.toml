@@ -1,7 +1,8 @@
 [build-system]
-# meson + ninja are needed by numpy.f2py on Python >= 3.12 (meson backend replaces
-# numpy.distutils which was removed from numpy 2.x / Python 3.12).
-requires = ["setuptools>=61", "wheel", "numpy", "meson>=1.1", "ninja"]
+# No compiled extension is built any more (issues.md issues #1, #2,
+# #9), so this no longer needs meson/ninja (those were only for
+# numpy.f2py) or a C/Fortran compiler.
+requires = ["setuptools>=61", "wheel", "numpy"]
 build-backend = "setuptools.build_meta"
 
 [project]

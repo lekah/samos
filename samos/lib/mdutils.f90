@@ -2,7 +2,20 @@
 
  ! To use it with python, compile with f2py
 
-
+ ! NOT BUILT. setup.py no longer compiles this file, and nothing in
+ ! samos imports it -- samos/analysis/_fft_dynamics.py replaced every
+ ! routine here with a pure numpy/scipy implementation using an FFT
+ ! identity instead of the O(N^2) loop below, 10-200x faster measured
+ ! end to end (see issues.md issue #1). Kept here for reference and in
+ ! case a future contributor wants the compiled version back.
+ !
+ ! The Python rewrite also fixed a bug: calculate_msd_specific_atoms,
+ ! ..._decompose_d and ..._max_stats all loop their outer time index
+ ! from 1, so lag 0 is never computed and every value ends up one
+ ! stepsize_t slot later than the t_list_fs axis get_msd reports it
+ ! under -- see README.md, "get_msd's time axis". calculate_vaf_
+ ! specific_atoms below does not have this problem; its loop already
+ ! starts at 0.
 
 
 SUBROUTINE calculate_msd_specific_atoms(    &

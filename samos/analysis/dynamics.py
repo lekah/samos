@@ -570,7 +570,7 @@ class DynamicsAnalyzer:
         """
         _check_deprecated_time_kwargs(kwargs)
 
-        from samos.lib.mdutils import (
+        from samos.analysis._fft_dynamics import (
             calculate_msd_specific_atoms,
             calculate_msd_specific_atoms_decompose_d,
             calculate_msd_specific_atoms_max_stats,
@@ -873,7 +873,7 @@ class DynamicsAnalyzer:
 
         _check_deprecated_time_kwargs(kwargs)
 
-        from samos.lib.mdutils import (
+        from samos.analysis._fft_dynamics import (
             calculate_vaf_specific_atoms,
             get_com_velocities)
         timestep_fs, trajectories = self._require_trajectories()

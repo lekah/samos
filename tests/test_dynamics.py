@@ -66,6 +66,22 @@ class TestRecenter(unittest.TestCase):
 
 
 class TestDynamics(unittest.TestCase):
+    """
+    stepsize_tau used to subsample time origins for speed; the FFT
+    rewrite (issue #1) made that unnecessary, so it is now ignored
+    (issue #6) and no longer passed here. Dropping it from the vaf
+    and msd_iso_dec calls changed their reference values -- every
+    origin is used now instead of one in twenty -- by up to ~11% on
+    the (3,3) diffusion tensor's off-diagonal terms, and, for VAF, up
+    to several-fold on H's std/sem (H moves faster and more
+    intricately than O, so its statistics were more sensitive to
+    heavy subsampling). Both are a real, expected improvement from
+    better statistics, not a bug: verified by comparing the new numpy
+    engine against samos.lib.mdutils directly, at stepsize_tau=1 on
+    this exact trajectory, to roundoff. msd_iso needed no change: it
+    never passed stepsize_tau to begin with.
+    """
+
     def test_1(self):
         def compare_values(val1, val2, label):
             # print("Comparing {}: {} vs {}".format(label, val1, val2))
@@ -134,7 +150,6 @@ class TestDynamics(unittest.TestCase):
         pws = d.get_power_spectrum(smoothing=1, nr_of_blocks=6)
 
         vaf = d.get_vaf(t_start_fit=2., t_end_fit=4., t_unit='ps',
-                        stepsize_tau=20,
                         nr_of_blocks=12, species_of_interest=['O', 'H'])
 
         msd_iso = d.get_msd(
@@ -145,7 +160,6 @@ class TestDynamics(unittest.TestCase):
 
         msd_iso_dec = d.get_msd(
             t_start_fit=2., t_end_fit=4., t_unit='ps',
-            stepsize_tau=20,
             nr_of_blocks=12, decomposed=True)
 
         for attributed_array, name in ((msd_iso, 'msd_iso'),
@@ -751,6 +765,79 @@ class TestFitWindowRequirement(unittest.TestCase):
         with self.assertRaises(InputError) as cm:
             self._analyzer().get_power_spectrum(nr_of_blocks=5000)
         self.assertNotIn('t_end', str(cm.exception))
+
+
+class TestMsdVafUseNumpyEngine(unittest.TestCase):
+    """get_msd/get_vaf now call samos.analysis._fft_dynamics
+    unconditionally (issue #1, stage 3): the Fortran path, the
+    _engine switch that used to choose between them, and
+    samos.lib.mdutils's build are all gone -- see README.md.  The
+    kernels' own correctness is covered by test_fft_dynamics.py
+    (independent brute-force references, not the retired Fortran);
+    this checks that the public API is still wired up to them
+    properly -- block layout, do_com, do_long, every VAF integration
+    method -- and that the two behaviour changes that came with the
+    switch (lag axis starting at 0, stepsize_tau ignored) are visible
+    through it too.
+    """
+
+    def _analyzer(self, seed=11, nstep=120, nat=6):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H4O2')
+        t = Trajectory(atoms=atoms, timestep=2.0)
+        t.set_positions(
+            np.cumsum(rng.normal(0, 0.3, (nstep, nat, 3)), axis=0))
+        t.set_velocities(rng.normal(size=(nstep, nat, 3)))
+        return DynamicsAnalyzer(trajectories=[t], verbosity=0)
+
+    def _common(self):
+        return dict(t_unit='dt', t_start_fit=0, block_length=25,
+                    t_end_fit=20, t_end=20, species_of_interest=['H'])
+
+    def test_msd_lag_zero_is_the_first_column(self):
+        d = self._analyzer()
+        msd = d.get_msd(**self._common())
+        np.testing.assert_allclose(
+            msd.get_array('msd_isotropic_H_0')[:, 0], 0.0, atol=1e-10)
+
+    def test_msd_decompose_trace_matches_isotropic(self):
+        d = self._analyzer()
+        common = self._common()
+        iso = d.get_msd(**common).get_array('msd_isotropic_H_0')
+        dec = d.get_msd(decomposed=True, **common).get_array(
+            'msd_decomposed_H_0')
+        trace = dec[:, :, 0, 0] + dec[:, :, 1, 1] + dec[:, :, 2, 2]
+        np.testing.assert_allclose(trace, iso, rtol=1e-9, atol=1e-10)
+
+    def test_msd_do_com_runs_and_shares_shape(self):
+        d = self._analyzer()
+        common = self._common()
+        without = d.get_msd(**common).get_array('msd_isotropic_H_0')
+        with_com = d.get_msd(do_com=True, **common).get_array(
+            'msd_isotropic_H_0')
+        self.assertEqual(without.shape, with_com.shape)
+        self.assertTrue(np.all(np.isfinite(with_com)))
+
+    def test_msd_do_long_runs(self):
+        d = self._analyzer()
+        msd = d.get_msd(do_long=True, t_long_end=31, **self._common())
+        arr = msd.get_array('msd_long_H_0')
+        self.assertEqual(arr.shape, (31,))
+        np.testing.assert_allclose(arr[0], 0.0, atol=1e-10)
+
+    def test_vaf_every_integration_method_runs(self):
+        d = self._analyzer()
+        common = self._common()
+        for method in ('trapezoid', 'trapezoid-simple', 'simpson'):
+            vaf = d.get_vaf(integration=method, **common)
+            arr = vaf.get_array('vaf_isotropic_H_0')
+            self.assertTrue(np.all(np.isfinite(arr)), method)
+
+    def test_stepsize_tau_warns_through_the_public_api(self):
+        d = self._analyzer()
+        with self.assertWarns(UserWarning):
+            d.get_msd(stepsize_tau=5, **self._common())
 
 
 if __name__ == '__main__':

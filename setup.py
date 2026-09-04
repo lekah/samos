@@ -45,10 +45,12 @@ class F2PyBuild(build_ext):
 
 
 setup(
-    ext_modules=[
-        f2py_Extension('samos.lib.fortran_lib', [
-            'samos/lib/mdutils.f90',
-        ]),
-    ],
+    # No compiled extensions are built any more (issues.md issues #1,
+    # #2, #9) -- mdutils.f90, mdutils_cpp_omp.cpp and
+    # gaussian_density.f90 are all kept in samos/lib for reference,
+    # each with a header explaining what replaced it, but none is
+    # listed here. f2py_Extension and F2PyBuild stay in case compiled
+    # code comes back.
+    ext_modules=[],
     cmdclass=dict(build_ext=F2PyBuild),
 )

@@ -10,8 +10,10 @@ molecular dynamics simulations.  Currently implemented are:
 * Radial distribution functions
 * Several plotting utilities
 
-The computationally intensive parts are written in Fortran 90 (wrapped with
-f2py) and optionally in C++ with OpenMP parallelisation.
+Everything is pure Python (numpy/scipy). It used to lean on Fortran 90
+(wrapped with f2py) and optionally C++ with OpenMP for the
+computationally intensive parts; see "Backwards-incompatible changes"
+below for what replaced each of those and why.
 
 ---
 
@@ -24,36 +26,9 @@ pip install .
 
 Other dependencies: `ase`, `scipy`, `matplotlib`.
 
-The build compiles a Fortran extension with f2py.  A Fortran compiler
-(gfortran) must be present before running `pip install .`.
-
-```bash
-# conda
-conda install -c conda-forge gfortran
-
-# apt (Debian/Ubuntu)
-sudo apt install gfortran
-```
-
-### Troubleshooting build failures
-
-**`numpy.f2py` returns non-zero exit status during `pip install`**
-
-The pip output usually truncates the real compiler error.  Run the
-failing f2py command directly to see it:
-
-```bash
-cd samos/lib
-python -m numpy.f2py -c mdutils.f90 -m mdutils
-```
-
-Common root causes:
-
-| Symptom | Fix |
-|---------|-----|
-| `gfortran: command not found` | Install gfortran (see above) |
-| `meson: command not found` | `pip install meson ninja` |
-| Errors about `numpy.distutils` on Python 3.12+ | Upgrade numpy to 2.x (`pip install "numpy>=2.0"`) and ensure meson/ninja are installed |
+No compiler is needed -- there is nothing left to build. (If you're
+on an older checkout that still expects gfortran or a C++ toolchain,
+pull the latest; see "Backwards-incompatible changes" below.)
 
 ---
 
@@ -420,8 +395,9 @@ another implementation.
 
 `samos/lib/rdf.f90` is gone entirely, so at that point the Fortran
 extension built from `gaussian_density.f90` and `mdutils.f90` only.
-`gaussian_density.f90` has since been removed too (see below), so it
-now builds from `mdutils.f90` alone.  **Rerun `pip install -e .`**
+Both have since stopped being built too (see "get_gaussian_density
+no longer needs a Fortran build" and "mdutils.f90 is disabled"
+below) -- nothing is compiled any more.  **Rerun `pip install -e .`**
 after pulling this.
 
 ### Minimum-image convention
@@ -605,3 +581,49 @@ build dependency and the `-fopenmp` compiler flag (the one that broke
 the macOS build, see "Removed: unreachable Fortran..." above) is gone
 from the build entirely. The source is kept in the repo for reference
 -- it compiles to nothing and nothing imports it.
+
+### `mdutils.f90` is disabled
+
+`get_msd` and `get_vaf` loop over every pair of time origins, which
+costs O(N^2) in trajectory length; the same quantities come from a
+Fast Correlation Algorithm (an FFT-based identity) in O(N log N).
+`samos/analysis/_fft_dynamics.py` replaces all six Fortran routines
+with that, measured 20-200x faster end to end (the gap grows with
+trajectory length, since one side is quadratic and the other is not).
+`setup.py` no longer builds `mdutils.f90` -- **no compiler is needed
+to install samos any more** -- and it is the last file that needed
+one, so `meson`/`ninja` have also dropped out of the build
+dependencies. The source is kept in the repo for reference.
+
+Two behavioural differences, both deliberate fixes rather than
+carried-over bugs:
+
+* **`get_msd`'s time axis was off by one.** `calculate_msd_specific_
+  atoms`, `..._decompose_d` and `..._max_stats` all looped their lag
+  index from 1, so lag 0 was never computed and every value in the
+  returned array was actually the MSD one `stepsize_t` later than the
+  time `t_list_fs` labelled it with -- silently biasing every fitted
+  diffusion coefficient, not just plot axes. Confirmed with a
+  constant-velocity trajectory, whose MSD at any lag is exactly
+  predictable: `msd_array[i]` matched `t_list_fs[i] + one step`, not
+  `t_list_fs[i]`. `calculate_vaf_specific_atoms` never had this bug
+  (its loop already started at 0). Index 0 is now genuinely lag 0
+  (trivially zero) for MSD too.
+* **`stepsize_tau` no longer does anything.** It used to subsample
+  time origins so the O(N^2) loop had less work to do, at the cost of
+  noisier statistics. An O(N log N) correlation costs the same
+  whether it uses one origin in twenty or all of them, so subsampling
+  no longer buys anything; every origin is now always used, and
+  passing `stepsize_tau` as anything but 1 raises a `UserWarning` and
+  is otherwise ignored.
+
+Both change existing results by a small, real amount -- better
+statistics from using every origin, and the axis fix -- not
+regressions. `tests/ref/vaf_H2O-64-300K.json` and `tests/ref/
+msd_iso_dec_H2O-64-300K.json` were regenerated accordingly; see
+`tests/test_dynamics.py`, `TestDynamics`'s docstring, for the size of
+the shift and how it was confirmed to be exactly this and nothing
+else (the new engine was checked against `samos.lib.mdutils` directly
+-- still buildable by hand even though nothing in samos does so any
+more -- at `stepsize_tau=1` on this same trajectory, agreeing to
+roundoff).
