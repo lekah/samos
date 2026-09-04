@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Metadata is declared in pyproject.toml.
-# This file handles only the C++ (pybind11) and Fortran (f2py) extension builds.
+# This file handles only the Fortran (f2py) extension build.
 
 import glob
 import os
@@ -9,7 +9,6 @@ import subprocess
 import sys
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
-from pybind11.setup_helpers import Pybind11Extension
 
 
 class f2py_Extension(Extension):
@@ -20,20 +19,13 @@ class f2py_Extension(Extension):
         self.dirs = sourcedirs
 
 
-class CombinedBuild(build_ext):
-    """Builds f2py (Fortran) and pybind11 (C++) extensions in one pass."""
+class F2PyBuild(build_ext):
+    """Builds the f2py (Fortran) extensions; nothing else runs here."""
 
     def run(self):
-        f2py_exts = [e for e in self.extensions if isinstance(e, f2py_Extension)]
-        cpp_exts  = [e for e in self.extensions if not isinstance(e, f2py_Extension)]
-
-        # Standard setuptools path initialises the compiler; run for C++ only.
-        self.extensions = cpp_exts
-        build_ext.run(self)
-
         use_stdlib_distutils = sys.version_info < (3, 12)
 
-        for ext in f2py_exts:
+        for ext in self.extensions:
             for i, src in enumerate(ext.sourcedirs):
                 module_loc = os.path.split(ext.dirs[i])[0]
                 module_name = os.path.split(src)[1].split('.')[0]
@@ -51,21 +43,14 @@ class CombinedBuild(build_ext):
                 for so in glob.glob(os.path.join(module_loc, module_name + '*.so')):
                     shutil.copy(so, dest_dir)
 
-        self.extensions = cpp_exts + f2py_exts
-
 
 setup(
-    ext_modules=[
-        f2py_Extension('samos.lib.fortran_lib', [
-            'samos/lib/gaussian_density.f90',
-            'samos/lib/mdutils.f90',
-        ]),
-        Pybind11Extension(
-            'samos.lib.mdutils_cpp_omp',
-            ['samos/lib/mdutils_cpp_omp.cpp'],
-            extra_compile_args=['-O3', '-fopenmp'],
-            extra_link_args=['-fopenmp'],
-        ),
-    ],
-    cmdclass=dict(build_ext=CombinedBuild),
+    # No compiled extensions are built any more (issues.md issues #1,
+    # #2, #9) -- mdutils.f90, mdutils_cpp_omp.cpp and
+    # gaussian_density.f90 are all kept in samos/lib for reference,
+    # each with a header explaining what replaced it, but none is
+    # listed here. f2py_Extension and F2PyBuild stay in case compiled
+    # code comes back.
+    ext_modules=[],
+    cmdclass=dict(build_ext=F2PyBuild),
 )

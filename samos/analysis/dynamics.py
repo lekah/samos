@@ -501,7 +501,6 @@ class DynamicsAnalyzer:
         )
 
     def get_msd(self, decomposed=False, atom_indices=None,
-                backend='fortran', num_threads=None,
                 t_unit='ps',
                 species_of_interest=None,
                 stepsize_t=1, stepsize_tau=1,
@@ -526,11 +525,6 @@ class DynamicsAnalyzer:
             *species_of_interest* is used, so this narrows the selection.
             Ignored when *do_com* is set, which leaves no individual
             atoms to select from.
-        :param str backend:
-            Compute kernel: ``'fortran'`` (default) or ``'cpp'`` (OpenMP).
-        :param int num_threads:
-            Number of OpenMP threads for the C++ backend. Only used when
-            backend='cpp'. Defaults to the current OMP_NUM_THREADS setting.
         :param str t_unit:
             Time unit for all time arguments
             (``'fs'``, ``'ps'``, or ``'dt'``; default ``'ps'``).
@@ -576,22 +570,11 @@ class DynamicsAnalyzer:
         """
         _check_deprecated_time_kwargs(kwargs)
 
-        if backend == 'cpp':
-            from samos.lib.mdutils_cpp_omp import (
-                calculate_msd_specific_atoms,
-                calculate_msd_specific_atoms_decompose_d,
-                calculate_msd_specific_atoms_max_stats,
-                get_com_positions, set_num_threads)
-            if num_threads is not None:
-                set_num_threads(int(num_threads))
-        elif backend == 'fortran':
-            from samos.lib.mdutils import (
-                calculate_msd_specific_atoms,
-                calculate_msd_specific_atoms_decompose_d,
-                calculate_msd_specific_atoms_max_stats,
-                get_com_positions)
-        else:
-            raise ValueError("backend must be 'cpp' or 'fortran'")
+        from samos.analysis._fft_dynamics import (
+            calculate_msd_specific_atoms,
+            calculate_msd_specific_atoms_decompose_d,
+            calculate_msd_specific_atoms_max_stats,
+            get_com_positions)
         timestep_fs, trajectories = self._require_trajectories()
 
         p = self._get_running_params(
@@ -890,7 +873,7 @@ class DynamicsAnalyzer:
 
         _check_deprecated_time_kwargs(kwargs)
 
-        from samos.lib.mdutils import (
+        from samos.analysis._fft_dynamics import (
             calculate_vaf_specific_atoms,
             get_com_velocities)
         timestep_fs, trajectories = self._require_trajectories()

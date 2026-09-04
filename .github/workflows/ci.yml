@@ -49,7 +49,7 @@ jobs:
       - name: Run tests
         run: |
           cd examples/data; tar -xvf LGPS-500K-1ns.lammpstrj.tar.xz
-          cd ../../tests
-          python test_dynamics.py
-          python test_trajectory.py
-          python test_lammps_io.py
+          cd ../..
+          # run-tests.sh picks up every tests/test_*.py, so a new test
+          # file is covered without touching this workflow.
+          bash tests/run-tests.sh
