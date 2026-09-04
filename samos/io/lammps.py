@@ -24,14 +24,14 @@ def get_indices(header_list, prefix='', postfix=''):
     return True, idc
 
 
-def get_position_indices(header_list):
+def get_position_indices(header_list, quiet=False):
     # Unwrapped positions u, # scaled positions s
     # wrapped positions given as x y z
     for postfix in ('u', 's', ''):
         found, idc = get_indices(header_list, prefix='',
                                  postfix=postfix)
         if found:
-            if postfix in ('s', ''):
+            if postfix in ('s', '') and not quiet:
                 print('Warning: I am not unwrapping positions,'
                       ' this is not yet implemented')
             return postfix, idc
@@ -53,8 +53,9 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     try:
         timestep = int(integer_regex.search(lines[1]).group('int'))
     except Exception as e:
-        print('Timestep is not an integer or was not found in '
-              f'line {lidx+1} ({lines[1]})')
+        if not quiet:
+            print('Timestep is not an integer or was not found in '
+                  f'line {lidx+1} ({lines[1]})')
         raise e
     if not lines[2].startswith('ITEM: NUMBER OF ATOMS'):
         raise Exception('Not a valid lammps dump file, '
@@ -62,7 +63,8 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
     try:
         nat = int(integer_regex.search(lines[3]).group('int'))
     except Exception as e:
-        print('Could not read number of atoms')
+        if not quiet:
+            print('Could not read number of atoms')
         raise e
     # Only the box lengths are kept, the origin (xlo/ylo/zlo) is
     # dropped. Everything downstream works on displacements, where the
@@ -76,7 +78,8 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
                           for m in float_regex.finditer(lines[5+idim])]
                 cell[idim, idim] = d2 - d1
         except Exception as e:
-            print(f'Could not read cell dimension {idim}')
+            if not quiet:
+                print(f'Could not read cell dimension {idim}')
             raise e
     elif lines[4].startswith('ITEM: BOX BOUNDS xy xz yz pp pp pp'):
         try:
@@ -95,8 +98,9 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             cell[2, 0] = xz
             cell[2, 1] = yz
         except Exception as e:
-            print('Could not read triclinic cell bounds from:\n{}'.format(
-                ''.join(lines[5:8])))
+            if not quiet:
+                print('Could not read triclinic cell bounds from:\n{}'
+                      .format(''.join(lines[5:8])))
             raise e
     else:
         raise ValueError('unsupported lammps dump file, '
@@ -126,7 +130,7 @@ def read_step_info(lines, lidx=0, start=False, additional_kw=[], quiet=False):
             type_idx = None
         # Let the error propagate: this used to call sys.exit(1), which
         # kills the interpreter of any program importing this module.
-        postype, posids = get_position_indices(header_list)
+        postype, posids = get_position_indices(header_list, quiet=quiet)
         if not quiet:
             print('Positions are given as: {}'.format(
                 {'u': 'unwrapped', 's': 'Scaled (wrapped)',
@@ -411,7 +415,9 @@ def read_lammps_dump(filename, elements=None,
                 step_info, lidx=lidx, start=False, quiet=quiet)
             lidx += 9
             if nat != nat_must:
-                print('Changing number of atoms is not supported, breaking')
+                if not quiet:
+                    print('Changing number of atoms is not supported, '
+                          'breaking')
                 break
 
             # these are read as strings

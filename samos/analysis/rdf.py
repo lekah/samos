@@ -200,18 +200,27 @@ def pairs_within(positions_1, positions_2, radius, algorithm,
 
 
 class BaseAnalyzer(metaclass=ABCMeta):
-    def __init__(self, *, trajectory=None, **kwargs):
+    def __init__(self, *, trajectory=None, verbosity=None, **kwargs):
         """
         :param Trajectory trajectory: The trajectory to analyse.
+        :param int verbosity: 0 silences the progress printing.
         :raises TypeError: On an unrecognised keyword argument.
         """
         self._trajectory = None
+        self._verbosity = 1
         if kwargs:
             raise TypeError(
                 '{} got unexpected keyword argument(s): {}'.format(
                     type(self).__name__, ', '.join(sorted(kwargs))))
         if trajectory is not None:
             self.set_trajectory(trajectory)
+        if verbosity is not None:
+            self.set_verbosity(verbosity)
+
+    def set_verbosity(self, verbosity):
+        if not isinstance(verbosity, int):
+            raise TypeError('Verbosity is an integer')
+        self._verbosity = verbosity
 
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
@@ -424,7 +433,8 @@ class RDF(BaseAnalyzer):
         algorithms, message = self._choose_algorithm(
             get_cell(self.trajectory) if fixed_cell else cells,
             frames, method)
-        print('RDF: ' + message)
+        if self._verbosity > 0:
+            print('RDF: ' + message)
 
         if species_pairs is None:
             species_pairs = sorted(list(
@@ -473,8 +483,9 @@ class RDF(BaseAnalyzer):
                 # Skipping keeps the remaining pairs computable; the
                 # histogram below would be empty and its normalisation
                 # a division by zero.
-                print('Warning: no atom pairs for {}, skipping'
-                      ''.format(label))
+                if self._verbosity > 0:
+                    print('Warning: no atom pairs for {}, skipping'
+                          ''.format(label))
                 continue
             # An atom of species 1 that is itself one of the species-2
             # atoms is not its own neighbour, so the ideal-gas count it
@@ -485,8 +496,9 @@ class RDF(BaseAnalyzer):
                 len(ind2)
                 - len(set(ind1) & set(ind2)) / float(len(ind1)))
             if n_neighbours_ideal <= 0:
-                print('Warning: no ideal-gas reference for {}, skipping'
-                      ''.format(label))
+                if self._verbosity > 0:
+                    print('Warning: no ideal-gas reference for {}, '
+                          'skipping'.format(label))
                 continue
             # normalize the histogram, by the number of steps taken,
             # and the number of species1

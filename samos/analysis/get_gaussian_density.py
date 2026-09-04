@@ -92,7 +92,8 @@ def _compute_density_grid(positions, cell, indices_i_care, sigma,
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
                          sigma=0.3, n_sigma=3.0, density=0.1,
                          istart=1, istop=None, stepsize=1,
-                         indices_i_care=None, indices_exclude_from_plot=None):
+                         indices_i_care=None, indices_exclude_from_plot=None,
+                         verbosity=1):
     """
     Write the gaussian-broadened probability density of an atomic
     species to an xsf file.
@@ -120,6 +121,7 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         The atom indices not written to the xsf file, 1-based.
         Defaults to indices_i_care, so that the mobile species is not
         drawn on top of its own density.
+    :param int verbosity: 0 silences the progress printing.
     """
     cell = trajectory.cell
     positions = trajectory.get_positions()
@@ -139,7 +141,8 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         else:
             indices_i_care = np.array(list(range(1, nat+1)))
 
-    print('(get_gaussian_density) indices_i_care:', indices_i_care)
+    if verbosity > 0:
+        print('(get_gaussian_density) indices_i_care:', indices_i_care)
     if not len(indices_i_care):
         raise Exception(
             'Element {} not found in symbols {}'.format(element, symbols))
@@ -150,14 +153,16 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
     a, b, c = [np.linalg.norm(cell[i]) for i in range(3)]
     n1, n2, n3 = [int(celldim/density)+1 for celldim in (a, b, c)]
 
-    print('Grid is {} x {} x {}'.format(n1, n2, n3))
-    print('Box is  {} x {} x {}'.format(a, b, c))
-    print('Writing xsf file to', format(outputfile))
+    if verbosity > 0:
+        print('Grid is {} x {} x {}'.format(n1, n2, n3))
+        print('Box is  {} x {} x {}'.format(a, b, c))
+        print('Writing xsf file to', format(outputfile))
     if indices_exclude_from_plot is None:
         indices_exclude_from_plot = indices_i_care
-    print(
-        '(get_gaussian_density) We do not show these atoms in the xsf file: '
-        f'{indices_exclude_from_plot}')
+    if verbosity > 0:
+        print(
+            '(get_gaussian_density) We do not show these atoms in the '
+            f'xsf file: {indices_exclude_from_plot}')
 
     S = np.diag([1., 1., 1., -(sigma*n_sigma/density)**2])
     cellT = cell.T

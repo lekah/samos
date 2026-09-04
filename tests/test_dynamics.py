@@ -605,7 +605,8 @@ class TestPowerSpectrumSpread(unittest.TestCase):
         rng = np.random.default_rng(3)
         t = Trajectory(atoms=Atoms('H' * 4), timestep=1.0)
         t.set_velocities(rng.random((200, 4, 3)))
-        return DynamicsAnalyzer(trajectories=[t]).get_power_spectrum(
+        return DynamicsAnalyzer(
+            trajectories=[t], verbosity=0).get_power_spectrum(
             nr_of_blocks=nr_of_blocks)
 
     def test_single_block_does_not_warn(self):
@@ -661,7 +662,7 @@ class TestSlicedTrajectoryTimeAxis(unittest.TestCase):
 
     def _t_list(self, traj):
         from samos.analysis.dynamics import DynamicsAnalyzer
-        dyn = DynamicsAnalyzer(trajectories=[traj])
+        dyn = DynamicsAnalyzer(trajectories=[traj], verbosity=0)
         msd = dyn.get_msd(t_start_fit=10., t_end_fit=50., t_unit='fs',
                           nr_of_blocks=1)
         return msd.get_array('t_list_fs')

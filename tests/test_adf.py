@@ -315,7 +315,7 @@ class TestADFInputValidation(unittest.TestCase):
             ['Si', 'O', 'O'],
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             20.0)
-        return ADF(trajectory=traj)
+        return ADF(trajectory=traj, verbosity=0)
 
     def test_centers_and_triplets_mutually_exclusive(self):
         a = self._adf()
@@ -343,7 +343,7 @@ class TestADFAngles(unittest.TestCase):
 
     def _run(self, symbols, positions, cutoffs, triplet, cell=20.0):
         traj = _make_traj(symbols, positions, cell)
-        a = ADF(trajectory=traj)
+        a = ADF(trajectory=traj, verbosity=0)
         return a.run(species_triplets=[triplet],
                      bonds=cutoffs, nbins=180)
 
@@ -379,7 +379,7 @@ class TestADFAngles(unittest.TestCase):
              [0.0, 1.0, 0.0],
              [0.0, 0.0, 1.0]],
             20.0)
-        a = ADF(trajectory=traj)
+        a = ADF(trajectory=traj, verbosity=0)
         res = a.run(species_triplets=[('O', 'Si', 'O')],
                     bonds={'Si-O': (0.5, 1.5)}, nbins=180)
         # adf.sum() * binsize = total_angles / n_center / n_frames
@@ -409,7 +409,7 @@ class TestADFOutputFormat(unittest.TestCase):
             20.0)
 
     def test_array_keys_present(self):
-        a = ADF(trajectory=self.traj)
+        a = ADF(trajectory=self.traj, verbosity=0)
         res = a.run(species_triplets=[('O', 'Si', 'O')],
                     bonds={'Si-O': (1.0, 2.0)}, nbins=90)
         names = res.get_arraynames()
@@ -417,7 +417,7 @@ class TestADFOutputFormat(unittest.TestCase):
         self.assertIn('angles_O_Si_O', names)
 
     def test_array_shapes(self):
-        a = ADF(trajectory=self.traj)
+        a = ADF(trajectory=self.traj, verbosity=0)
         res = a.run(species_triplets=[('O', 'Si', 'O')],
                     bonds={'Si-O': (1.0, 2.0)}, nbins=90)
         self.assertEqual(res.get_array('adf_O_Si_O').shape, (90,))
@@ -425,7 +425,7 @@ class TestADFOutputFormat(unittest.TestCase):
 
     def test_bin_centres(self):
         # nbins=36 -> binsize=5; centres = 2.5, 7.5, ..., 177.5
-        a = ADF(trajectory=self.traj)
+        a = ADF(trajectory=self.traj, verbosity=0)
         res = a.run(species_triplets=[('O', 'Si', 'O')],
                     bonds={'Si-O': (1.0, 2.0)}, nbins=36)
         angles = res.get_array('angles_O_Si_O')
@@ -433,7 +433,7 @@ class TestADFOutputFormat(unittest.TestCase):
         self.assertAlmostEqual(angles[-1], 177.5)
 
     def test_species_triplets_attr(self):
-        a = ADF(trajectory=self.traj)
+        a = ADF(trajectory=self.traj, verbosity=0)
         res = a.run(species_triplets=[('O', 'Si', 'O')],
                     bonds={'Si-O': (1.0, 2.0)}, nbins=36)
         self.assertIn(('O', 'Si', 'O'), res.get_attr('species_triplets'))
@@ -461,7 +461,7 @@ class TestADFStaticBonds(unittest.TestCase):
         self.traj = traj
 
     def _run(self, static):
-        a = ADF(trajectory=self.traj)
+        a = ADF(trajectory=self.traj, verbosity=0)
         return a.run(species_triplets=[('O', 'Si', 'O')],
                      bonds={'Si-O': (0.5, 1.5)},
                      static_bonds=static, nbins=180)
@@ -488,7 +488,7 @@ class TestADFCentersExpansion(unittest.TestCase):
             ['Si', 'O', 'O'],
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             20.0)
-        a = ADF(trajectory=traj)
+        a = ADF(trajectory=traj, verbosity=0)
         res = a.run(centers=['Si'], bonds={'Si-O': (0.5, 1.5)}, nbins=90)
         self.assertIn('adf_O_Si_O', res.get_arraynames())
 
@@ -497,8 +497,8 @@ class TestADFCentersExpansion(unittest.TestCase):
             ['Si', 'O', 'O'],
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             20.0)
-        a1 = ADF(trajectory=traj)
-        a2 = ADF(trajectory=traj)
+        a1 = ADF(trajectory=traj, verbosity=0)
+        a2 = ADF(trajectory=traj, verbosity=0)
         r1 = a1.run(centers=['Si'],
                     bonds={'Si-O': (0.5, 1.5)}, nbins=90)
         r2 = a2.run(species_triplets=[('O', 'Si', 'O')],
@@ -518,7 +518,7 @@ class TestADFExplicitBonds(unittest.TestCase):
             ['Si', 'O', 'O'],
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             20.0)
-        a = ADF(trajectory=traj)
+        a = ADF(trajectory=traj, verbosity=0)
         a.set_bonds([[0, 1]])  # only one Si-O bond
         res = a.run(species_triplets=[('O', 'Si', 'O')],
                     bonds={'Si-O': (0.5, 1.5)},  # ignored
@@ -543,7 +543,7 @@ class TestADFEmptyFrameSelection(unittest.TestCase):
                                 [3.2, 0., 0.]]), (5, 1, 1))
         t = Trajectory(atoms=atoms, timestep=1.)
         t.set_positions(pos)
-        return ADF(trajectory=t)
+        return ADF(trajectory=t, verbosity=0)
 
     def test_empty_frame_range_raises(self):
         adf = self._analyzer()
@@ -616,7 +616,7 @@ class TestRDFValidationAndAttributes(unittest.TestCase):
 
     def _rdf(self):
         from samos.analysis.rdf import RDF
-        return RDF(trajectory=self._trajectory())
+        return RDF(trajectory=self._trajectory(), verbosity=0)
 
     def test_radius_is_required(self):
         with self.assertRaises(TypeError):
@@ -740,19 +740,19 @@ class TestBaseAnalyzerWithoutTrajectory(unittest.TestCase):
     def test_rdf_without_trajectory(self):
         from samos.analysis.rdf import RDF
         with self.assertRaises(ValueError) as cm:
-            RDF().run(radius=4.0)
+            RDF(verbosity=0).run(radius=4.0)
         self.assertIn('set_trajectory', str(cm.exception))
 
     def test_adf_without_trajectory(self):
         from samos.analysis.rdf import ADF
         with self.assertRaises(ValueError) as cm:
-            ADF().run(bonds={'Si-O': (1.0, 2.0)})
+            ADF(verbosity=0).run(bonds={'Si-O': (1.0, 2.0)})
         self.assertIn('set_trajectory', str(cm.exception))
 
     def test_set_trajectory_type_checked(self):
         from samos.analysis.rdf import RDF
         with self.assertRaises(TypeError):
-            RDF(trajectory='not a trajectory')
+            RDF(trajectory='not a trajectory', verbosity=0)
 
 
 class TestWriteXsfHeaderOnly(unittest.TestCase):
@@ -815,8 +815,9 @@ class TestADFPlotting(unittest.TestCase):
                                 [3.2, 0., 0.]]), (3, 1, 1))
         t = Trajectory(atoms=atoms, timestep=1.)
         t.set_positions(pos)
-        return ADF(trajectory=t).run(species_triplets=[('O', 'Si', 'O')],
-                                     bonds={'Si-O': (1.0, 2.0)}, nbins=180)
+        return ADF(trajectory=t, verbosity=0).run(
+            species_triplets=[('O', 'Si', 'O')],
+            bonds={'Si-O': (1.0, 2.0)}, nbins=180)
 
     def _axes(self):
         import matplotlib
@@ -852,7 +853,7 @@ class TestBondCutoffGuard(unittest.TestCase):
         import warnings
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
-            ADF(trajectory=self._traj()).run(
+            ADF(trajectory=self._traj(), verbosity=0).run(
                 nbins=20, bonds={'H-O': (0.0, 2.0)})
         self.assertEqual([str(w.message) for w in caught], [])
 
@@ -860,7 +861,7 @@ class TestBondCutoffGuard(unittest.TestCase):
         import warnings
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
-            ADF(trajectory=self._traj()).run(
+            ADF(trajectory=self._traj(), verbosity=0).run(
                 nbins=20, bonds={'H-O': (0.0, 6.0)})
         self.assertEqual(len(caught), 1)
         self.assertIn('biased low', str(caught[0].message))

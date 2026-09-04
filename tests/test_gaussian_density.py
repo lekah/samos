@@ -201,7 +201,7 @@ class TestGetGaussianDensityEndToEnd(unittest.TestCase):
             get_gaussian_density(
                 t, element='Li', outputfile=outfile,
                 sigma=0.3, n_sigma=3.0, density=0.4,
-                istart=1, istop=5, stepsize=1)
+                istart=1, istop=5, stepsize=1, verbosity=0)
             result = read_xsf(outfile)
 
         # places=3, not 6: the file round-trips through write_xsf's

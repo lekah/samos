@@ -197,7 +197,7 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
 
 def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
             t_start_fit=5., t_end_fit=10., t_unit='ps', nblocks=1,
-            write=None):
+            write=None, verbosity=1):
     """
     Compute the MSD for *traj* and optionally display or save a plot.
 
@@ -224,11 +224,12 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
     :param str write:
         If given, write the mean MSD for each species to this CSV file.
         Columns: ``t_fs``, then ``msd_{species}_A2`` per species.
+    :param int verbosity: 0 silences the analyzer's progress printing.
     """
     if species is None:
         species = sorted(set(traj.atoms.get_chemical_symbols()))
 
-    dyn = DynamicsAnalyzer(trajectories=[traj])
+    dyn = DynamicsAnalyzer(trajectories=[traj], verbosity=verbosity)
     msd = dyn.get_msd(
         stepsize_t=stepsize,
         species_of_interest=species,
@@ -263,7 +264,7 @@ def run_msd(traj, stepsize=1, species=None, plot=False, savefig=None,
 def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
             t_start_fit=5., t_end_fit=10., t_end=None, t_unit='ps',
             nblocks=1, integration='trapezoid',
-            remove_angular_momentum=False, write=None):
+            remove_angular_momentum=False, write=None, verbosity=1):
     """
     Compute the VAF and its running integral (diffusion coefficient)
     for *traj*, and optionally display or save a plot.
@@ -297,11 +298,12 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
     :param str write:
         If given, write the mean VAF for each species to this CSV file.
         Columns: ``t_fs``, then ``vaf_{species}_A2fs-2`` per species.
+    :param int verbosity: 0 silences the analyzer's progress printing.
     """
     if species is None:
         species = sorted(set(traj.atoms.get_chemical_symbols()))
 
-    dyn = DynamicsAnalyzer(trajectories=[traj])
+    dyn = DynamicsAnalyzer(trajectories=[traj], verbosity=verbosity)
     vaf = dyn.get_vaf(
         integration=integration,
         remove_angular_momentum=remove_angular_momentum,
@@ -345,7 +347,7 @@ def run_vaf(traj, stepsize=1, species=None, plot=False, savefig=None,
 
 def run_vdos(traj, species=None, plot=False, savefig=None,
              nblocks=1, smoothing=1,
-             remove_angular_momentum=False, write=None):
+             remove_angular_momentum=False, write=None, verbosity=1):
     """
     Compute the vibrational density of states (power spectrum via
     Welch periodogram) for *traj*, and optionally display or save a plot.
@@ -368,11 +370,12 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
         If given, write the mean power spectrum for each species to this
         CSV file.  Columns: ``frequency_THz``, then one column per
         species named ``vdos_{species}``.
+    :param int verbosity: 0 silences the analyzer's progress printing.
     """
     if species is None:
         species = sorted(set(traj.atoms.get_chemical_symbols()))
 
-    dyn = DynamicsAnalyzer(trajectories=[traj])
+    dyn = DynamicsAnalyzer(trajectories=[traj], verbosity=verbosity)
     vdos = dyn.get_power_spectrum(
         species_of_interest=species,
         nr_of_blocks=nblocks,
@@ -407,7 +410,7 @@ def run_vdos(traj, species=None, plot=False, savefig=None,
 
 def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
             radius=5.0, bins=100, no_int=False, method='auto',
-            plot=False, savefig=None, write=None):
+            plot=False, savefig=None, write=None, verbosity=1):
     """
     Compute the radial distribution function for *traj* and optionally
     display, save, or write a plot.
@@ -440,6 +443,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
         If given, write the RDF and integral for each species pair to
         this CSV file. Columns: ``radius_A``, then
         ``rdf_{A}_{B}`` and ``int_{A}_{B}`` for each pair.
+    :param int verbosity: 0 silences the analyzer's progress printing.
     """
     if species_pairs is not None and species is not None:
         raise ValueError(
@@ -452,7 +456,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
     else:
         pairs = None
 
-    rdf_analyzer = RDF(trajectory=traj)
+    rdf_analyzer = RDF(trajectory=traj, verbosity=verbosity)
     res = rdf_analyzer.run(
         radius=radius, stepsize=stepsize, nbins=bins,
         species_pairs=pairs, method=method)
@@ -487,7 +491,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
 def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
             bonds=None, bonds_file=None, radius=None, static_bonds=False,
             bins=180, plot=False, savefig=None, write=None,
-            species=None):
+            species=None, verbosity=1):
     """
     Compute the angular distribution function for *traj* and optionally
     display, save, or write results.
@@ -533,6 +537,7 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
         Fallback center species when neither *centers* nor
         *species_triplets* is given (mapped from the top-level
         ``--species`` flag).
+    :param int verbosity: 0 silences the analyzer's progress printing.
     """
     # Parse bond cutoffs: ['Si-O:1.4:2.0', ...] -> {'Si-O': (1.4, 2.0)}
     bonds_dict = None
@@ -570,7 +575,7 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
     if triplets is None and effective_centers is None:
         effective_centers = species  # None -> ADF computes all triplets
 
-    adf_analyzer = ADF(trajectory=traj)
+    adf_analyzer = ADF(trajectory=traj, verbosity=verbosity)
     if bonds_file is not None:
         adf_analyzer.load_bonds_lammps(bonds_file)
 
@@ -693,6 +698,9 @@ def _traj_parser():
              "'500:1500:2' for every 2nd between 500 and 1500. A stride "
              'multiplies the timestep by the same factor, so time axes '
              'stay correct.')
+    p.add_argument(
+        '-q', '--quiet', action='store_true',
+        help='Silence the analyzer progress output.')
 
     plot_group = p.add_mutually_exclusive_group()
     plot_group.add_argument(
@@ -925,7 +933,8 @@ def _prepare(args):
 def _output_kwargs(args):
     """The species/output options every run_* function takes."""
     return dict(species=args.species, plot=args.plot,
-                savefig=args.savefig, write=args.write)
+                savefig=args.savefig, write=args.write,
+                verbosity=0 if args.quiet else 1)
 
 
 def main_msd(argv=None):
