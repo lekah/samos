@@ -19,6 +19,20 @@ from samos.trajectory import Trajectory
 from samos.analysis.rdf import RDF, MinimumImage
 
 
+def _only_user_warnings():
+    """Record only UserWarning inside a catch_warnings block.
+
+    Newer numpy/ase combinations (Python 3.12+) raise their own
+    DeprecationWarning from routine array-shape assignments deep
+    inside ase, unrelated to anything under test here.  A plain
+    ``simplefilter('always')`` would record that noise too and throw
+    off counts/emptiness checks below, so ignore everything except
+    the UserWarning the RDF/ADF radius guard actually raises.
+    """
+    warnings.simplefilter('ignore')
+    warnings.simplefilter('always', category=UserWarning)
+
+
 def _gas(nstep, symbols, length, seed=0, cells=None):
     """
     Build an ideal gas: positions drawn uniformly in the cell, so that
@@ -238,13 +252,13 @@ class TestRadiusGuard(unittest.TestCase):
 
     def test_radius_within_the_cell_is_quiet(self):
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
+            _only_user_warnings()
             RDF(trajectory=self._traj(), verbosity=0).run(radius=4.0, nbins=20)
         self.assertEqual([str(w.message) for w in caught], [])
 
     def test_radius_beyond_half_the_lattice_vector_warns(self):
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
+            _only_user_warnings()
             RDF(trajectory=self._traj(), verbosity=0).run(radius=6.0, nbins=20)
         self.assertEqual(len(caught), 1)
         self.assertIn('biased low', str(caught[0].message))
@@ -255,7 +269,7 @@ class TestRadiusGuard(unittest.TestCase):
         cells = _breathing_cells(20, 10.0, 12.0)
         traj = _gas(20, 'H8He8', 10.0, cells=cells)
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
+            _only_user_warnings()
             RDF(trajectory=traj, verbosity=0).run(radius=6.0, nbins=20)
         self.assertEqual(len(caught), 1)
 
@@ -368,7 +382,7 @@ class TestOrthoSkewAgreement(unittest.TestCase):
         biased identically, and the warning has to still fire."""
         traj = _gas_in_cell(10, 'H20He20', [10.0] * 3)
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
+            _only_user_warnings()
             RDF(trajectory=traj, verbosity=0).run(radius=8.0, method='ortho')
         self.assertEqual(len(caught), 1)
         self.assertIn('biased low', str(caught[0].message))

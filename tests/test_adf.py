@@ -9,6 +9,7 @@ files are required.
 import os
 import tempfile
 import unittest
+import warnings
 
 import numpy as np
 from ase import Atoms
@@ -16,6 +17,20 @@ from ase import Atoms
 from samos.trajectory import Trajectory
 from samos.analysis.rdf import (
     ADF, BondAnalyzer, MinimumImage, TorsionAnalyzer)
+
+
+def _only_user_warnings():
+    """Record only UserWarning inside a catch_warnings block.
+
+    Newer numpy/ase combinations (Python 3.12+) raise their own
+    DeprecationWarning from routine array-shape assignments deep
+    inside ase, unrelated to anything under test here.  A plain
+    ``simplefilter('always')`` would record that noise too and throw
+    off counts/emptiness checks below, so ignore everything except
+    the UserWarning the RDF/ADF radius guard actually raises.
+    """
+    warnings.simplefilter('ignore')
+    warnings.simplefilter('always', category=UserWarning)
 
 
 def _make_traj(symbols, positions, cell):
@@ -850,17 +865,15 @@ class TestBondCutoffGuard(unittest.TestCase):
         return t
 
     def test_short_cutoff_is_quiet(self):
-        import warnings
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
+            _only_user_warnings()
             ADF(trajectory=self._traj(), verbosity=0).run(
                 nbins=20, bonds={'H-O': (0.0, 2.0)})
         self.assertEqual([str(w.message) for w in caught], [])
 
     def test_long_cutoff_warns_once_for_the_whole_run(self):
-        import warnings
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
+            _only_user_warnings()
             ADF(trajectory=self._traj(), verbosity=0).run(
                 nbins=20, bonds={'H-O': (0.0, 6.0)})
         self.assertEqual(len(caught), 1)
