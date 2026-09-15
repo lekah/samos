@@ -4,13 +4,96 @@
 import sys
 import numpy as np
 from samos.io.xsf import write_xsf
-from samos.utils.terminal import get_terminal_width
+
+
+def _compute_density_grid(positions, cell, indices_i_care, sigma,
+                          n1, n2, n3, b1, b2, b3,
+                          istart, istop, stepsize):
+    """
+    Gaussian-broadened density of the given atoms, binned onto an
+    ``(n1, n2, n3)`` grid periodic in all three directions.
+
+    This replaces the old ``samos.lib.gaussian_density`` Fortran
+    routine. For each frame and each atom of interest, the atom is
+    folded into the cell, its nearest grid point is found, and a
+    small box of ``(2*b+1)`` grid points around it (sized by *b1*,
+    *b2*, *b3*) is walked in *unwrapped* crystal coordinates -- only
+    wrapped to the grid at the very end. That order is what lets a
+    box crossing a cell edge land its far side on the correct
+    periodic image on the other side of the grid, rather than falling
+    off the edge.
+
+    :param positions: ``(nstep, nat, 3)`` array, unfolded cartesian.
+    :param indices_i_care: 1-based atom indices, as the public API
+        uses throughout (kept 1-based here to match, converted to
+        0-based only for the actual numpy indexing).
+    :param istart, istop: 1-based frame indices, inclusive -- matches
+        the convention the old Fortran loop used.
+    :returns: the ``(n1, n2, n3)`` grid, normalised so it integrates
+        to ``len(indices_i_care)``.
+    """
+    cell = np.asarray(cell, dtype=float)
+    # Real-space position = frac @ cell (ASE convention: rows of cell
+    # are lattice vectors), so the inverse map is frac = real @
+    # inv(cell). The old Fortran instead folded atoms with
+    # inv(cell.T) but converted back with cell (not cell.T) -- a
+    # mismatched pair that round-trips correctly only when cell is
+    # symmetric, i.e. only for an orthorhombic cell. Fixed here by
+    # using cell / cell.T consistently in both directions.
+    invcell = np.linalg.inv(cell)
+    idx0 = np.asarray(indices_i_care, dtype=int) - 1
+    nat_care = len(idx0)
+    n = np.array([n1, n2, n3])
+
+    o1 = np.arange(-b1, b1 + 1)
+    o2 = np.arange(-b2, b2 + 1)
+    o3 = np.arange(-b3, b3 + 1)
+    O1, O2, O3 = np.meshgrid(o1, o2, o3, indexing='ij')
+
+    counted = np.zeros((n1, n2, n3), dtype=float)
+    for istep in range(istart, istop + 1, stepsize):
+        pos = positions[istep - 1, idx0, :]
+
+        # Fold into the primary cell via crystal coordinates -- works
+        # for any cell shape. Unlike Fortran's MOD, numpy's % already
+        # wraps negative values into [0, 1) in one step.
+        frac = (pos @ invcell) % 1.0
+        real = frac @ cell
+        base = np.floor(frac * n).astype(int)
+
+        # Broadcast the box offsets over all atoms of interest at
+        # once: (nat_care, 1, 1, 1) + (1, b1, b2, b3) -> (nat_care,
+        # b1, b2, b3).
+        is1 = base[:, 0, None, None, None] + O1
+        is2 = base[:, 1, None, None, None] + O2
+        is3 = base[:, 2, None, None, None] + O3
+        gp_frac = np.stack([is1 / n1, is2 / n2, is3 / n3], axis=-1)
+        gp_real = gp_frac @ cell
+        diff = gp_real - real[:, None, None, None, :]
+        sq = np.einsum('...i,...i->...', diff, diff)
+        weight = np.exp(-sq / (2.0 * sigma * sigma))
+
+        # Wrap to the grid only now, after the (possibly
+        # out-of-cell) real-space distance has been measured.
+        j1, j2, j3 = is1 % n1, is2 % n2, is3 % n3
+        flat = (j1 * n2 + j2) * n3 + j3
+        # bincount, not fancy-index +=: a box wider than half the
+        # grid can wrap onto the same point twice, and += silently
+        # drops one of the two contributions.
+        counted += np.bincount(
+            flat.ravel(), weights=weight.ravel(),
+            minlength=n1 * n2 * n3).reshape(n1, n2, n3)
+
+    dV = abs(np.linalg.det(cell)) / (n1 * n2 * n3)
+    counted *= nat_care / (counted.sum() * dV)
+    return counted
 
 
 def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
                          sigma=0.3, n_sigma=3.0, density=0.1,
                          istart=1, istop=None, stepsize=1,
-                         indices_i_care=None, indices_exclude_from_plot=None):
+                         indices_i_care=None, indices_exclude_from_plot=None,
+                         verbosity=1):
     """
     Write the gaussian-broadened probability density of an atomic
     species to an xsf file.
@@ -38,9 +121,8 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         The atom indices not written to the xsf file, 1-based.
         Defaults to indices_i_care, so that the mobile species is not
         drawn on top of its own density.
+    :param int verbosity: 0 silences the progress printing.
     """
-    from samos.lib.gaussian_density import make_gaussian_density
-
     cell = trajectory.cell
     positions = trajectory.get_positions()
 
@@ -59,43 +141,28 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         else:
             indices_i_care = np.array(list(range(1, nat+1)))
 
-    print('(get_gaussian_density) indices_i_care:', indices_i_care)
+    if verbosity > 0:
+        print('(get_gaussian_density) indices_i_care:', indices_i_care)
     if not len(indices_i_care):
         raise Exception(
             'Element {} not found in symbols {}'.format(element, symbols))
 
-    nat_this_species = len(indices_i_care)
-
     if istop is None:
         istop = nstep
 
-    try:
-        termwidth = get_terminal_width()
-        pbar_frequency = int((istop - istart) / termwidth)
-    except Exception as e:
-        print('Warning Could not get progressbar ({})'.format(e))
-        pbar_frequency = int((istop - istart) / 30)
-
-    pbar_frequency = max([pbar_frequency, 1])
     a, b, c = [np.linalg.norm(cell[i]) for i in range(3)]
     n1, n2, n3 = [int(celldim/density)+1 for celldim in (a, b, c)]
 
-    print('Grid is {} x {} x {}'.format(n1, n2, n3))
-    print('Box is  {} x {} x {}'.format(a, b, c))
-    print('Writing xsf file to', format(outputfile))
+    if verbosity > 0:
+        print('Grid is {} x {} x {}'.format(n1, n2, n3))
+        print('Box is  {} x {} x {}'.format(a, b, c))
+        print('Writing xsf file to', format(outputfile))
     if indices_exclude_from_plot is None:
         indices_exclude_from_plot = indices_i_care
-    print(
-        '(get_gaussian_density) We do not show these atoms in the xsf file: '
-        f'{indices_exclude_from_plot}')
-    # data=None writes the header and grid dimensions only;
-    # make_gaussian_density appends the grid itself below.
-    write_xsf(
-        [s for i, s in enumerate(symbols, start=1)
-         if i not in indices_exclude_from_plot],
-        [p for i, p in enumerate(starting_pos, start=1)
-         if i not in indices_exclude_from_plot],
-        cell, data=None, outfilename=outputfile, shape=(n1, n2, n3))
+    if verbosity > 0:
+        print(
+            '(get_gaussian_density) We do not show these atoms in the '
+            f'xsf file: {indices_exclude_from_plot}')
 
     S = np.diag([1., 1., 1., -(sigma*n_sigma/density)**2])
     cellT = cell.T
@@ -137,11 +204,16 @@ def get_gaussian_density(trajectory, element=None, outputfile='out.xsf',
         abs((R[2, 3] - np.sqrt(R[2, 3]**2 - R[2, 2]*R[3, 3]))
             / R[3, 3]) / density)+1
 
-    make_gaussian_density(
-        positions, outputfile, n1, n2, n3, b1, b2, b3, istart, istop, stepsize,
-        sigma, cell, cellTI, indices_i_care, pbar_frequency, nstep, nat,
-        nat_this_species
-    )
+    grid = _compute_density_grid(
+        positions, cell, indices_i_care, sigma, n1, n2, n3, b1, b2, b3,
+        istart, istop, stepsize)
+
+    write_xsf(
+        [s for i, s in enumerate(symbols, start=1)
+         if i not in indices_exclude_from_plot],
+        [p for i, p in enumerate(starting_pos, start=1)
+         if i not in indices_exclude_from_plot],
+        cell, data=grid, outfilename=outputfile)
 
 
 if __name__ == '__main__':

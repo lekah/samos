@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-
-from .gaussian_density import *  # noqa: F403
-from .mdutils import *  # noqa: F403
-
-__all__ = ['mdutils', 'gaussian_density']  # noqa: F405
-
-from . import *  # noqa: F403
+"""
+No compiled extension is built from this package any more (see
+issues.md issues #1, #2 and #9). ``mdutils.f90``,
+``mdutils_cpp_omp.cpp`` and ``gaussian_density.f90`` are kept here for
+reference -- each has a header pointing to what replaced it -- but
+none of them is importable: nothing here compiles them.
+"""

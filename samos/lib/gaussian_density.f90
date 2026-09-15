@@ -1,5 +1,21 @@
 ! f2py -c -m gaussian_density gaussian_density.f90
-
+!
+! NOT BUILT. setup.py no longer compiles this file, and nothing in
+! samos imports it -- samos/analysis/get_gaussian_density.py replaced
+! it with a pure-numpy implementation (_compute_density_grid). Kept
+! here for reference and in case a future contributor wants the
+! compiled version back.
+!
+! It also carries two coordinate bugs the Python rewrite fixed rather
+! than copied, both explained in README.md under "get_gaussian_density
+! no longer needs a Fortran build":
+!   * pos_atom_crystal is folded with invcell (built as inv(cell.T)),
+!     but pos_atom_real/pos_grid_point_real convert back with cell
+!     instead of cell.T below -- a mismatched pair that round-trips
+!     correctly only for a symmetric (e.g. orthorhombic) cell.
+!   * every grid candidate's weight is computed from position is/n1
+!     (etc.), one grid step past the storage cell mod(is,n1) it gets
+!     written to -- for any cell shape, not just skewed ones.
 
 
 SUBROUTINE make_gaussian_density(&

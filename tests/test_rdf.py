@@ -7,14 +7,30 @@ the per-frame g(r), and the ideal-gas reference an atom is compared
 against excludes the atom itself.
 """
 
+import io
 import unittest
 import warnings
+from contextlib import redirect_stdout
 
 import numpy as np
 from ase import Atoms
 
 from samos.trajectory import Trajectory
 from samos.analysis.rdf import RDF, MinimumImage
+
+
+def _only_user_warnings():
+    """Record only UserWarning inside a catch_warnings block.
+
+    Newer numpy/ase combinations (Python 3.12+) raise their own
+    DeprecationWarning from routine array-shape assignments deep
+    inside ase, unrelated to anything under test here.  A plain
+    ``simplefilter('always')`` would record that noise too and throw
+    off counts/emptiness checks below, so ignore everything except
+    the UserWarning the RDF/ADF radius guard actually raises.
+    """
+    warnings.simplefilter('ignore')
+    warnings.simplefilter('always', category=UserWarning)
 
 
 def _gas(nstep, symbols, length, seed=0, cells=None):
@@ -63,7 +79,7 @@ class TestVariableCellNormalisation(unittest.TestCase):
         cells = _breathing_cells(40, 12.0, 18.0)
         traj = _gas(40, 'H30He30', 12.0, cells=cells)
         sliced = traj.slice_steps(order)
-        return RDF(trajectory=sliced).run(radius=5.0, nbins=50)
+        return RDF(trajectory=sliced, verbosity=0).run(radius=5.0, nbins=50)
 
     def test_frame_order_does_not_change_the_rdf(self):
         forward = self._traj(slice(None))
@@ -81,9 +97,9 @@ class TestVariableCellNormalisation(unittest.TestCase):
         # gives a different answer here.
         cells = _breathing_cells(2, 10.0, 20.0)
         traj = _gas(2, 'H20He20', 10.0, cells=cells)
-        both = RDF(trajectory=traj).run(radius=4.0, nbins=40)
+        both = RDF(trajectory=traj, verbosity=0).run(radius=4.0, nbins=40)
         singles = [
-            RDF(trajectory=traj.slice_steps(slice(i, i + 1))).run(
+            RDF(trajectory=traj.slice_steps(slice(i, i + 1)), verbosity=0).run(
                 radius=4.0, nbins=40)
             for i in (0, 1)
         ]
@@ -127,7 +143,7 @@ class TestIdealGasReference(unittest.TestCase):
 
     def _run(self, symbols, **kwargs):
         traj = _gas(20, symbols, self.LENGTH)
-        return RDF(trajectory=traj).run(
+        return RDF(trajectory=traj, verbosity=0).run(
             radius=self.RADIUS, nbins=self.NBINS, **kwargs)
 
     def test_like_pair_excludes_the_atom_itself(self):
@@ -152,8 +168,8 @@ class TestIdealGasReference(unittest.TestCase):
     def test_ideal_gas_plateau_is_one(self):
         # The physics the above adds up to, at the sampling a unit test
         # can afford: loose, and only a smoke test.
-        res = RDF(trajectory=_gas(60, 'H100He100', self.LENGTH)).run(
-            radius=self.RADIUS, nbins=self.NBINS)
+        res = RDF(trajectory=_gas(60, 'H100He100', self.LENGTH),
+                  verbosity=0).run(radius=self.RADIUS, nbins=self.NBINS)
         for label in ('H_H', 'H_He'):
             self.assertAlmostEqual(_plateau(res, label, 4.0), 1.0,
                                    delta=0.02)
@@ -168,8 +184,8 @@ class TestRunningIntegral(unittest.TestCase):
 
     def test_integral_counts_ideal_gas_neighbours(self):
         n, length = 100, 20.0
-        res = RDF(trajectory=_gas(60, 'H{}'.format(n), length)).run(
-            radius=6.0, nbins=60)
+        res = RDF(trajectory=_gas(60, 'H{}'.format(n), length),
+                  verbosity=0).run(radius=6.0, nbins=60)
         radii = res.get_array('radii_H_H')
         integral = res.get_array('int_H_H')
         # <n(r)> = rho * 4/3 pi r^3 with rho = (N - 1) / V.  The sum
@@ -207,9 +223,9 @@ class TestMinimumImageInRDF(unittest.TestCase):
         than one cell vector away."""
         # 2.9 A is inside max_radius (3.0 A) for both, so neither run
         # trips the radius guard.
-        cubic = RDF(trajectory=self._traj(self.CUBIC)).run(
+        cubic = RDF(trajectory=self._traj(self.CUBIC), verbosity=0).run(
             radius=2.9, nbins=30)
-        sheared = RDF(trajectory=self._traj(self.SHEARED)).run(
+        sheared = RDF(trajectory=self._traj(self.SHEARED), verbosity=0).run(
             radius=2.9, nbins=30)
         for name in cubic.get_arraynames():
             np.testing.assert_allclose(
@@ -236,14 +252,14 @@ class TestRadiusGuard(unittest.TestCase):
 
     def test_radius_within_the_cell_is_quiet(self):
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            RDF(trajectory=self._traj()).run(radius=4.0, nbins=20)
+            _only_user_warnings()
+            RDF(trajectory=self._traj(), verbosity=0).run(radius=4.0, nbins=20)
         self.assertEqual([str(w.message) for w in caught], [])
 
     def test_radius_beyond_half_the_lattice_vector_warns(self):
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            RDF(trajectory=self._traj()).run(radius=6.0, nbins=20)
+            _only_user_warnings()
+            RDF(trajectory=self._traj(), verbosity=0).run(radius=6.0, nbins=20)
         self.assertEqual(len(caught), 1)
         self.assertIn('biased low', str(caught[0].message))
 
@@ -253,8 +269,8 @@ class TestRadiusGuard(unittest.TestCase):
         cells = _breathing_cells(20, 10.0, 12.0)
         traj = _gas(20, 'H8He8', 10.0, cells=cells)
         with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            RDF(trajectory=traj).run(radius=6.0, nbins=20)
+            _only_user_warnings()
+            RDF(trajectory=traj, verbosity=0).run(radius=6.0, nbins=20)
         self.assertEqual(len(caught), 1)
 
     def test_limit_is_the_lattice_not_the_supplied_basis(self):
@@ -263,6 +279,197 @@ class TestRadiusGuard(unittest.TestCase):
         cell = 8.0*np.array([[0., .5, .5], [.5, 0., .5], [.5, .5, 0.]])
         self.assertAlmostEqual(MinimumImage(cell).max_radius,
                                0.5 * 8.0 / np.sqrt(2.), places=10)
+
+
+def _gas_in_cell(nstep, symbols, cell, seed=0, cells=None):
+    """
+    Ideal gas in an arbitrary *cell*, given as a 3x3 matrix or as three
+    edge lengths.  Positions are drawn uniformly in fractional
+    coordinates, so they fill whatever cell shape is asked for.
+    """
+    cell = np.asarray(cell, dtype=float)
+    if cell.shape == (3,):
+        cell = np.diag(cell)
+    rng = np.random.default_rng(seed)
+    atoms = Atoms(symbols, cell=cell, pbc=True)
+    traj = Trajectory(atoms=atoms)
+    frac = rng.random((nstep, len(atoms), 3))
+    if cells is None:
+        traj.set_positions(np.einsum('sac,cd->sad', frac, cell))
+    else:
+        traj.set_positions(np.einsum('sac,scd->sad', frac, cells))
+        traj.set_cells(cells)
+    return traj
+
+
+class TestOrthoSkewAgreement(unittest.TestCase):
+    """
+    The ortho algorithm (a periodic k-d tree) and the skew one (every
+    pair against all 27 neighbour images) compute the same quantity:
+    the distance to the nearest periodic image.  Everything the two
+    produce therefore has to match, not just the histogram, so these
+    tests compare every array and every attribute.
+    """
+
+    TRICLINIC = np.array([[10., 0., 0.], [3., 10., 0.], [2., 4., 10.]])
+
+    def _assert_same_result(self, traj, **kwargs):
+        """Run both algorithms and compare everything they return."""
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            ortho = RDF(trajectory=traj, verbosity=0).run(
+                method='ortho', **kwargs)
+            skew = RDF(trajectory=traj, verbosity=0).run(
+                method='skew', **kwargs)
+
+        self.assertEqual(sorted(ortho.get_arraynames()),
+                         sorted(skew.get_arraynames()))
+        self.assertEqual(sorted(ortho.get_attrs()), sorted(skew.get_attrs()))
+        # An empty result would pass every comparison below.
+        self.assertTrue(ortho.get_arraynames())
+
+        for name in ortho.get_arraynames():
+            np.testing.assert_allclose(
+                ortho.get_array(name), skew.get_array(name),
+                rtol=1e-12, atol=0.0,
+                err_msg='array {} differs'.format(name))
+        for name, value in ortho.get_attrs().items():
+            other = skew.get_attr(name)
+            if isinstance(value, float):
+                self.assertAlmostEqual(
+                    value, other, places=10,
+                    msg='attribute {} differs'.format(name))
+            else:
+                self.assertEqual(value, other,
+                                 'attribute {} differs'.format(name))
+        return ortho
+
+    def test_cubic_cell(self):
+        """Three species, so the pairs cover a species with itself, two
+        different species, and a species that is in both lists."""
+        traj = _gas_in_cell(15, 'H20He20Li10', [12.0] * 3)
+        self._assert_same_result(traj, radius=5.0)
+
+    def test_orthorhombic_with_unequal_edges(self):
+        """Catches anywhere a single box length is assumed."""
+        traj = _gas_in_cell(15, 'H20He20', [9.0, 13.0, 17.0])
+        self._assert_same_result(traj, radius=4.0)
+
+    def test_overlapping_species_groups(self):
+        """A pair whose two index lists share atoms exercises the
+        self-pair mask, which is what stops an atom being counted as
+        its own neighbour at r=0."""
+        traj = _gas_in_cell(10, 'H20He20Li10', [12.0] * 3)
+        res = self._assert_same_result(
+            traj, radius=5.0,
+            species_pairs=[(('H', 'Li'), 'H'), ('He', ('H', 'He'))])
+        # No spike in the first bin: an atom is not its own neighbour.
+        self.assertEqual(res.get_array('rdf_spec_0_H')[0], 0.0)
+
+    def test_variable_cell(self):
+        traj = _gas_in_cell(12, 'H20He20', [12.0] * 3,
+                            cells=_breathing_cells(12, 12.0, 18.0))
+        self._assert_same_result(traj, radius=5.0)
+
+    def test_sampling_window(self):
+        traj = _gas_in_cell(30, 'H20He20', [12.0] * 3)
+        self._assert_same_result(traj, radius=5.0,
+                                 istart=3, istop=27, stepsize=4)
+
+    def test_radius_beyond_the_minimum_image_limit(self):
+        """Past half the shortest lattice vector both algorithms count
+        only the nearest image and so are biased low.  They have to be
+        biased identically, and the warning has to still fire."""
+        traj = _gas_in_cell(10, 'H20He20', [10.0] * 3)
+        with warnings.catch_warnings(record=True) as caught:
+            _only_user_warnings()
+            RDF(trajectory=traj, verbosity=0).run(radius=8.0, method='ortho')
+        self.assertEqual(len(caught), 1)
+        self.assertIn('biased low', str(caught[0].message))
+        self._assert_same_result(traj, radius=8.0)
+
+    def test_atoms_on_the_cell_boundary(self):
+        """A coordinate a hair below zero folds to exactly the edge
+        under a plain modulo, which cKDTree rejects outright.  Atoms
+        sitting on 0 and on the far face must also not be doubled."""
+        length = 10.0
+        positions = np.array([[[-1e-17, 1.0, 1.0],
+                               [0.0, 5.0, 5.0],
+                               [length - 1e-13, 2.0, 2.0],
+                               [-1e-9, 8.0, 8.0],
+                               [3.0, 3.0, 3.0],
+                               [7.0, 7.0, 7.0]]])
+        atoms = Atoms('H3He3', cell=np.eye(3) * length, pbc=True)
+        traj = Trajectory(atoms=atoms)
+        traj.set_positions(positions)
+        self._assert_same_result(traj, radius=4.0)
+
+    def test_nearly_orthorhombic_cell_still_takes_ortho(self):
+        """Rounding junk off the diagonal must not push a cubic cell
+        onto the slow path, and must not change the answer either."""
+        cell = np.eye(3) * 12.0
+        cell[0, 1] = 1e-14
+        traj = _gas_in_cell(10, 'H20He20', cell)
+        buffer = io.StringIO()
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            with redirect_stdout(buffer):
+                RDF(trajectory=traj).run(radius=4.0)
+        self.assertIn('faster ortho algorithm', buffer.getvalue())
+        self._assert_same_result(traj, radius=4.0)
+
+
+class TestAlgorithmSelection(unittest.TestCase):
+    """Which algorithm gets picked, and what is said about it."""
+
+    TRICLINIC = np.array([[10., 0., 0.], [3., 10., 0.], [2., 4., 10.]])
+
+    def _run_capturing_output(self, traj, **kwargs):
+        buffer = io.StringIO()
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            with redirect_stdout(buffer):
+                RDF(trajectory=traj).run(radius=4.0, **kwargs)
+        return buffer.getvalue()
+
+    def test_auto_picks_ortho_for_an_orthorhombic_cell(self):
+        traj = _gas_in_cell(5, 'H10He10', [12.0] * 3)
+        out = self._run_capturing_output(traj)
+        self.assertIn('faster ortho algorithm', out)
+        self.assertIn('detected as orthorhombic', out)
+
+    def test_auto_picks_skew_for_a_triclinic_cell(self):
+        traj = _gas_in_cell(5, 'H10He10', self.TRICLINIC)
+        out = self._run_capturing_output(traj)
+        self.assertIn('slower skew algorithm', out)
+        self.assertIn('not orthorhombic', out)
+
+    def test_forcing_skew_says_it_was_requested(self):
+        traj = _gas_in_cell(5, 'H10He10', [12.0] * 3)
+        out = self._run_capturing_output(traj, method='skew')
+        self.assertIn('slower skew algorithm', out)
+        self.assertIn('requested', out)
+
+    def test_mixed_cell_shapes_report_both(self):
+        """Half the frames orthorhombic, half not."""
+        cells = np.array([np.eye(3) * 12.0] * 3
+                         + [self.TRICLINIC] * 2)
+        traj = _gas_in_cell(5, 'H10He10', np.eye(3) * 12.0, cells=cells)
+        out = self._run_capturing_output(traj)
+        self.assertIn('for 3 of 5 frames', out)
+        self.assertIn('cell shape changes', out)
+
+    def test_ortho_refuses_a_triclinic_cell(self):
+        traj = _gas_in_cell(5, 'H10He10', self.TRICLINIC)
+        with self.assertRaises(ValueError) as ctx:
+            RDF(trajectory=traj, verbosity=0).run(radius=4.0, method='ortho')
+        self.assertIn('5 sampled frames', str(ctx.exception))
+
+    def test_unknown_method_is_rejected(self):
+        traj = _gas_in_cell(5, 'H10He10', [12.0] * 3)
+        with self.assertRaises(ValueError) as ctx:
+            RDF(trajectory=traj, verbosity=0).run(radius=4.0, method='fast')
+        self.assertIn("'auto', 'ortho' or 'skew'", str(ctx.exception))
 
 
 if __name__ == '__main__':

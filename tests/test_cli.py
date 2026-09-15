@@ -7,7 +7,10 @@ tests cover both that options are accepted in any order and that each
 command runs end to end and writes the CSV it promises.
 """
 
+import contextlib
+import io
 import os
+import sys
 import tempfile
 import unittest
 
@@ -20,6 +23,17 @@ import matplotlib
 matplotlib.use('Agg')
 
 from samos import cli  # noqa: E402
+
+
+@contextlib.contextmanager
+def _silence_argparse():
+    """Discard the usage/error text argparse writes when it rejects
+    input or prints --help, so the tests below that deliberately
+    exercise those paths don't flood the console with output that is
+    expected, not a sign of anything wrong."""
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        yield
 
 
 def _write_extxyz(path, nstep=120, seed=0):
@@ -80,10 +94,10 @@ class TestOptionOrder(CLITestCase):
     def test_order_does_not_matter(self):
         parser = cli._parser_msd()
         orders = (
-            [self.traj_path, '-n', '3', '-s', '2', '--backend', 'cpp'],
-            [self.traj_path, '--backend', 'cpp', '-n', '3', '-s', '2'],
-            ['-n', '3', self.traj_path, '--backend', 'cpp', '-s', '2'],
-            ['-n', '3', '-s', '2', '--backend', 'cpp', self.traj_path],
+            [self.traj_path, '-n', '3', '-s', '2', '--t-unit', 'fs'],
+            [self.traj_path, '--t-unit', 'fs', '-n', '3', '-s', '2'],
+            ['-n', '3', self.traj_path, '--t-unit', 'fs', '-s', '2'],
+            ['-n', '3', '-s', '2', '--t-unit', 'fs', self.traj_path],
         )
         namespaces = [vars(parser.parse_args(a)) for a in orders]
         for other in namespaces[1:]:
@@ -100,26 +114,28 @@ class TestOptionOrder(CLITestCase):
         args = parser.parse_args([self.traj_path, '--species', 'Li', 'O'])
         self.assertEqual(args.species, ['Li', 'O'])
         self.assertEqual(args.trajectory_path, self.traj_path)
-        with self.assertRaises(SystemExit):
+        with _silence_argparse(), self.assertRaises(SystemExit):
             parser.parse_args(['--species', 'Li', 'O', self.traj_path])
 
 
 class TestFlags(CLITestCase):
     """The short flags that used to collide across parsers."""
 
-    def test_n_is_nblocks_and_j_is_threads(self):
-        args = cli._parser_msd().parse_args(
-            [self.traj_path, '-n', '7', '-j', '4'])
+    def test_n_is_nblocks(self):
+        # -n used to mean OpenMP threads in the old single-command
+        # CLI; it is always --nblocks now.
+        args = cli._parser_msd().parse_args([self.traj_path, '-n', '7'])
         self.assertEqual(args.nblocks, 7)
-        self.assertEqual(args.num_threads, 4)
 
-    def test_msd_backend_has_no_short_flag(self):
-        # -b used to mean --backend here and --bins elsewhere.
-        with self.assertRaises(SystemExit):
-            cli._parser_msd().parse_args([self.traj_path, '-b', 'cpp'])
-        args = cli._parser_msd().parse_args(
-            [self.traj_path, '--backend', 'cpp'])
-        self.assertEqual(args.backend, 'cpp')
+    def test_rdf_method_defaults_to_auto(self):
+        args = cli._parser_rdf().parse_args([self.traj_path])
+        self.assertEqual(args.method, 'auto')
+        for choice in ('auto', 'ortho', 'skew'):
+            args = cli._parser_rdf().parse_args(
+                [self.traj_path, '--method', choice])
+            self.assertEqual(args.method, choice)
+        with _silence_argparse(), self.assertRaises(SystemExit):
+            cli._parser_rdf().parse_args([self.traj_path, '--method', 'fast'])
 
     def test_b_is_bins(self):
         rdf = cli._parser_rdf().parse_args([self.traj_path, '-b', '33'])
@@ -130,7 +146,7 @@ class TestFlags(CLITestCase):
 
     def test_integration_has_no_short_flag(self):
         # -i is reserved for the trajectory slice option.
-        with self.assertRaises(SystemExit):
+        with _silence_argparse(), self.assertRaises(SystemExit):
             cli._parser_vaf().parse_args([self.traj_path, '-i', 'simpson'])
         args = cli._parser_vaf().parse_args(
             [self.traj_path, '--integration', 'simpson'])
@@ -143,7 +159,7 @@ class TestFlags(CLITestCase):
         # Blocking is meaningless for rdf and adf, which used to accept
         # --nblocks as a global option and silently ignore it.
         for parser in (cli._parser_rdf(), cli._parser_adf()):
-            with self.assertRaises(SystemExit):
+            with _silence_argparse(), self.assertRaises(SystemExit):
                 parser.parse_args([self.traj_path, '-r', '3', '-n', '2'])
 
 
@@ -151,20 +167,23 @@ class TestDispatcher(CLITestCase):
     """The samos command, which dispatches on its first argument."""
 
     def test_no_arguments_is_an_error(self):
-        self.assertEqual(cli.main([]), 2)
+        with _silence_argparse():
+            self.assertEqual(cli.main([]), 2)
 
     def test_help_succeeds(self):
-        self.assertEqual(cli.main(['--help']), 0)
+        with _silence_argparse():
+            self.assertEqual(cli.main(['--help']), 0)
 
     def test_unknown_command_is_an_error(self):
-        self.assertEqual(cli.main(['msdd']), 2)
+        with _silence_argparse():
+            self.assertEqual(cli.main(['msdd']), 2)
 
     def test_every_listed_command_is_dispatchable(self):
         listed = [name for name, _ in cli.COMMAND_SUMMARIES]
         self.assertEqual(sorted(listed), sorted(cli.MAINS))
 
     def test_dispatch_equals_direct_call(self):
-        common = ['--timestep', '1', '-r', '4', '-b', '20']
+        common = ['--timestep', '1', '-r', '4', '-b', '20', '-q']
         cli.main(['rdf', self.traj_path, '--write', self.out('a.csv')]
                  + common)
         cli.main_rdf([self.traj_path, '--write', self.out('b.csv')] + common)
@@ -180,42 +199,55 @@ class TestCommands(CLITestCase):
 
     def test_msd(self):
         cli.main_msd([self.traj_path, '--timestep', '1', '-n', '2',
-                      '--t-unit', 'dt', '-ts', '5', '-te', '20',
+                      '--t-unit', 'dt', '-ts', '5', '-te', '20', '-q',
                       '--write', self.out('msd.csv')])
         self.assert_csv(self.out('msd.csv'), 't_fs,msd_Li_A2,msd_O_A2')
 
     def test_vaf(self):
         cli.main_vaf([self.traj_path, '--timestep', '1',
                       '--compute-velocities', '--t-unit', 'dt',
-                      '-ts', '5', '-te', '20',
+                      '-ts', '5', '-te', '20', '-q',
                       '--write', self.out('vaf.csv')])
         self.assert_csv(self.out('vaf.csv'),
                         't_fs,vaf_Li_A2fs-2,vaf_O_A2fs-2')
 
     def test_vdos(self):
         cli.main_vdos([self.traj_path, '--timestep', '1',
-                       '--compute-velocities', '-sm', '3',
+                       '--compute-velocities', '-sm', '3', '-q',
                        '--write', self.out('vdos.csv')])
         self.assert_csv(self.out('vdos.csv'),
                         'frequency_THz,vdos_Li,vdos_O')
 
     def test_rdf(self):
         cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
-                      '-b', '20', '--species-pairs', 'Li-O',
+                      '-b', '20', '--species-pairs', 'Li-O', '-q',
                       '--write', self.out('rdf.csv')])
         self.assert_csv(self.out('rdf.csv'),
                         'radius_A,rdf_Li_O,int_Li_O')
 
+    def test_rdf_method_reaches_the_analyzer(self):
+        """The two algorithms agree, so the same CSV must come out
+        whichever one the flag selects."""
+        for choice in ('ortho', 'skew'):
+            cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
+                          '-b', '20', '--species-pairs', 'Li-O', '-q',
+                          '--method', choice,
+                          '--write', self.out(choice + '.csv')])
+        with open(self.out('ortho.csv')) as f:
+            ortho = f.read()
+        with open(self.out('skew.csv')) as f:
+            self.assertEqual(ortho, f.read())
+
     def test_adf(self):
         cli.main_adf([self.traj_path, '--timestep', '1', '-r', '3',
-                      '-b', '20', '--species-triplets', 'O-Li-O',
+                      '-b', '20', '--species-triplets', 'O-Li-O', '-q',
                       '--write', self.out('adf.csv')])
         self.assert_csv(self.out('adf.csv'), 'angle_deg,adf_O_Li_O')
 
     def test_savefig(self):
         # The plotting path is otherwise untouched by --write.
         cli.main_msd([self.traj_path, '--timestep', '1', '--t-unit', 'dt',
-                      '-ts', '5', '-te', '20',
+                      '-ts', '5', '-te', '20', '-q',
                       '--savefig', self.out('msd.png')])
         self.assertTrue(os.path.exists(self.out('msd.png')))
 
@@ -223,7 +255,7 @@ class TestCommands(CLITestCase):
         # --species comes from the shared parser and --species-pairs from
         # the rdf parser, so argparse cannot enforce this for us.
         with self.assertRaises(ValueError):
-            cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
+            cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4', '-q',
                           '--species', 'Li', '--species-pairs', 'Li-O'])
 
 
@@ -263,7 +295,7 @@ class TestIndex(CLITestCase):
         for index, spacing, name in ((None, 1.0, 'full.csv'),
                                      ('::2', 2.0, 'strided.csv')):
             argv = [self.traj_path, '--timestep', '1', '--t-unit', 'dt',
-                    '-ts', '5', '-te', '20', '--write', self.out(name)]
+                    '-ts', '5', '-te', '20', '-q', '--write', self.out(name)]
             if index is not None:
                 argv += ['-i', index]
             cli.main_msd(argv)
@@ -273,7 +305,7 @@ class TestIndex(CLITestCase):
     def test_slice_changes_the_result(self):
         # Averaging over a third of the frames gives a different RDF;
         # identical output would mean --index never reached the analysis.
-        common = ['--timestep', '1', '-r', '4', '-b', '20',
+        common = ['--timestep', '1', '-r', '4', '-b', '20', '-q',
                   '--species-pairs', 'Li-O']
         cli.main_rdf([self.traj_path] + common
                      + ['--write', self.out('all.csv')])
@@ -290,7 +322,7 @@ class TestIndex(CLITestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             cli.main_vdos([self.traj_path, '--timestep', '1',
-                           '--compute-velocities', '-i', '::3',
+                           '--compute-velocities', '-i', '::3', '-q',
                            '--write', self.out('vdos.csv')])
         self.assertIn('Warning', buf.getvalue())
         self.assertIn('every 3th frame', buf.getvalue())
@@ -301,10 +333,19 @@ class TestIndex(CLITestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             cli.main_vdos([self.traj_path, '--timestep', '1',
-                           '--compute-velocities', '-i', '0:100',
+                           '--compute-velocities', '-i', '0:100', '-q',
                            '--write', self.out('vdos.csv')])
         self.assertNotIn('Warning', buf.getvalue())
 
 
 if __name__ == '__main__':
+    # This file's argparse usage/error text (tested deliberately, see
+    # TestFlags etc.) is bulky enough to bury unittest's own OK/FAILED
+    # verdict: that goes out on stderr, unbuffered, while print()
+    # output sits in a buffer until the process exits when stdout
+    # isn't a terminal (piped, redirected, or run under a tool). Line-
+    # buffering stdout here keeps the two interleaved in the order
+    # they actually happened, so the verdict lands where it's expected
+    # -- at the end -- no matter how this file is invoked.
+    sys.stdout.reconfigure(line_buffering=True)
     unittest.main()

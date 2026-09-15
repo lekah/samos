@@ -10,8 +10,10 @@ molecular dynamics simulations.  Currently implemented are:
 * Radial distribution functions
 * Several plotting utilities
 
-The computationally intensive parts are written in Fortran 90 (wrapped with
-f2py) and optionally in C++ with OpenMP parallelisation.
+Everything is pure Python (numpy/scipy). It used to lean on Fortran 90
+(wrapped with f2py) and optionally C++ with OpenMP for the
+computationally intensive parts; see "Backwards-incompatible changes"
+below for what replaced each of those and why.
 
 ---
 
@@ -24,51 +26,9 @@ pip install .
 
 Other dependencies: `ase`, `scipy`, `matplotlib`.
 
-The build compiles Fortran extensions with f2py and a C++ extension with
-pybind11 + OpenMP.  A Fortran compiler (gfortran) and a C++ compiler must
-be present before running `pip install .`.
-
-```bash
-# conda
-conda install -c conda-forge gfortran
-
-# apt (Debian/Ubuntu)
-sudo apt install gfortran
-```
-
-### Troubleshooting build failures
-
-**`numpy.f2py` returns non-zero exit status during `pip install`**
-
-The pip output usually truncates the real compiler error.  Run the
-failing f2py command directly to see it:
-
-```bash
-cd samos/lib
-python -m numpy.f2py -c gaussian_density.f90 -m gaussian_density
-```
-
-Common root causes:
-
-| Symptom | Fix |
-|---------|-----|
-| `gfortran: command not found` | Install gfortran (see above) |
-| `meson: command not found` | `pip install meson ninja` |
-| Errors about `numpy.distutils` on Python 3.12+ | Upgrade numpy to 2.x (`pip install "numpy>=2.0"`) and ensure meson/ninja are installed |
-
-**C++ extension fails to compile (`-fopenmp` not found)**
-
-The C++ backend uses OpenMP.  On macOS with Apple Clang, `-fopenmp` is
-not available by default.  Install LLVM via Homebrew and set the
-compiler environment variables, or install gcc:
-
-```bash
-brew install gcc
-CC=gcc-14 CXX=g++-14 pip install .
-```
-
-The Fortran backend works without OpenMP and is used by default; the
-C++ backend is optional.
+No compiler is needed -- there is nothing left to build. (If you're
+on an older checkout that still expects gfortran or a C++ toolchain,
+pull the latest; see "Backwards-incompatible changes" below.)
 
 ---
 
@@ -210,8 +170,8 @@ samos-msd traj.extxyz --t-start-fit 2000 --t-end-fit 4000 --t-unit fs
 # Fit window in timesteps
 samos-msd traj.extxyz --t-start-fit 160 --t-end-fit 320 --t-unit dt
 
-# C++ backend with 4 OpenMP threads; write results to CSV
-samos-msd traj.extxyz --backend cpp -j 4 --write msd.csv --savefig msd.png
+# write results to CSV and save a plot
+samos-msd traj.extxyz --write msd.csv --savefig msd.png
 
 # LAMMPS dump, Li species, 3 blocks
 samos-msd traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
@@ -219,8 +179,7 @@ samos-msd traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
 ```
 
 Command options: `-s/--stepsize N`, `-ts/--t-start-fit T`,
-`-te/--t-end-fit T`, `--t-unit UNIT`, `--backend {fortran,cpp}`,
-`-j/--num-threads N`.
+`-te/--t-end-fit T`, `--t-unit UNIT`.
 
 ### VAF
 
@@ -277,9 +236,24 @@ samos-rdf traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
     --radius 6 --savefig rdf.png
 ```
 
+```bash
+# Force the exact-for-any-cell algorithm, as a check on the fast one
+samos-rdf traj.extxyz --species-pairs Li-O --method skew
+```
+
 Command options: `-s/--stepsize N`, `-r/--radius A`, `-b/--bins N`,
-`--species-pairs A-B ...`, `--no-int`.  `--species` and
+`--species-pairs A-B ...`, `--no-int`,
+`--method {auto,ortho,skew}`.  `--species` and
 `--species-pairs` are mutually exclusive.
+
+`--method` chooses how pairs are found.  `auto` (the default) uses a
+periodic k-d tree wherever the cell is orthorhombic, which is orders
+of magnitude faster and lighter on memory for large systems, and falls
+back to testing all 27 neighbour images otherwise.  `ortho` demands
+the fast one and fails on a skewed cell; `skew` forces the slow one
+even for an orthorhombic cell.  Both compute the distance to the
+nearest periodic image, so they agree to rounding -- `skew` is there
+as a check on `ortho`.
 
 ### ADF
 
@@ -323,11 +297,6 @@ msd = d.get_msd(
     t_start_fit=2., t_end_fit=4., t_unit='ps',
     block_length=8., nr_of_blocks=None)
 
-# MSD with C++ backend
-msd_cpp = d.get_msd(
-    t_start_fit=2., t_end_fit=4., t_unit='ps',
-    nr_of_blocks=6, backend='cpp', num_threads=4)
-
 # VAF
 vaf = d.get_vaf(
     species_of_interest=['Li'],
@@ -345,15 +314,24 @@ Time parameters (`t_start`, `t_end`, `t_start_fit`, `t_end_fit`,
 unit is set once per call via `t_unit` (`'fs'`, `'ps'`, or `'dt'`).
 `stepsize_t` and `stepsize_tau` are always plain integer timestep counts.
 
-The C++ MSD backend supports OpenMP parallelisation.  Pass
-`backend='cpp'` and optionally `num_threads=N`.  The Fortran backend is
-the default.
-
 ---
 
 ## Backwards-incompatible changes
 
 The following changes break existing call sites.
+
+### `shortest_distance` is now measured within the RDF radius
+
+`RDF.run` reports `shortest_distance` and `shortest_distance_<pair>`.
+These used to be the shortest distance between any two atoms of the
+pair, ignoring the requested `radius`, because the old code computed
+every distance anyway.  The fast `ortho` algorithm only ever sees
+pairs inside `radius`, so both algorithms now report the shortest
+distance **within `radius`**, and `inf` when nothing is in range.
+
+The two definitions differ only when a species pair has no neighbour
+inside the whole RDF radius, in which case g(r) is zero everywhere and
+the number was not describing anything useful.
 
 ### Time-parameter API (dynamics module)
 
@@ -415,9 +393,12 @@ went too.  The remaining `recenter` tests assert the property directly
 -- the centre of mass ends up at zero -- rather than agreeing with
 another implementation.
 
-`samos/lib/rdf.f90` is gone entirely, so the Fortran extension now
-builds from `gaussian_density.f90` and `mdutils.f90` only.  **Rerun
-`pip install -e .`** after pulling this.
+`samos/lib/rdf.f90` is gone entirely, so at that point the Fortran
+extension built from `gaussian_density.f90` and `mdutils.f90` only.
+Both have since stopped being built too (see "get_gaussian_density
+no longer needs a Fortran build" and "mdutils.f90 is disabled"
+below) -- nothing is compiled any more.  **Rerun `pip install -e .`**
+after pulling this.
 
 ### Minimum-image convention
 
@@ -519,9 +500,14 @@ things on either side of the command name:
 
 | Old | New |
 |---|---|
-| `msd -n N` (OpenMP threads) | `-j/--num-threads N`; `-n` is always `--nblocks` |
-| `msd -b BACKEND` | `--backend BACKEND`; `-b` is always `--bins` |
+| `msd -n N` (OpenMP threads) | `-n` is always `--nblocks` |
+| `msd -b BACKEND` | `-b` is always `--bins` |
 | `vaf -i METHOD` | `--integration METHOD` |
+
+`msd`'s `-n`/`-b` used to mean OpenMP threads and compute backend.
+Both moved to `-j/--num-threads` and `--backend` at the time, and both
+have since been removed entirely along with the C++ backend they
+controlled -- see "The C++ backend is disabled" below.
 
 `-n/--nblocks` is no longer accepted by `samos-rdf` and `samos-adf`,
 which never used it.
@@ -547,3 +533,97 @@ The `--t-unit` flag is per command and defaults to `ps`.
 Previously returned a 14-element positional tuple.  Now returns a
 `RunningParams` namedtuple; callers must access fields by name
 (e.g. `rp.t_start_fit_dt` instead of `rp[5]`).
+
+### `get_gaussian_density` no longer needs a Fortran build
+
+`get_gaussian_density` now bins the density onto the grid in pure
+numpy and hands the array to `write_xsf` directly, instead of writing
+the header in Python and having Fortran open the same file again in
+append mode to finish it. `setup.py` no longer builds
+`samos/lib/gaussian_density.f90` -- the file is kept in the repo for
+reference, but it is dead code: nothing imports it any more.
+
+The Fortran carried two bugs, both fixed rather than ported over:
+
+* It folded an atom into the cell with `inv(cell.T)` but converted
+  back with `cell` instead of `cell.T`.  That round trip only returns
+  to where it started for a symmetric cell, so density written for a
+  skewed cell was placed at the wrong position relative to the atoms
+  in the same file.
+* Every grid candidate's weight was computed one grid step further
+  along each axis than the storage cell it was written to -- for any
+  cell shape, not just skewed ones. Invisible only because the
+  gaussian is usually broader than one grid spacing, so the shift
+  didn't stand out.
+
+`get_gaussian_density`'s own arguments and defaults are unchanged.
+The output `.xsf` file now uses the same `%.4E` grid formatting as
+every other writer in `samos.io.xsf`, rather than the Fortran's
+`%20.10f`, and the density itself is shifted by one grid cell (and,
+for skewed cells, correctly placed at all) relative to files written
+by the old code.
+
+### The C++ backend is disabled
+
+`samos/lib/mdutils_cpp_omp.cpp` re-implemented 4 of the 6 Fortran
+routines with OpenMP, but never `get_com_velocities` or
+`calculate_vaf_specific_atoms` -- so `backend='cpp'` silently fell
+back to the (slower) Fortran path for VAF, with no warning that the
+faster backend a caller asked for was not actually used. It had also
+drifted from the Fortran it duplicated: a comment claimed a different
+averaging method that, on inspection, the Fortran used too.
+
+`get_msd`'s `backend` and `num_threads` keywords are gone, along with
+`samos-msd`'s `--backend` and `-j/--num-threads` flags -- the Fortran
+kernel is the only one now, so there is nothing left to pick between.
+`setup.py` no longer builds this file, so `pybind11` is no longer a
+build dependency and the `-fopenmp` compiler flag (the one that broke
+the macOS build, see "Removed: unreachable Fortran..." above) is gone
+from the build entirely. The source is kept in the repo for reference
+-- it compiles to nothing and nothing imports it.
+
+### `mdutils.f90` is disabled
+
+`get_msd` and `get_vaf` loop over every pair of time origins, which
+costs O(N^2) in trajectory length; the same quantities come from a
+Fast Correlation Algorithm (an FFT-based identity) in O(N log N).
+`samos/analysis/_fft_dynamics.py` replaces all six Fortran routines
+with that, measured 20-200x faster end to end (the gap grows with
+trajectory length, since one side is quadratic and the other is not).
+`setup.py` no longer builds `mdutils.f90` -- **no compiler is needed
+to install samos any more** -- and it is the last file that needed
+one, so `meson`/`ninja` have also dropped out of the build
+dependencies. The source is kept in the repo for reference.
+
+Two behavioural differences, both deliberate fixes rather than
+carried-over bugs:
+
+* **`get_msd`'s time axis was off by one.** `calculate_msd_specific_
+  atoms`, `..._decompose_d` and `..._max_stats` all looped their lag
+  index from 1, so lag 0 was never computed and every value in the
+  returned array was actually the MSD one `stepsize_t` later than the
+  time `t_list_fs` labelled it with -- silently biasing every fitted
+  diffusion coefficient, not just plot axes. Confirmed with a
+  constant-velocity trajectory, whose MSD at any lag is exactly
+  predictable: `msd_array[i]` matched `t_list_fs[i] + one step`, not
+  `t_list_fs[i]`. `calculate_vaf_specific_atoms` never had this bug
+  (its loop already started at 0). Index 0 is now genuinely lag 0
+  (trivially zero) for MSD too.
+* **`stepsize_tau` no longer does anything.** It used to subsample
+  time origins so the O(N^2) loop had less work to do, at the cost of
+  noisier statistics. An O(N log N) correlation costs the same
+  whether it uses one origin in twenty or all of them, so subsampling
+  no longer buys anything; every origin is now always used, and
+  passing `stepsize_tau` as anything but 1 raises a `UserWarning` and
+  is otherwise ignored.
+
+Both change existing results by a small, real amount -- better
+statistics from using every origin, and the axis fix -- not
+regressions. `tests/ref/vaf_H2O-64-300K.json` and `tests/ref/
+msd_iso_dec_H2O-64-300K.json` were regenerated accordingly; see
+`tests/test_dynamics.py`, `TestDynamics`'s docstring, for the size of
+the shift and how it was confirmed to be exactly this and nothing
+else (the new engine was checked against `samos.lib.mdutils` directly
+-- still buildable by hand even though nothing in samos does so any
+more -- at `stepsize_tau=1` on this same trajectory, agreeing to
+roundoff).

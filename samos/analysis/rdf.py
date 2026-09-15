@@ -2,6 +2,7 @@
 
 import numpy as np
 from ase.geometry import minkowski_reduce
+from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 
 from samos.trajectory import Trajectory
@@ -109,19 +110,117 @@ class MinimumImage:
         return wrapped - self._images[closest]
 
 
+def is_orthorhombic(cell, rtol=1e-10):
+    """
+    Whether *cell* is diagonal with positive edge lengths.
+
+    A cell that came out of a relaxation carries rounding junk off the
+    diagonal, so an exact test would send almost every "cubic" cell
+    down the slow path.  *rtol* is relative to the largest entry of the
+    cell: treating an off-diagonal of that size as zero displaces a
+    position by at most ``rtol`` times the cell size, which is 5e-9 A
+    for the default on a 50 A cell.
+    """
+    cell = np.asarray(cell, dtype=float)
+    off_diagonal = cell - np.diag(np.diag(cell))
+    scale = np.abs(cell).max()
+    return bool(np.all(np.abs(off_diagonal) <= rtol * scale)
+                and np.all(np.diag(cell) > 0.0))
+
+
+def _wrap_into_box(positions, edges):
+    """
+    Fold *positions* into ``[0, edge)`` along each axis.
+
+    ``positions % edges`` is not enough on its own: for a coordinate a
+    hair below zero the remainder rounds up to exactly the edge, and
+    :class:`scipy.spatial.cKDTree` then rejects the whole array with
+    "some input data are greater than the size of the periodic box".
+    Unwrapped MD coordinates hit this routinely.
+    """
+    wrapped = np.asarray(positions, dtype=float) % edges
+    wrapped[wrapped >= edges] = 0.0
+    return wrapped
+
+
+def pairs_within(positions_1, positions_2, radius, algorithm,
+                 cell=None, mic=None, wrapped=False):
+    """
+    Every periodic pair closer than *radius*, and how far apart it is.
+
+    Two algorithms, giving the same answer:
+
+    ``'ortho'``
+        A pair of k-d trees over the periodic box.  Only builds the
+        pairs that are actually within *radius*, so it costs O(N) in
+        both time and memory, but it needs an orthorhombic *cell*.
+    ``'skew'``
+        Every pair against all 27 neighbour images via *mic*.  Exact
+        for any cell shape, and O(N^2) in both time and memory.
+
+    Both report the distance to the *nearest* periodic image only, so
+    both are biased low beyond ``MinimumImage.max_radius`` and in the
+    same way -- see :meth:`BaseAnalyzer._check_radius`.
+
+    :param bool wrapped:
+        For ``'ortho'`` only: skip folding *positions_1* and
+        *positions_2* into the box, because the caller already did so.
+        A caller that queries the same frame for several species pairs
+        can fold every atom once and pass the same wrapped array in
+        for each pair, rather than this function folding the same
+        atoms again for every pair that touches them.  Ignored for
+        ``'skew'``, which never wraps -- :class:`MinimumImage` finds
+        the nearest periodic image directly from unwrapped positions.
+
+    :returns:
+        ``(i, j, d)``.  *i* indexes *positions_1* and *j* indexes
+        *positions_2*, both locally; *d* holds the distances.  Pairs of
+        an atom with itself are not filtered out here, because whether
+        two rows are the same atom is the caller's bookkeeping.
+    """
+    if algorithm == 'ortho':
+        edges = np.diag(np.asarray(cell, dtype=float))
+        p1 = positions_1 if wrapped else _wrap_into_box(positions_1, edges)
+        p2 = positions_2 if wrapped else _wrap_into_box(positions_2, edges)
+        tree_1 = cKDTree(p1, boxsize=edges)
+        tree_2 = cKDTree(p2, boxsize=edges)
+        found = tree_1.sparse_distance_matrix(
+            tree_2, radius, output_type='ndarray')
+        return found['i'], found['j'], found['v']
+
+    if algorithm != 'skew':
+        raise ValueError(
+            "algorithm must be 'ortho' or 'skew', got {!r}".format(algorithm))
+
+    n_1, n_2 = len(positions_1), len(positions_2)
+    i, j = np.divmod(np.arange(n_1 * n_2), n_2)
+    d = mic.distances(np.asarray(positions_2)[j] - np.asarray(positions_1)[i])
+    close = d <= radius
+    return i[close], j[close], d[close]
+
+
 class BaseAnalyzer(metaclass=ABCMeta):
-    def __init__(self, *, trajectory=None, **kwargs):
+    def __init__(self, *, trajectory=None, verbosity=None, **kwargs):
         """
         :param Trajectory trajectory: The trajectory to analyse.
+        :param int verbosity: 0 silences the progress printing.
         :raises TypeError: On an unrecognised keyword argument.
         """
         self._trajectory = None
+        self._verbosity = 1
         if kwargs:
             raise TypeError(
                 '{} got unexpected keyword argument(s): {}'.format(
                     type(self).__name__, ', '.join(sorted(kwargs))))
         if trajectory is not None:
             self.set_trajectory(trajectory)
+        if verbosity is not None:
+            self.set_verbosity(verbosity)
+
+    def set_verbosity(self, verbosity):
+        if not isinstance(verbosity, int):
+            raise TypeError('Verbosity is an integer')
+        self._verbosity = verbosity
 
     def set_trajectory(self, trajectory):
         if not isinstance(trajectory, Trajectory):
@@ -144,7 +243,7 @@ class BaseAnalyzer(metaclass=ABCMeta):
                 'method, or pass trajectory=... to the constructor.')
         return self._trajectory
 
-    def _check_radius(self, mic, radius, what='radius'):
+    def _check_radius(self, max_radius, radius, what='radius'):
         """
         Warn, at most once per run, if *radius* is too large for the
         cell to support unbiased minimum-image counting.
@@ -152,8 +251,12 @@ class BaseAnalyzer(metaclass=ABCMeta):
         A warning rather than an error: the result is biased low past
         this point, not meaningless, and callers have been computing
         RDFs out to it for years.
+
+        Takes *max_radius* as a number rather than a
+        :class:`MinimumImage`, because the orthorhombic path knows it
+        is half the shortest cell edge and so never builds one.
         """
-        if radius <= mic.max_radius:
+        if radius <= max_radius:
             return
         if getattr(self, '_radius_warned', False):
             return
@@ -162,8 +265,69 @@ class BaseAnalyzer(metaclass=ABCMeta):
              '({:.3f} A). Beyond that, an atom has more than one '
              'periodic image in range and only the nearest is counted, '
              'so the result is biased low. Use a larger cell or a '
-             'smaller radius.'.format(what, radius, mic.max_radius),
+             'smaller radius.'.format(what, radius, max_radius),
              stacklevel=3)
+
+    @staticmethod
+    def _choose_algorithm(cells, frames, method):
+        """
+        Pick ``'ortho'`` or ``'skew'`` for each sampled frame.
+
+        The choice is made from the cells alone, before any distance is
+        computed, so ``method='ortho'`` on a skewed cell fails at once
+        rather than partway through a long trajectory.
+
+        :param cells: ``(nstep, 3, 3)`` array, or a single ``(3, 3)``
+            cell that applies to every frame.
+        :param frames: Indices of the frames that will be sampled.
+        :param str method: ``'auto'``, ``'ortho'`` or ``'skew'``.
+        :returns:
+            ``(algorithms, message)`` -- one algorithm name per entry of
+            *frames*, and the line to print saying what was chosen.
+        """
+        if method not in ('auto', 'ortho', 'skew'):
+            raise ValueError(
+                "method must be 'auto', 'ortho' or 'skew', got "
+                "{!r}".format(method))
+
+        if method == 'skew':
+            # No need to look at the cells at all.
+            return (np.full(len(frames), 'skew'),
+                    'using the slower skew algorithm, because it was '
+                    'requested.')
+
+        cells = np.asarray(cells, dtype=float)
+        if cells.ndim == 2:
+            # One cell for the whole trajectory, so one test for it.
+            ortho = np.full(len(frames), is_orthorhombic(cells))
+        else:
+            ortho = np.array([is_orthorhombic(cells[frame])
+                              for frame in frames])
+        if method == 'ortho':
+            if not ortho.all():
+                raise ValueError(
+                    "method='ortho' needs a cell that is diagonal with "
+                    'positive edges, but {} of the {} sampled frames do '
+                    'not have one. Use method=\'auto\' or '
+                    "method='skew'.".format(
+                        int((~ortho).sum()), len(frames)))
+            return (np.full(len(frames), 'ortho'),
+                    'using the faster ortho algorithm, because it was '
+                    'requested.')
+
+        algorithms = np.where(ortho, 'ortho', 'skew')
+        if ortho.all():
+            message = ('using the faster ortho algorithm, because the '
+                       'cell was detected as orthorhombic.')
+        elif not ortho.any():
+            message = ('using the slower skew algorithm, because the '
+                       'cell is not orthorhombic.')
+        else:
+            message = ('using the faster ortho algorithm for {} of {} '
+                       'frames and the slower skew algorithm for the '
+                       'rest, because the cell shape changes.'.format(
+                           int(ortho.sum()), len(frames)))
+        return algorithms, message
 
     @abstractmethod
     def run(self, *args, **kwargs):
@@ -172,7 +336,7 @@ class BaseAnalyzer(metaclass=ABCMeta):
 
 class RDF(BaseAnalyzer):
     def run(self, radius, species_pairs=None,
-            istart=0, istop=None, stepsize=1, nbins=100):
+            istart=0, istop=None, stepsize=1, nbins=100, method='auto'):
         """
         Calculate a RDF, also searching periodic images.
 
@@ -195,11 +359,10 @@ class RDF(BaseAnalyzer):
         edge of that bin, half a binsize beyond the matching entry of
         ``radii_*``, which holds bin centres.
 
-        Distances use :class:`MinimumImage`, which is exact for any
-        cell shape.  A *radius* beyond ``MinimumImage.max_radius``
-        still biases g(r) low -- see there -- and warns.
-
-        TODO: Implement orthorhombic case to gain efficiency
+        Distances come from :func:`pairs_within`, which reports the
+        distance to the nearest periodic image whichever algorithm it
+        uses.  A *radius* beyond ``MinimumImage.max_radius`` biases
+        g(r) low -- see there -- and warns.
 
         :param float radius:
             The radius for the calculation of the RDF
@@ -211,6 +374,16 @@ class RDF(BaseAnalyzer):
         :param in binsize:
             Number of bins to use in histogram, defaults to 100.
             Increasing this means finer resolution but also more noise.
+        :param str method:
+            Which pair-finding algorithm to use: ``'auto'`` (default)
+            takes ``'ortho'`` wherever the cell allows it, ``'ortho'``
+            demands it and raises if the cell is skewed, and ``'skew'``
+            forces the exact-for-any-cell path even when the cell is
+            orthorhombic.  The two agree to rounding, so ``'skew'`` is
+            useful as a check on ``'ortho'``.  See :func:`pairs_within`.
+        :raises ValueError:
+            On an unknown *method*, or ``method='ortho'`` with a cell
+            that is not diagonal with positive edges.
         """
         def get_indices(spec, chem_sym):
             """
@@ -245,13 +418,9 @@ class RDF(BaseAnalyzer):
         types = self.trajectory.get_types()
         cells = self.trajectory.get_cells()
         self._radius_warned = False
-        if cells is None:
-            fixed_cell = True
-            volume = self.trajectory.atoms.get_volume()
-            mic = MinimumImage(get_cell(self.trajectory))
-            self._check_radius(mic, radius, 'RDF radius')
-        else:
-            fixed_cell = False
+        fixed_cell = cells is None
+        if fixed_cell:
+            fixed_volume = self.trajectory.atoms.get_volume()
 
         if istop is None:
             istop = len(positions)
@@ -259,6 +428,14 @@ class RDF(BaseAnalyzer):
             raise ValueError('Istop ({}) is higher than the number of '
                              'positions ({})'.format(
                                  istop, len(positions)))
+        frames = np.arange(istart, istop, stepsize)
+
+        algorithms, message = self._choose_algorithm(
+            get_cell(self.trajectory) if fixed_cell else cells,
+            frames, method)
+        if self._verbosity > 0:
+            print('RDF: ' + message)
+
         if species_pairs is None:
             species_pairs = sorted(list(
                 itertools.combinations_with_replacement(
@@ -282,46 +459,34 @@ class RDF(BaseAnalyzer):
         rdf_res = AttributedArray()
         rdf_res.set_attr('species_pairs', species_pairs_pruned)
         binsize = float(radius)/nbins
+        bin_edges = np.histogram([], bins=nbins, range=(0, radius))[1]
 
-        # wrapping the positions:
-        shortest_distance_all = np.inf
+        # Everything that does not change from frame to frame, worked
+        # out once per species pair.  n_pairs is counted rather than
+        # enumerated: listing every index pair is what used to make
+        # this function quadratic in memory even before any distance
+        # was computed.
+        plan = []
         for label, (ind1, ind2) in zip(labels, indices_pairs):
-            shortest_distance_this_pair = np.inf
-            if ind1 == ind2:
-                # lists are equal, I will therefore not double calculate
-                pairs_of_atoms = [(i, j) for i in ind1
-                                  for j in ind2 if i < j]
+            same_list = ind1 == ind2
+            if same_list:
+                # Each unordered pair once, then counted from both
+                # ends by the factor of two.
+                n_pairs = len(ind1) * (len(ind1) - 1) // 2
                 pair_factor = 2.0
             else:
-                pairs_of_atoms = [(i, j) for i in ind1
-                                  for j in ind2 if i != j]
+                n_pairs = (len(ind1) * len(ind2)
+                           - len(set(ind1) & set(ind2)))
                 pair_factor = 1.0
-            if not pairs_of_atoms:
+            if not n_pairs:
                 # e.g. a species that is absent from the trajectory.
                 # Skipping keeps the remaining pairs computable; the
-                # unpacking below would raise an opaque
-                # 'not enough values to unpack' instead.
-                print('Warning: no atom pairs for {}, skipping'
-                      ''.format(label))
+                # histogram below would be empty and its normalisation
+                # a division by zero.
+                if self._verbosity > 0:
+                    print('Warning: no atom pairs for {}, skipping'
+                          ''.format(label))
                 continue
-            ind_pair1, ind_pair2 = list(zip(*pairs_of_atoms))
-
-            # doinng a loop in time to avoid memory explosion
-            # this also makes it easier to deal with cell changes
-            hist, bin_edges = np.histogram([], bins=nbins, range=(0, radius))
-            hist = hist.astype(float)
-            # Second accumulator, weighted by each frame's volume, so
-            # that the g(r) below is the mean of the per-frame g(r)
-            # rather than one histogram divided by a single volume.
-            # hist itself stays a plain neighbour count, which is what
-            # the running integral reports.
-            hist_by_density = np.zeros(nbins, dtype=float)
-            # normalize the histogram, by the number of steps taken,
-            # and the number of species1
-            prefactor = (
-                pair_factor
-                / float(len(np.arange(istart, istop, stepsize)))
-                / float(len(ind1)))
             # An atom of species 1 that is itself one of the species-2
             # atoms is not its own neighbour, so the ideal-gas count it
             # is compared against is len(ind2) minus the chance of that
@@ -331,47 +496,109 @@ class RDF(BaseAnalyzer):
                 len(ind2)
                 - len(set(ind1) & set(ind2)) / float(len(ind1)))
             if n_neighbours_ideal <= 0:
-                print('Warning: no ideal-gas reference for {}, skipping'
-                      ''.format(label))
+                if self._verbosity > 0:
+                    print('Warning: no ideal-gas reference for {}, '
+                          'skipping'.format(label))
                 continue
-            for index in np.arange(istart, istop, stepsize):
-                if not fixed_cell:
-                    cell = cells[index]
-                    volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
-                    mic = MinimumImage(cell)
-                    self._check_radius(mic, radius, 'RDF radius')
-                shortest_distances = mic.distances(
-                    positions[index, ind_pair2, :]
-                    - positions[index, ind_pair1, :])
-                shortest_distance_this_pair = min(
-                    shortest_distance_this_pair, shortest_distances.min())
-                counts = prefactor * (
-                    np.histogram(shortest_distances, bins=nbins,
-                                 range=(0, radius))[0]).astype(float)
-                hist += counts
-                hist_by_density += counts * volume
+            # normalize the histogram, by the number of steps taken,
+            # and the number of species1
+            prefactor = pair_factor / float(len(frames)) / float(len(ind1))
+            plan.append(dict(
+                label=label, ind1=np.asarray(ind1), ind2=np.asarray(ind2),
+                same_list=same_list, n_pairs=n_pairs, prefactor=prefactor,
+                n_neighbours_ideal=n_neighbours_ideal,
+                hist=np.zeros(nbins, dtype=float),
+                # Second accumulator, weighted by each frame's volume,
+                # so that the g(r) below is the mean of the per-frame
+                # g(r) rather than one histogram divided by a single
+                # volume.  hist itself stays a plain neighbour count,
+                # which is what the running integral reports.
+                hist_by_density=np.zeros(nbins, dtype=float),
+                shortest=np.inf))
 
-            radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
+        # Frames outermost so that the cell work -- the Minkowski
+        # reduction above all, which the MinimumImage docstring calls
+        # the expensive part -- happens once per frame instead of once
+        # per frame per species pair.
+        def prepare_cell(cell, algorithm):
+            """Cell-dependent work: the reduction, and the radius check.
 
-            rdf = (hist_by_density
+            Only the skew path needs a MinimumImage; for an
+            orthorhombic cell the shortest lattice vector is the
+            shortest edge, so the ortho path gets its radius limit
+            without reducing anything.
+            """
+            mic = None if algorithm == 'ortho' else MinimumImage(cell)
+            max_radius = (0.5 * np.diag(cell).min() if algorithm == 'ortho'
+                          else mic.max_radius)
+            self._check_radius(max_radius, radius, 'RDF radius')
+            return mic
+
+        if fixed_cell:
+            cell, volume = get_cell(self.trajectory), fixed_volume
+            mic = prepare_cell(cell, algorithms[0])
+
+        for iframe, index in enumerate(frames):
+            algorithm = algorithms[iframe]
+            if not fixed_cell:
+                cell = cells[index]
+                volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
+                mic = prepare_cell(cell, algorithm)
+
+            # Every species pair that shares a species would otherwise
+            # fold that species' atoms into the box again for each
+            # pair it appears in.  Folding the whole frame once here
+            # instead means every atom is wrapped exactly once per
+            # frame, however many pairs it takes part in.
+            if algorithm == 'ortho':
+                wrapped_positions = _wrap_into_box(
+                    positions[index], np.diag(cell))
+
+            for entry in plan:
+                ind1, ind2 = entry['ind1'], entry['ind2']
+                if algorithm == 'ortho':
+                    pos1 = wrapped_positions[ind1]
+                    pos2 = wrapped_positions[ind2]
+                else:
+                    pos1 = positions[index, ind1, :]
+                    pos2 = positions[index, ind2, :]
+                i, j, distances = pairs_within(
+                    pos1, pos2, radius, algorithm, cell=cell, mic=mic,
+                    wrapped=(algorithm == 'ortho'))
+                # An atom is not its own neighbour.  For a species
+                # against itself, i < j additionally keeps each
+                # unordered pair once, which pair_factor doubles back.
+                global_i, global_j = ind1[i], ind2[j]
+                keep = (global_i < global_j if entry['same_list']
+                        else global_i != global_j)
+                distances = distances[keep]
+                if len(distances):
+                    entry['shortest'] = min(entry['shortest'],
+                                            distances.min())
+                counts = entry['prefactor'] * np.histogram(
+                    distances, bins=nbins, range=(0, radius))[0]
+                entry['hist'] += counts
+                entry['hist_by_density'] += counts * volume
+
+        radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
+        shortest_distance_all = np.inf
+        for entry in plan:
+            label = entry['label']
+            rdf = (entry['hist_by_density']
                    / (4.0 * np.pi * radii**2 * binsize)
-                   / n_neighbours_ideal)
-            integral = np.empty(len(rdf))
-            sum_ = 0.0
-            for i in range(len(integral)):
-                sum_ += hist[i]
-                integral[i] = sum_
+                   / entry['n_neighbours_ideal'])
+            integral = np.cumsum(entry['hist'])
 
             rdf_res.set_array('rdf_{}'.format(label), rdf)
             rdf_res.set_array('int_{}'.format(label), integral)
             rdf_res.set_array('radii_{}'.format(label), radii)
-            rdf_res.set_attr('n_pairs_{}'.format(label), len(pairs_of_atoms))
+            rdf_res.set_attr('n_pairs_{}'.format(label), entry['n_pairs'])
             rdf_res.set_attr('n_data_{}'.format(label),
-                             len(pairs_of_atoms) * ((istop-istart)//stepsize))
+                             entry['n_pairs'] * ((istop-istart)//stepsize))
             rdf_res.set_attr('shortest_distance_{}'.format(label),
-                             float(shortest_distance_this_pair))
+                             float(entry['shortest']))
             shortest_distance_all = min(shortest_distance_all,
-                                        shortest_distance_this_pair)
+                                        entry['shortest'])
         # One global value, after every pair has contributed.  This used
         # to be written inside the loop, so it held the running minimum
         # over the pairs seen so far under a name that reads per-pair.
@@ -524,7 +751,8 @@ class BondAnalyzer(BaseAnalyzer):
         cutoffs_parsed = self._parse_cutoffs(cutoffs)
         positions = self.trajectory.get_positions()[frame]
         mic = MinimumImage(get_cell(self.trajectory, frame))
-        self._check_radius(mic, max(r for _, r in cutoffs_parsed.values()),
+        self._check_radius(mic.max_radius,
+                           max(r for _, r in cutoffs_parsed.values()),
                            'Bond cutoff')
         types = self.trajectory.get_types()
 
