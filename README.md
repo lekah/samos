@@ -86,23 +86,55 @@ Time values are plain floats; the unit is set with `--t-unit`
 
 | Flag | Description |
 |------|-------------|
-| `--timestep FS` | Override the trajectory timestep (fs) |
 | `--lammps` | Read as LAMMPS dump (file must have an `element` column) |
 | `--lammps-types SYM ...` | Read as LAMMPS dump; map integer types to symbols in order |
 | `--lammps-elements SYM...\|FORMULA` | Read as LAMMPS dump; assign symbols per atom or via formula |
 | `--units SYSTEM` | Convert arrays from a named unit system to samos internal units |
 | `-i/--index SLICE` | Analyse only these frames, e.g. `::10` or `500:1500:2` |
 | `--species SYM ...` | Restrict analysis to these chemical symbols |
-| `--recenter` | Subtract centre-of-mass motion before analysis |
-| `--compute-velocities` | Derive velocities from positions (Verlet formula) |
 | `--transform-species SYM` | Relabel all atoms as SYM |
 | `--write FILE` | Write results to a CSV file |
 | `--plot` | Show the plot interactively |
 | `--savefig FILE` | Save the plot to FILE |
 
+### Options that need a real trajectory
+
+These three are accepted by `samos-msd`, `samos-vaf`, `samos-vdos` and
+`samos-adf`, but **not** by `samos-rdf`.  A timestep presumes the frames
+are a time series, and recentering and deriving velocities both presume
+that atom *i* is the same atom in every frame.  The RDF works one frame
+at a time and needs none of that, so it does not offer them.
+
+| Flag | Description |
+|------|-------------|
+| `--timestep FS` | Override the trajectory timestep (fs) |
+| `--recenter` | Subtract centre-of-mass motion before analysis |
+| `--compute-velocities` | Derive velocities from positions (Verlet formula) |
+
 `-n/--nblocks N` splits the trajectory into N blocks and is accepted by
 `samos-msd`, `samos-vaf` and `samos-vdos`.  It is not accepted by
 `samos-rdf` and `samos-adf`, which do not block-average.
+
+### Files whose frames hold different atoms
+
+`samos-rdf` reads a file whose frames differ in atom count, species and
+cell -- a set of unrelated structures rather than a trajectory.  Every
+frame is analysed and normalised on its own and the results averaged,
+so this needs no correspondence between one frame's atoms and the
+next's.
+
+```bash
+# structures.extxyz holds, say, Si8O16, Si12O24 and Al6O9
+samos-rdf structures.extxyz --radius 4
+```
+
+One thing to know about the averaging: a frame holding none of a pair's
+species contributes nothing to that pair and still counts in the
+average, so g(r) tends to the fraction of frames containing both
+species rather than to 1.  That is the composition-averaged correlation
+of the whole set.
+
+The other commands refuse such a file, and say why.
 
 ### Reading LAMMPS dump files
 
@@ -122,7 +154,7 @@ samos-msd traj.lammpstrj --lammps-elements Li10GeP2S12 --timestep 2
 samos-msd traj.lammpstrj --lammps-elements Al Al Al --timestep 2
 ```
 
-Preprocessing applies to every command:
+Preprocessing, on the commands that take a trajectory:
 
 ```bash
 # Remove centre-of-mass drift
@@ -232,7 +264,7 @@ samos-rdf traj.extxyz --species Li --radius 6
 samos-rdf traj.extxyz --species-pairs Li-O O-O --bins 200
 
 # LAMMPS dump
-samos-rdf traj.lammpstrj --lammps-types Li Ge P S --timestep 1000 \
+samos-rdf traj.lammpstrj --lammps-types Li Ge P S \
     --radius 6 --savefig rdf.png
 ```
 

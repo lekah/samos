@@ -183,7 +183,7 @@ class TestDispatcher(CLITestCase):
         self.assertEqual(sorted(listed), sorted(cli.MAINS))
 
     def test_dispatch_equals_direct_call(self):
-        common = ['--timestep', '1', '-r', '4', '-b', '20', '-q']
+        common = ['-r', '4', '-b', '20', '-q']
         cli.main(['rdf', self.traj_path, '--write', self.out('a.csv')]
                  + common)
         cli.main_rdf([self.traj_path, '--write', self.out('b.csv')] + common)
@@ -219,7 +219,7 @@ class TestCommands(CLITestCase):
                         'frequency_THz,vdos_Li,vdos_O')
 
     def test_rdf(self):
-        cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
+        cli.main_rdf([self.traj_path, '-r', '4',
                       '-b', '20', '--species-pairs', 'Li-O', '-q',
                       '--write', self.out('rdf.csv')])
         self.assert_csv(self.out('rdf.csv'),
@@ -229,7 +229,7 @@ class TestCommands(CLITestCase):
         """The two algorithms agree, so the same CSV must come out
         whichever one the flag selects."""
         for choice in ('ortho', 'skew'):
-            cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4',
+            cli.main_rdf([self.traj_path, '-r', '4',
                           '-b', '20', '--species-pairs', 'Li-O', '-q',
                           '--method', choice,
                           '--write', self.out(choice + '.csv')])
@@ -255,7 +255,7 @@ class TestCommands(CLITestCase):
         # --species comes from the shared parser and --species-pairs from
         # the rdf parser, so argparse cannot enforce this for us.
         with self.assertRaises(ValueError):
-            cli.main_rdf([self.traj_path, '--timestep', '1', '-r', '4', '-q',
+            cli.main_rdf([self.traj_path, '-r', '4', '-q',
                           '--species', 'Li', '--species-pairs', 'Li-O'])
 
 
@@ -305,7 +305,7 @@ class TestIndex(CLITestCase):
     def test_slice_changes_the_result(self):
         # Averaging over a third of the frames gives a different RDF;
         # identical output would mean --index never reached the analysis.
-        common = ['--timestep', '1', '-r', '4', '-b', '20', '-q',
+        common = ['-r', '4', '-b', '20', '-q',
                   '--species-pairs', 'Li-O']
         cli.main_rdf([self.traj_path] + common
                      + ['--write', self.out('all.csv')])
@@ -336,6 +336,118 @@ class TestIndex(CLITestCase):
                            '--compute-velocities', '-i', '0:100', '-q',
                            '--write', self.out('vdos.csv')])
         self.assertNotIn('Warning', buf.getvalue())
+
+
+def _write_mixed_extxyz(path, seed=101):
+    """
+    Write three structures that differ in atom count and species.
+
+    Not a trajectory by any reading: there is no correspondence between
+    the atoms of one frame and the next.
+    """
+    rng = np.random.default_rng(seed)
+    images = []
+    for symbols, edge in (('Si8O16', 11.0), ('Si12O24', 13.0),
+                          ('Al6O9', 10.0)):
+        atoms = Atoms(symbols, cell=np.eye(3) * edge, pbc=True)
+        atoms.set_positions(rng.random((len(atoms), 3)) * edge)
+        images.append(atoms)
+    ase_write(path, images, format='extxyz')
+
+
+class TestMixedStructures(CLITestCase):
+    """
+    samos-rdf treats every frame on its own, so it reads a file whose
+    frames hold different atoms.  The commands that follow an atom
+    through time cannot, and say so.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.mixed_path = os.path.join(self.tmpdir, 'mixed.extxyz')
+        _write_mixed_extxyz(self.mixed_path)
+
+    def test_rdf_reads_a_mixed_file(self):
+        cli.main_rdf([self.mixed_path, '-r', '4', '-b', '20', '-q',
+                      '--species-pairs', 'O-Si',
+                      '--write', self.out('rdf.csv')])
+        self.assert_csv(self.out('rdf.csv'), 'radius_A,rdf_O_Si,int_O_Si')
+
+    def test_rdf_default_pairs_span_every_frame(self):
+        # Al is in the last frame only and Si in the first two, so the
+        # pair list has to come from the union over frames.
+        cli.main_rdf([self.mixed_path, '-r', '4', '-b', '20', '-q',
+                      '--write', self.out('rdf.csv')])
+        with open(self.out('rdf.csv')) as handle:
+            header = handle.readline()
+        for pair in ('rdf_Al_Al', 'rdf_Al_O', 'rdf_O_O', 'rdf_O_Si',
+                     'rdf_Si_Si'):
+            self.assertIn(pair, header)
+
+    def test_index_slices_a_mixed_file(self):
+        cli.main_rdf([self.mixed_path, '-r', '4', '-b', '20', '-q',
+                      '-i', '0:2', '--species-pairs', 'O-Si',
+                      '--write', self.out('part.csv')])
+        self.assert_csv(self.out('part.csv'), 'radius_A,rdf_O_Si,int_O_Si')
+
+    def test_transform_species_works_on_a_mixed_file(self):
+        cli.main_rdf([self.mixed_path, '-r', '4', '-b', '20', '-q',
+                      '--transform-species', 'H',
+                      '--write', self.out('all.csv')])
+        self.assert_csv(self.out('all.csv'), 'radius_A,rdf_H_H,int_H_H')
+
+    def test_msd_refuses_a_mixed_file_with_a_reason(self):
+        with self.assertRaises(ValueError) as ctx:
+            cli.main_msd([self.mixed_path, '-q',
+                          '--write', self.out('msd.csv')])
+        message = str(ctx.exception)
+        self.assertIn('not all hold the same atoms', message)
+        self.assertIn('samos-rdf', message)
+
+    def test_adf_refuses_a_mixed_file(self):
+        with self.assertRaises(ValueError):
+            cli.main_adf([self.mixed_path, '-r', '3', '-q',
+                          '--write', self.out('adf.csv')])
+
+    def test_an_ordinary_trajectory_still_loads_for_every_command(self):
+        cli.main_msd([self.traj_path, '--timestep', '1', '-q',
+                      '--t-start-fit', '1', '--t-end-fit', '2',
+                      '--t-unit', 'dt', '--write', self.out('msd.csv')])
+        self.assertTrue(os.path.exists(self.out('msd.csv')))
+
+
+class TestTrajectoryOnlyOptions(CLITestCase):
+    """
+    Options that need atom-to-atom correspondence are not offered by
+    samos-rdf at all, rather than offered and rejected at run time.
+    """
+
+    TRAJECTORY_ONLY = ('--timestep', '--recenter', '--compute-velocities')
+
+    def test_rdf_does_not_offer_them(self):
+        for option in self.TRAJECTORY_ONLY:
+            argv = [self.traj_path, '-r', '4', '-q', option]
+            if option == '--timestep':
+                argv.append('1')
+            with _silence_argparse(), self.assertRaises(
+                    SystemExit, msg=option):
+                cli.main_rdf(argv)
+
+    def test_the_other_commands_still_offer_them(self):
+        help_text = _parser_help(cli._parser_msd)
+        for option in self.TRAJECTORY_ONLY:
+            self.assertIn(option, help_text)
+
+    def test_rdf_keeps_the_options_that_do_work(self):
+        help_text = _parser_help(cli._parser_rdf)
+        for option in ('--index', '--transform-species', '--units',
+                       '--species'):
+            self.assertIn(option, help_text)
+
+
+def _parser_help(builder):
+    """The --help text of a command parser, as a single string."""
+    return builder().format_help()
 
 
 if __name__ == '__main__':

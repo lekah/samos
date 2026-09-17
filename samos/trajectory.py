@@ -128,7 +128,22 @@ class Trajectory(StructureList):
     @classmethod
     def from_atoms(cls, atoms_list, timestep_fs=None, add_arrays=None):
         """
-        Instantiate a new class instance given a set of atoms
+        Instantiate a new class instance given a set of atoms.
+
+        Every frame must list the same atoms in the same order, because
+        the time-correlated analyses follow atom *i* from frame to
+        frame.  Frames that do not are a
+        :class:`~samos.structurelist.StructureList`, not a trajectory.
+
+        This used to try to repair a symbol-list mismatch by sorting
+        each frame by atomic number.  That makes the symbol lists
+        agree without making atom *i* the same atom: two frames holding
+        one motionless structure, listed as ``H O H`` and ``H H O``,
+        came out with a displacement of 1 A invented between them, and
+        the guard here then passed.  The LAMMPS reader, which is what
+        the repair was written for, never comes through here and sorts
+        by atom id instead -- see ``read_lammps_dump``, where the id
+        carries the identity that atomic number cannot.
         """
         from ase import Atoms
         chem_sym_set = set()
@@ -140,22 +155,12 @@ class Trajectory(StructureList):
         if len(chem_sym_set) < 1:
             raise ValueError('Empty list provided')
         elif len(chem_sym_set) > 1:
-            # let's try to fix that by reordering the atoms:
-            chem_sym_set = set()
-            for atoms in atoms_list:
-                order = np.argsort(atoms.get_atomic_numbers())
-                atoms.set_atomic_numbers(atoms.get_atomic_numbers()[order])
-                atoms.set_positions(atoms.get_positions()[order])
-                if atoms.get_velocities() is not None:
-                    atoms.set_velocities(atoms.get_velocities()[order])
-                try:
-                    atoms.set_forces(atoms.get_forces()[order])
-                except Exception:
-                    pass
-                chem_sym_set.add(tuple(atoms.get_chemical_symbols()))
-            if len(chem_sym_set) > 1:
-                raise ValueError('The chemical_symbols list of provided atoms '
-                                 'are not the same for all, cannot proceed')
+            raise ValueError(
+                'The chemical symbols of the provided atoms are not the '
+                'same for all frames, so this is not a trajectory. Use '
+                'StructureList.from_atoms for frames that differ in '
+                'their atoms; analyses that are per-frame, such as the '
+                'RDF, accept one.')
 
         positions = np.array([atoms.get_positions() for atoms in atoms_list])
         velocities = np.array([atoms.get_velocities() for atoms in atoms_list])
@@ -616,11 +621,10 @@ class Trajectory(StructureList):
         :param float s_conv: stress factor to eV/Angstrom^3
         """
         names = self.get_arraynames()
-        if l_conv != 1.0:
-            if self._POSITIONS_KEY in names:
-                self._arrays[self._POSITIONS_KEY] *= l_conv
-            if self._CELL_KEY in names:
-                self._arrays[self._CELL_KEY] *= l_conv
+        # Positions and cells are handled by StructureList, which does
+        # the same thing shape-agnostically.  What is left below are
+        # the arrays only a trajectory has.
+        super().apply_unit_conversion(l_conv=l_conv)
         if v_conv != 1.0 and self._VELOCITIES_KEY in names:
             self._arrays[self._VELOCITIES_KEY] *= v_conv
         if f_conv != 1.0 and self._FORCES_KEY in names:

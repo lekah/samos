@@ -375,5 +375,144 @@ class TestTrajectoryUnchanged(unittest.TestCase):
             Trajectory(structures=_mixed_frames())
 
 
+class TestStructureListSliceSteps(unittest.TestCase):
+    """
+    Backs the CLI's --index for frames that differ, so the atom counts
+    have to be re-derived rather than assumed.
+    """
+
+    def setUp(self):
+        self.frames = _mixed_frames()
+        self.sl = StructureList.from_atoms(self.frames)
+
+    def test_selected_frames_are_kept_in_order(self):
+        sliced = self.sl.slice_steps(slice(0, 3, 2))
+        self.assertEqual(sliced.nstep, 2)
+        self.assertEqual(
+            [sliced.get_frame_natoms(i) for i in range(2)], [6, 5])
+        for new, old in enumerate((0, 2)):
+            np.testing.assert_allclose(
+                sliced.get_frame_positions(new),
+                self.frames[old].get_positions())
+            self.assertEqual(list(sliced.get_frame_types(new)),
+                             self.frames[old].get_chemical_symbols())
+            np.testing.assert_allclose(
+                sliced.get_frame_cell(new),
+                np.asarray(self.frames[old].cell))
+
+    def test_offsets_are_rebuilt_not_carried_over(self):
+        # The whole point: frame 1 of the slice must start where frame
+        # 0 of the slice ends, not where it started in the original.
+        sliced = self.sl.slice_steps(slice(1, 3))
+        np.testing.assert_array_equal(
+            sliced.get_array('offsets'), [0, 9, 14])
+        self.assertEqual(len(sliced.get_array('positions')), 14)
+        self.assertEqual(len(sliced.get_array('types')), 14)
+
+    def test_negative_and_open_ended_slices(self):
+        self.assertEqual(self.sl.slice_steps(slice(None, -1)).nstep, 2)
+        self.assertEqual(self.sl.slice_steps(slice(-2, None)).nstep, 2)
+        self.assertEqual(self.sl.slice_steps(slice(None, None, -1)).nstep,
+                         3)
+
+    def test_reversed_slice_reverses_the_frames(self):
+        reversed_ = self.sl.slice_steps(slice(None, None, -1))
+        np.testing.assert_allclose(reversed_.get_frame_positions(0),
+                                   self.frames[-1].get_positions())
+
+    def test_pbc_is_sliced_with_the_frames(self):
+        frames = _mixed_frames()
+        frames[1].pbc = False
+        sliced = StructureList.from_atoms(frames).slice_steps(slice(1, 3))
+        self.assertFalse(sliced.get_frame_pbc(0).any())
+        self.assertTrue(sliced.get_frame_pbc(1).all())
+
+    def test_attributes_are_carried_over(self):
+        self.sl.set_attr('source', 'test')
+        self.assertEqual(
+            self.sl.slice_steps(slice(0, 2)).get_attr('source'), 'test')
+
+    def test_original_is_unchanged(self):
+        self.sl.slice_steps(slice(0, 1))
+        self.assertEqual(self.sl.nstep, 3)
+        self.assertEqual(len(self.sl.get_array('positions')), 20)
+
+    def test_empty_slice_raises(self):
+        with self.assertRaises(ValueError):
+            self.sl.slice_steps(slice(2, 2))
+
+    def test_non_slice_raises(self):
+        with self.assertRaises(TypeError):
+            self.sl.slice_steps(1)
+
+    def test_an_array_of_unknown_kind_raises(self):
+        # Neither per-atom nor per-frame, so there is no right way to
+        # cut it.  Failing beats guessing.
+        self.sl.set_array('mystery', np.arange(4.0))
+        with self.assertRaises(TypeError) as ctx:
+            self.sl.slice_steps(slice(0, 2))
+        self.assertIn('mystery', str(ctx.exception))
+
+    def test_a_trajectory_still_uses_its_own_slicing(self):
+        traj = Trajectory(atoms=Atoms('H4', cell=np.eye(3) * 5.0, pbc=True),
+                          timestep=2.0)
+        traj.set_positions(np.zeros((6, 4, 3)))
+        sliced = traj.slice_steps(slice(None, None, 2))
+        self.assertIsInstance(sliced, Trajectory)
+        # The timestep rescaling is Trajectory's, and must survive the
+        # base class gaining a slice_steps of its own.
+        self.assertEqual(sliced.get_timestep(), 4.0)
+
+
+class TestStructureListTransformSpecies(unittest.TestCase):
+
+    def test_every_atom_of_every_frame_is_relabelled(self):
+        sl = StructureList.from_atoms(_mixed_frames())
+        sl.transform_species('H')
+        self.assertEqual(list(sl.get_species()), ['H'])
+        for i in range(sl.nstep):
+            self.assertEqual(set(sl.get_frame_types(i)), {'H'})
+
+    def test_atom_counts_are_untouched(self):
+        sl = StructureList.from_atoms(_mixed_frames())
+        sl.transform_species('H')
+        self.assertEqual([sl.get_frame_natoms(i) for i in range(3)],
+                         [6, 9, 5])
+
+
+class TestUnitConversion(unittest.TestCase):
+    """
+    Lengths are scaled by StructureList; a Trajectory extends that with
+    the arrays only it has.
+    """
+
+    def test_structure_list_scales_positions_and_cells(self):
+        frames = _mixed_frames()
+        sl = StructureList.from_atoms(frames)
+        sl.apply_unit_conversion(l_conv=2.0)
+        np.testing.assert_allclose(sl.get_frame_positions(1),
+                                   frames[1].get_positions() * 2.0)
+        np.testing.assert_allclose(sl.get_frame_cell(1),
+                                   np.asarray(frames[1].cell) * 2.0)
+
+    def test_a_factor_of_one_changes_nothing(self):
+        frames = _mixed_frames()
+        sl = StructureList.from_atoms(frames)
+        sl.apply_unit_conversion(l_conv=1.0)
+        np.testing.assert_array_equal(sl.get_frame_positions(0),
+                                      frames[0].get_positions())
+
+    def test_trajectory_still_converts_velocities_and_lengths(self):
+        rng = np.random.default_rng(83)
+        pos = rng.random((4, 3, 3))
+        vel = rng.random((4, 3, 3))
+        traj = Trajectory(atoms=Atoms('H3', cell=np.eye(3) * 5.0, pbc=True))
+        traj.set_positions(pos)
+        traj.set_velocities(vel)
+        traj.apply_unit_conversion(l_conv=2.0, v_conv=3.0)
+        np.testing.assert_allclose(traj.get_positions(), pos * 2.0)
+        np.testing.assert_allclose(traj.get_velocities(), vel * 3.0)
+
+
 if __name__ == '__main__':
     unittest.main()

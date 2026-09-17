@@ -34,6 +34,14 @@ class StructureList(AttributedArray):
     _PBC_KEY = 'pbc'
     _OFFSETS_KEY = 'offsets'
 
+    # Which stored arrays are indexed by atom and which by frame.
+    # Slicing has to know: a per-atom array is cut with the offsets, a
+    # per-frame array with the frame numbers, and getting it the wrong
+    # way round produces a plausible-looking but corrupt result rather
+    # than an error.
+    _PER_ATOM_KEYS = (_POSITIONS_KEY, _TYPES_KEY)
+    _PER_FRAME_KEYS = (_CELL_KEY, _PBC_KEY)
+
     # No __init__ of its own, deliberately.  Holding no state is what
     # lets Trajectory inherit from this class without its rectangular
     # arrays having to coexist with a second, unused layout.
@@ -232,6 +240,91 @@ class StructureList(AttributedArray):
         blocks = self.get_array(self._TYPES_KEY).reshape(
             len(counts), counts[0])
         return bool(np.all(blocks == blocks[0]))
+
+    def slice_steps(self, index):
+        """
+        Return a new structure list holding only the frames selected by
+        *index*.  The instance this is called on is left unchanged.
+
+        Per-atom arrays are rebuilt by concatenating the selected
+        frames' slices, and the offsets are rebuilt from the selected
+        atom counts, so the result is as compact as if it had been
+        built from those frames in the first place.
+
+        :param slice index: The frames to keep, e.g. ``slice(0, 50, 2)``.
+        :returns: A new :class:`StructureList`.
+        :raises TypeError: If *index* is not a slice, or an array is
+            stored that is neither per-atom nor per-frame.
+        :raises ValueError: If the slice selects no frames.
+        """
+        if not isinstance(index, slice):
+            raise TypeError(
+                'index has to be a slice, got {}'.format(type(index)))
+        frames = range(self.nstep)[index]
+        if not len(frames):
+            raise ValueError(
+                'Slicing {} frames with {} leaves nothing to '
+                'analyse'.format(self.nstep, index))
+
+        unknown = (set(self._arrays)
+                   - set(self._PER_ATOM_KEYS)
+                   - set(self._PER_FRAME_KEYS)
+                   - {self._OFFSETS_KEY})
+        if unknown:
+            raise TypeError(
+                'Cannot slice {}: not known to be per-atom or '
+                'per-frame. Add it to _PER_ATOM_KEYS or '
+                '_PER_FRAME_KEYS.'.format(', '.join(sorted(unknown))))
+
+        new = self.__class__()
+        slices = [self._frame_slice(frame) for frame in frames]
+        counts = [self.get_frame_natoms(frame) for frame in frames]
+        new.set_array(self._OFFSETS_KEY,
+                      np.concatenate(([0], np.cumsum(counts))).astype(int))
+        for name in self._PER_ATOM_KEYS:
+            if name in self._arrays:
+                flat = self._flat(name)
+                new.set_array(name, np.concatenate(
+                    [flat[where] for where in slices]))
+        for name in self._PER_FRAME_KEYS:
+            if name in self._arrays:
+                new.set_array(name, self._arrays[name][list(frames)])
+        for key, value in self._attrs.items():
+            new.set_attr(key, value)
+        return new
+
+    def transform_species(self, target):
+        """
+        Relabel every atom in every frame as *target* in-place.
+
+        Useful when an analysis should treat the whole set as a single
+        component -- an RDF of everything against everything, say --
+        without filtering by element.
+
+        :param str target: Chemical symbol, e.g. ``'H'``.
+        """
+        types = self.get_array(self._TYPES_KEY)
+        self.set_array(self._TYPES_KEY,
+                       np.full(len(types), target, dtype=str))
+
+    def apply_unit_conversion(self, l_conv=1.0):
+        """
+        Scale the stored lengths to samos internal units in-place.
+
+        Only the arrays present are touched.  The flat layout makes no
+        difference here: the factor multiplies every element either
+        way, which is why
+        :class:`~samos.trajectory.Trajectory` can extend this rather
+        than reimplement it.
+
+        :param float l_conv: length factor (multiply to get Angstrom);
+            applied to both positions and cell vectors
+        """
+        if l_conv == 1.0:
+            return
+        for name in (self._POSITIONS_KEY, self._CELL_KEY):
+            if name in self._arrays:
+                self._arrays[name] = self._arrays[name] * l_conv
 
     def __len__(self):
         return self.nstep

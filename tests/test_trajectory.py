@@ -217,6 +217,67 @@ class TestAttributedArrayRoundTrip(unittest.TestCase):
         self.assertEqual(self._round_trip(t).nstep, 6)
 
 
+class TestFromAtomsRefusesMismatchedFrames(unittest.TestCase):
+    """
+    from_atoms used to try to repair a symbol-list mismatch by sorting
+    each frame by atomic number.  That makes the symbol lists agree
+    without making atom i the same atom, so it could accept frames it
+    had silently scrambled.  It now refuses, and such frames are a
+    StructureList instead.
+    """
+
+    def test_differing_frames_are_refused(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        frames = [Atoms('Si2O4', positions=np.zeros((6, 3))),
+                  Atoms('Si3O6', positions=np.zeros((9, 3)))]
+        with self.assertRaises(ValueError) as ctx:
+            Trajectory.from_atoms(frames)
+        self.assertIn('StructureList', str(ctx.exception))
+
+    def test_reordered_frames_are_no_longer_silently_accepted(self):
+        # One motionless structure written two ways.  The old repair
+        # sorted both to H H O and reported a displacement of 1 A for
+        # two of the three atoms -- motion that never happened.
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        f1 = Atoms('HOH', positions=[[0., 0, 0], [10., 0, 0], [1., 0, 0]],
+                   cell=np.eye(3) * 20, pbc=True)
+        f2 = Atoms('HHO', positions=[[1., 0, 0], [0., 0, 0], [10., 0, 0]],
+                   cell=np.eye(3) * 20, pbc=True)
+        with self.assertRaises(ValueError):
+            Trajectory.from_atoms([f1, f2])
+
+    def test_the_input_list_is_not_modified(self):
+        # The repair reordered the caller's atoms in place, so a failed
+        # call left the frames permuted behind it.
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        f1 = Atoms('HOH', positions=[[0., 0, 0], [10., 0, 0], [1., 0, 0]])
+        f2 = Atoms('HHO', positions=[[1., 0, 0], [0., 0, 0], [10., 0, 0]])
+        before = [a.get_chemical_symbols() for a in (f1, f2)]
+        with self.assertRaises(ValueError):
+            Trajectory.from_atoms([f1, f2])
+        self.assertEqual([a.get_chemical_symbols() for a in (f1, f2)],
+                         before)
+
+    def test_matching_frames_still_work(self):
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        rng = np.random.default_rng(3)
+        frames = [Atoms('Li2O4', positions=rng.random((6, 3)),
+                        cell=np.eye(3) * 5.0, pbc=True)
+                  for _ in range(4)]
+        traj = Trajectory.from_atoms(frames)
+        self.assertEqual(traj.nstep, 4)
+        self.assertEqual(list(traj.get_types()),
+                         ['Li', 'Li', 'O', 'O', 'O', 'O'])
+
+
 class TestSingleBohrConstant(unittest.TestCase):
     """bohr_to_ang was defined in four modules with two different
     values; samos.utils.constants is now the only definition."""

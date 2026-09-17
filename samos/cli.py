@@ -24,6 +24,7 @@ import numpy as np
 from ase.io import read
 from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
+from samos.structurelist import StructureList
 from samos.trajectory import Trajectory
 from samos.analysis.dynamics import DynamicsAnalyzer
 from samos.analysis.rdf import RDF, ADF, pairs_with_other_species
@@ -141,7 +142,8 @@ def _finish_plot(savefig):
 
 
 def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
-                    lammps_elements=None, lammps=False, units=None):
+                    lammps_elements=None, lammps=False, units=None,
+                    allow_structures=False):
     """
     Load a trajectory from *trajectory_path* and return a
     :class:`~samos.trajectory.Trajectory` instance.
@@ -173,7 +175,17 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         For LAMMPS dumps the conversion is applied during reading; for
         all other formats it is applied after loading via
         :meth:`~samos.trajectory.Trajectory.apply_unit_conversion`.
-    :returns: :class:`~samos.trajectory.Trajectory`
+    :param bool allow_structures:
+        Whether a file whose frames differ in their atoms may be
+        returned as a :class:`~samos.structurelist.StructureList`
+        instead.  When False such a file raises, since the analysis
+        asking for it follows atoms from frame to frame.
+    :returns:
+        :class:`~samos.trajectory.Trajectory`, or a
+        :class:`~samos.structurelist.StructureList` when the frames
+        differ and *allow_structures*.
+    :raises ValueError:
+        If the frames differ and *allow_structures* is False.
     """
     if lammps_types is not None or lammps_elements is not None or lammps:
         from samos.io.lammps import read_lammps_dump
@@ -187,6 +199,27 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         traj = Trajectory.load_file(trajectory_path)
     except Exception:
         aselist = read(trajectory_path, format='extxyz', index=':')
+        # Asked before building anything rather than by catching
+        # from_atoms, so that the two cases are told apart by the one
+        # property that distinguishes them rather than by which
+        # exception happened to come out.
+        if len({tuple(atoms.get_chemical_symbols())
+                for atoms in aselist}) > 1:
+            if not allow_structures:
+                raise ValueError(
+                    "The frames in '{}' do not all hold the same atoms, "
+                    'so they are not a trajectory and this analysis '
+                    'cannot follow an atom from one frame to the next. '
+                    'samos-rdf reads such a file, since it treats every '
+                    'frame on its own.'.format(trajectory_path))
+            structures = StructureList.from_atoms(aselist)
+            if units is not None:
+                # Only the length factor: a structure list stores no
+                # velocities, forces, energies or stress for the rest
+                # of the system's factors to apply to.
+                structures.apply_unit_conversion(
+                    l_conv=UNIT_SYSTEMS[units]['l_conv'])
+            return structures
         traj = Trajectory.from_atoms(aselist)
     if timestep is not None:
         traj.set_timestep(timestep)
@@ -623,11 +656,18 @@ COMMAND_SUMMARIES = (
 )
 
 
-def _traj_parser():
+def _frames_parser():
     """
     Build the parser holding the options every command accepts: which
     file to read, how to interpret it, what to do to it before the
     analysis, and where the output goes.
+
+    These are the options that make sense for any set of frames,
+    whether or not the frames share their atoms.  The ones that need a
+    real trajectory live in :func:`_traj_parser` instead, so that a
+    command which accepts a
+    :class:`~samos.structurelist.StructureList` does not offer them at
+    all rather than accepting them and failing later.
 
     Returned as a parent parser (``add_help=False``) so that every
     command parser gets one flat namespace from a single
@@ -640,9 +680,6 @@ def _traj_parser():
     p.add_argument(
         'trajectory_path',
         help='Path to the trajectory file (.extxyz or native samos format).')
-    p.add_argument(
-        '--timestep', type=float, default=None, metavar='FS',
-        help='Override the trajectory timestep in femtoseconds.')
     p.add_argument(
         '--lammps-types', nargs='+', metavar='SYMBOL',
         dest='lammps_types',
@@ -670,15 +707,6 @@ def _traj_parser():
     p.add_argument(
         '--write', metavar='FILE',
         help='Write results to FILE as CSV (one column per species).')
-    p.add_argument(
-        '--recenter', action='store_true',
-        help='Recenter positions and velocities before analysis.')
-    p.add_argument(
-        '--compute-velocities', action='store_true',
-        dest='compute_velocities',
-        help='Compute velocities from positions using the Verlet finite-'
-             'difference formula before analysis. Required for VAF and '
-             'VDOS when the trajectory does not store velocities.')
     p.add_argument(
         '--transform-species', metavar='SYMBOL', default=None,
         dest='transform_species',
@@ -711,6 +739,37 @@ def _traj_parser():
     return p
 
 
+def _traj_parser():
+    """
+    Build the parent parser for the options that need a real
+    trajectory, i.e. frames that all hold the same atoms in the same
+    order.
+
+    A timestep presumes the frames are a time series; recentering and
+    deriving velocities both presume atom *i* is the same atom from one
+    frame to the next.  None of that holds for an arbitrary set of
+    structures, so ``samos-rdf`` does not take this parent and these
+    options are not offered there at all.  Same reasoning as
+    :func:`_block_parser`.
+
+    :returns: :class:`argparse.ArgumentParser` to be used as a parent.
+    """
+    p = ArgumentParser(add_help=False)
+    p.add_argument(
+        '--timestep', type=float, default=None, metavar='FS',
+        help='Override the trajectory timestep in femtoseconds.')
+    p.add_argument(
+        '--recenter', action='store_true',
+        help='Recenter positions and velocities before analysis.')
+    p.add_argument(
+        '--compute-velocities', action='store_true',
+        dest='compute_velocities',
+        help='Compute velocities from positions using the Verlet finite-'
+             'difference formula before analysis. Required for VAF and '
+             'VDOS when the trajectory does not store velocities.')
+    return p
+
+
 def _block_parser():
     """
     Build the parent parser for block averaging, which only the
@@ -726,16 +785,22 @@ def _block_parser():
     return p
 
 
-def _make_parser(command, description, blocks=True):
+def _make_parser(command, description, blocks=True, trajectory=True):
     """
     Build the parser for one command, with the shared parents attached.
 
     :param str command: The command name, e.g. ``'msd'``.
     :param str description: Shown at the top of ``--help``.
     :param bool blocks: Whether the command supports ``-n/--nblocks``.
+    :param bool trajectory:
+        Whether the command needs frames that all hold the same atoms.
+        False adds no :func:`_traj_parser` options and lets the command
+        read a set of unrelated structures.
     :returns: :class:`argparse.ArgumentParser`
     """
-    parents = [_traj_parser()]
+    parents = [_frames_parser()]
+    if trajectory:
+        parents.append(_traj_parser())
     if blocks:
         parents.append(_block_parser())
     return ArgumentParser(prog='samos-{}'.format(command),
@@ -817,8 +882,11 @@ def _parser_vdos():
 
 
 def _parser_rdf():
+    # trajectory=False: the RDF is worked out one frame at a time, so
+    # it reads a set of unrelated structures as happily as a trajectory
+    # and has no use for a timestep, recentering or derived velocities.
     p = _make_parser('rdf', 'Calculate the RDF and its running integral.',
-                     blocks=False)
+                     blocks=False, trajectory=False)
     _add_stepsize(p)
     p.add_argument(
         '-r', '--radius', type=float, default=5.0, metavar='A',
@@ -889,24 +957,53 @@ def _parser_adf():
     return p
 
 
-def _prepare(args):
+def _prepare_frames(args, allow_structures=True):
     """
-    Load the trajectory named on the command line and apply the
-    preprocessing requested by the shared options.
+    Load the frames named on the command line and apply the
+    preprocessing that works on any set of them.
+
+    Used by commands whose parser omits :func:`_traj_parser`, so this
+    must not read options that parser defines.
 
     :param args: The parsed :class:`argparse.Namespace`.
-    :returns: :class:`~samos.trajectory.Trajectory`
+    :param bool allow_structures:
+        Whether a file whose frames differ in their atoms is acceptable.
+        False is what :func:`_prepare` passes, so that the
+        time-correlation commands still refuse such a file.
+    :returns:
+        :class:`~samos.trajectory.Trajectory`, or a
+        :class:`~samos.structurelist.StructureList` when the file holds
+        frames that differ in their atoms and *allow_structures*.
     """
     lammps_elements = (
         _expand_elements(args.lammps_elements)
         if args.lammps_elements is not None else None
     )
-    traj = load_trajectory(args.trajectory_path, timestep=args.timestep,
-                           lammps_types=args.lammps_types,
-                           lammps_elements=lammps_elements,
-                           lammps=args.lammps,
-                           units=args.units)
+    frames = load_trajectory(args.trajectory_path,
+                             timestep=getattr(args, 'timestep', None),
+                             lammps_types=args.lammps_types,
+                             lammps_elements=lammps_elements,
+                             lammps=args.lammps,
+                             units=args.units,
+                             allow_structures=allow_structures)
 
+    if args.index is not None:
+        frames = frames.slice_steps(args.index)
+
+    if args.transform_species:
+        frames.transform_species(args.transform_species)
+
+    return frames
+
+
+def _prepare(args):
+    """
+    As :func:`_prepare_frames`, plus the preprocessing that needs every
+    frame to hold the same atoms.
+
+    :param args: The parsed :class:`argparse.Namespace`.
+    :returns: :class:`~samos.trajectory.Trajectory`
+    """
     if args.index is not None:
         stride = abs(args.index.step or 1)
         if stride > 1 and args.compute_velocities:
@@ -916,10 +1013,8 @@ def _prepare(args):
                 'wider spacing. The velocities are correct for the '
                 'sliced trajectory but a coarser estimate than those '
                 'from every frame.'.format(stride))
-        traj = traj.slice_steps(args.index)
 
-    if args.transform_species:
-        traj.transform_species(args.transform_species)
+    traj = _prepare_frames(args, allow_structures=False)
 
     if args.recenter:
         traj.recenter()
@@ -967,7 +1062,7 @@ def main_vdos(argv=None):
 def main_rdf(argv=None):
     """Entry point of the ``samos-rdf`` command."""
     args = _parser_rdf().parse_args(argv)
-    run_rdf(_prepare(args), stepsize=args.stepsize,
+    run_rdf(_prepare_frames(args), stepsize=args.stepsize,
             species_pairs=args.species_pairs, radius=args.radius,
             bins=args.bins, no_int=args.no_int, method=args.method,
             **_output_kwargs(args))
