@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from samos.utils.attributed_array import AttributedArray
+from samos.structurelist import StructureList
 
 
 class IncompatibleTrajectoriesException(Exception):
@@ -40,10 +40,19 @@ def check_trajectory_compatibility(trajectories):
     return np.array(types_set.pop()), timestep_set.pop()
 
 
-class Trajectory(AttributedArray):
+class Trajectory(StructureList):
     """
     Class defining our trajectories.
     A trajectory is a sequence of time-ordered points in phase space.
+
+    A trajectory is the special case of a
+    :class:`~samos.structurelist.StructureList` in which every frame
+    holds the same atoms in the same order.  That promise is what makes
+    the rectangular ``(nstep, nat, 3)`` storage below possible, and
+    what the time-correlated analyses (MSD, VAF, VDOS) rely on: they
+    follow atom *i* from frame to frame, so atom *i* has to mean the
+    same atom throughout.
+
     The internal units of a trajectory:
     *   Femtoseconds for times
     *   Angstrom for coordinates
@@ -284,6 +293,95 @@ class Trajectory(AttributedArray):
     @property
     def cell(self):
         return self.atoms.cell
+
+    # --- StructureList interface -------------------------------------
+    # Everything below re-expresses the flat, per-frame layout of
+    # StructureList in terms of the rectangular arrays this class
+    # stores.  Nothing above or below this block changes because of it:
+    # the storage, the saved file format, slice_steps and
+    # get_step_atoms are all untouched.
+
+    # Arrays whose first axis is the step, so that any one of them
+    # answers how many steps there are.  types is absent on purpose:
+    # it is per-atom.
+    _PER_STEP_KEYS = (_POSITIONS_KEY, _VELOCITIES_KEY, _FORCES_KEY,
+                      _CELL_KEY, _STRESS_KEY, _POT_ENER_KEY)
+
+    @property
+    def nstep(self):
+        # StructureList counts frames from its offsets array, which
+        # this class does not keep.  The rectangular storage says the
+        # same thing in the first axis of every per-step array.
+        if self._nstep is not None:
+            return self._nstep
+        # AttributedArray fills _nstep from the setters, but load_file
+        # restores arrays without going through them, so a trajectory
+        # read back from a file has the counter unset even though the
+        # arrays are all there.  Fall back to the arrays themselves.
+        for key in self._PER_STEP_KEYS:
+            if key in self._arrays:
+                return len(self._arrays[key])
+        # Still None rather than 0 when nothing is stored: set_cells
+        # tells a bare 3x3 cell apart from a per-step one by exactly
+        # this.
+        return None
+
+    def _frame_slice(self, frame):
+        # Frames are evenly spaced here, so the offsets StructureList
+        # looks up are just multiples of the atom count.
+        index = self._frame_index(frame)
+        nat = self.nat
+        return slice(index * nat, (index + 1) * nat)
+
+    def _flat(self, name):
+        # Reshaping a contiguous (nstep, nat, ...) array to
+        # (nstep * nat, ...) is a view, so a frame taken through
+        # _frame_slice costs no copy here either.  This is the whole
+        # reason the rectangular layout can share StructureList's
+        # per-atom accessors rather than reimplementing them.
+        array = self.get_array(name)
+        return array.reshape(self.nstep * self.nat, *array.shape[2:])
+
+    def get_frame_types(self, frame):
+        # Every frame holds the same atoms, so the symbols are stored
+        # once rather than repeated per frame as StructureList does.
+        self._frame_index(frame)  # bounds check only
+        return self.get_types()
+
+    def get_frame_natoms(self, frame):
+        self._frame_index(frame)  # bounds check only
+        return self.nat
+
+    def get_frame_cell(self, frame):
+        index = self._frame_index(frame)
+        cells = self.get_cells()
+        if cells is not None:
+            return cells[index]
+        if self._atoms is None:
+            raise ValueError(
+                'No cell available: the trajectory stores no per-step '
+                'cells and no atoms have been set.')
+        # self._atoms rather than self.atoms: the latter copies the
+        # whole Atoms object, which an analyzer asking once per frame
+        # would pay for on every frame.
+        return np.asarray(self._atoms.cell, dtype=float)
+
+    def get_frame_pbc(self, frame):
+        self._frame_index(frame)  # bounds check only
+        if self._atoms is None:
+            raise ValueError(
+                'No boundary conditions available: no atoms have been '
+                'set.')
+        return np.asarray(self._atoms.pbc, dtype=bool)
+
+    def get_species(self):
+        return np.unique(self.get_types())
+
+    @property
+    def has_uniform_composition(self):
+        return True
+
+    # --- end StructureList interface ---------------------------------
 
     def set_cells(self, array, check_existing=False):
         # make sure a list is converted to an array before
@@ -588,9 +686,7 @@ class Trajectory(AttributedArray):
 
         if need_calculator:
             calc = SinglePointCalculator(atoms, **calc_kwargs)
-            atoms.set_calculator(calc)  # this seems to be deprecated,
-            # replace with atoms.calc = calc at somepoint
-
+            atoms.calc = calc
         return atoms
 
     def slice_steps(self, index):

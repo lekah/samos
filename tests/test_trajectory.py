@@ -203,6 +203,19 @@ class TestAttributedArrayRoundTrip(unittest.TestCase):
         self.assertTrue(np.array_equal(
             t.get_positions(), back.get_positions()))
 
+    def test_trajectory_restores_its_step_count(self):
+        # Regression: load_file restores arrays with set_array's
+        # default check_nstep=False, so the step counter it normally
+        # fills stayed unset and nstep came back None on a trajectory
+        # whose arrays were all present.
+        import numpy as np
+        from ase import Atoms
+        from samos.trajectory import Trajectory
+        t = Trajectory()
+        t.set_atoms(Atoms('H2O2'))
+        t.set_positions(np.random.random((6, 4, 3)))
+        self.assertEqual(self._round_trip(t).nstep, 6)
+
 
 class TestSingleBohrConstant(unittest.TestCase):
     """bohr_to_ang was defined in four modules with two different
