@@ -13,7 +13,7 @@ def main():
     traj = read_lammps_dump(filename, elements=['Al']*31)
 
     print('Running Dynamics Analyzer')
-    rdf_analyzer = RDF(trajectory=traj)
+    rdf_analyzer = RDF(structures=traj)
     res = rdf_analyzer.run(radius=6)
     print('Making figure 1')
     fig = plt.figure(figsize=(6, 4))

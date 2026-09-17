@@ -456,7 +456,7 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
     else:
         pairs = None
 
-    rdf_analyzer = RDF(trajectory=traj, verbosity=verbosity)
+    rdf_analyzer = RDF(structures=traj, verbosity=verbosity)
     res = rdf_analyzer.run(
         radius=radius, stepsize=stepsize, nbins=bins,
         species_pairs=pairs, method=method)
@@ -575,7 +575,7 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
     if triplets is None and effective_centers is None:
         effective_centers = species  # None -> ADF computes all triplets
 
-    adf_analyzer = ADF(trajectory=traj, verbosity=verbosity)
+    adf_analyzer = ADF(structures=traj, verbosity=verbosity)
     if bonds_file is not None:
         adf_analyzer.load_bonds_lammps(bonds_file)
 

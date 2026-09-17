@@ -5,6 +5,7 @@ from ase.geometry import minkowski_reduce
 from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 
+from samos.structurelist import StructureList
 from samos.trajectory import Trajectory
 from samos.utils.attributed_array import AttributedArray
 
@@ -12,24 +13,6 @@ import itertools
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from warnings import warn
-
-
-def get_cell(trajectory, frame=None):
-    """
-    Cell of *frame*, or the trajectory's fixed cell if it stores none
-    per frame.
-
-    ``ase.cell.Cell`` only grew its ``.array`` attribute in ase 3.18;
-    ``.copy()`` is the fallback for anything older.
-    """
-    cells = trajectory.get_cells()
-    if cells is not None and frame is not None:
-        return cells[frame]
-    atoms = trajectory.get_atoms()
-    try:
-        return atoms.cell.array
-    except AttributeError:
-        return atoms.cell.copy()
 
 
 class MinimumImage:
@@ -200,20 +183,23 @@ def pairs_within(positions_1, positions_2, radius, algorithm,
 
 
 class BaseAnalyzer(metaclass=ABCMeta):
-    def __init__(self, *, trajectory=None, verbosity=None, **kwargs):
+    def __init__(self, *, structures=None, verbosity=None, **kwargs):
         """
-        :param Trajectory trajectory: The trajectory to analyse.
+        :param StructureList structures:
+            The frames to analyse.  A
+            :class:`~samos.trajectory.Trajectory` is one, so either
+            works wherever the analysis is per-frame.
         :param int verbosity: 0 silences the progress printing.
         :raises TypeError: On an unrecognised keyword argument.
         """
-        self._trajectory = None
+        self._structures = None
         self._verbosity = 1
         if kwargs:
             raise TypeError(
                 '{} got unexpected keyword argument(s): {}'.format(
                     type(self).__name__, ', '.join(sorted(kwargs))))
-        if trajectory is not None:
-            self.set_trajectory(trajectory)
+        if structures is not None:
+            self.set_structures(structures)
         if verbosity is not None:
             self.set_verbosity(verbosity)
 
@@ -222,26 +208,27 @@ class BaseAnalyzer(metaclass=ABCMeta):
             raise TypeError('Verbosity is an integer')
         self._verbosity = verbosity
 
-    def set_trajectory(self, trajectory):
-        if not isinstance(trajectory, Trajectory):
+    def set_structures(self, structures):
+        if not isinstance(structures, StructureList):
             raise TypeError(
-                'You need to pass a {} as trajectory'.format(Trajectory))
-        self._trajectory = trajectory
+                'You need to pass a {} as structures'.format(StructureList))
+        self._structures = structures
 
     @property
-    def trajectory(self):
+    def structures(self):
         """
-        The trajectory set with :meth:`set_trajectory`.
+        The frames set with :meth:`set_structures`.
 
         :raises ValueError:
-            If none was set.  Reading ``self._trajectory`` directly used
-            to give an AttributeError from deep inside :meth:`run`.
+            If none were set.  Reading ``self._structures`` directly
+            used to give an AttributeError from deep inside
+            :meth:`run`.
         """
-        if self._trajectory is None:
+        if self._structures is None:
             raise ValueError(
-                'No trajectory has been set. Use the set_trajectory '
-                'method, or pass trajectory=... to the constructor.')
-        return self._trajectory
+                'No structures have been set. Use the set_structures '
+                'method, or pass structures=... to the constructor.')
+        return self._structures
 
     def _check_radius(self, max_radius, radius, what='radius'):
         """
@@ -269,7 +256,7 @@ class BaseAnalyzer(metaclass=ABCMeta):
              stacklevel=3)
 
     @staticmethod
-    def _choose_algorithm(cells, frames, method):
+    def _choose_algorithm(structures, frames, method):
         """
         Pick ``'ortho'`` or ``'skew'`` for each sampled frame.
 
@@ -277,8 +264,9 @@ class BaseAnalyzer(metaclass=ABCMeta):
         computed, so ``method='ortho'`` on a skewed cell fails at once
         rather than partway through a long trajectory.
 
-        :param cells: ``(nstep, 3, 3)`` array, or a single ``(3, 3)``
-            cell that applies to every frame.
+        :param structures:
+            The :class:`~samos.structurelist.StructureList` to read the
+            per-frame cells from.
         :param frames: Indices of the frames that will be sampled.
         :param str method: ``'auto'``, ``'ortho'`` or ``'skew'``.
         :returns:
@@ -296,13 +284,13 @@ class BaseAnalyzer(metaclass=ABCMeta):
                     'using the slower skew algorithm, because it was '
                     'requested.')
 
-        cells = np.asarray(cells, dtype=float)
-        if cells.ndim == 2:
-            # One cell for the whole trajectory, so one test for it.
-            ortho = np.full(len(frames), is_orthorhombic(cells))
+        if structures.has_fixed_cell:
+            # One cell for every frame, so one test for it.
+            ortho = np.full(len(frames), is_orthorhombic(
+                structures.get_frame_cell(frames[0])))
         else:
-            ortho = np.array([is_orthorhombic(cells[frame])
-                              for frame in frames])
+            ortho = np.array([is_orthorhombic(
+                structures.get_frame_cell(frame)) for frame in frames])
         if method == 'ortho':
             if not ortho.all():
                 raise ValueError(
@@ -352,6 +340,18 @@ class RDF(BaseAnalyzer):
         the atom itself, so a species paired with itself is normalised
         by N-1 rather than N.  Without that, g(r) of a like pair tends
         to (N-1)/N at large r instead of 1.
+
+        Frames need not hold the same atoms: the species indices and
+        the normalisation are worked out per frame, so a plain
+        :class:`~samos.structurelist.StructureList` of unrelated
+        structures works as well as a
+        :class:`~samos.trajectory.Trajectory`.  A frame that holds none
+        of a pair's species contributes nothing to that pair and still
+        counts in the average, so for a set of mixed composition g(r)
+        tends to the fraction of frames containing both species rather
+        than to 1.  That is the composition-averaged correlation of the
+        set; average only over the frames that contain the pair if you
+        want the conditional one instead.
 
         The ``int_*`` arrays are running neighbour counts and carry no
         volume factor, so they are unaffected by either of the above.
@@ -411,110 +411,83 @@ class RDF(BaseAnalyzer):
                 return spec
             elif isinstance(spec, (tuple, list)):
                 return 'spec_{}'.format(ispec)
+            elif isinstance(spec, int):
+                # Used to fall through to the else below, which printed
+                # the type and returned None, so a single-atom spec
+                # labelled its output arrays 'None_O'.
+                return 'atom{}'.format(spec)
             else:
-                print(type(spec))
+                raise TypeError(
+                    '{} can not be turned into a label'.format(spec))
 
-        positions = self.trajectory.get_positions()
-        types = self.trajectory.get_types()
-        cells = self.trajectory.get_cells()
+        structures = self.structures
         self._radius_warned = False
-        fixed_cell = cells is None
-        if fixed_cell:
-            fixed_volume = self.trajectory.atoms.get_volume()
+        fixed_cell = structures.has_fixed_cell
 
         if istop is None:
-            istop = len(positions)
-        elif istop > len(positions):
+            istop = structures.nstep
+        elif istop > structures.nstep:
             raise ValueError('Istop ({}) is higher than the number of '
-                             'positions ({})'.format(
-                                 istop, len(positions)))
+                             'frames ({})'.format(istop, structures.nstep))
         frames = np.arange(istart, istop, stepsize)
+        if not len(frames):
+            # Worth saying out loud: the per-frame normalisation below
+            # would otherwise just return empty arrays, where the old
+            # whole-trajectory prefactor divided by zero.  Same wording
+            # as ADF.run, which has always checked this.
+            raise ValueError(
+                'No frames selected: istart={}, istop={}, stepsize={} '
+                'over {} frame(s).'.format(
+                    istart, istop, stepsize, structures.nstep))
 
         algorithms, message = self._choose_algorithm(
-            get_cell(self.trajectory) if fixed_cell else cells,
-            frames, method)
+            structures, frames, method)
         if self._verbosity > 0:
             print('RDF: ' + message)
 
         if species_pairs is None:
             species_pairs = sorted(list(
                 itertools.combinations_with_replacement(
-                    sorted(set(types)), 2)))
-        indices_pairs = []
-        labels = []
-        species_pairs_pruned = []
-        for ispec, (spec1, spec2) in enumerate(species_pairs):
-            ind_spec1, ind_spec2 = (get_indices(spec1, types),
-                                    get_indices(spec2, types))
-            # special situation if there's only one atom of a species
-            # and we're making the RDF of that species with itself.
-            # there will be empty pairs_of_atoms and the
-            # code below would crash!
-            if ind_spec1 == ind_spec2 and len(ind_spec1) == 1:
-                continue
-            indices_pairs.append((ind_spec1, ind_spec2))
-            labels.append('{}_{}'.format(
-                get_label(spec1, ispec), get_label(spec2, ispec)))
-            species_pairs_pruned.append((spec1, spec2))
-        rdf_res = AttributedArray()
-        rdf_res.set_attr('species_pairs', species_pairs_pruned)
+                    sorted(structures.get_species()), 2)))
+        if not structures.has_uniform_composition:
+            # An atom index picks a different atom in each frame once
+            # the frames stop agreeing on their atoms, so there is no
+            # sensible answer to give.  Chemical symbols still are.
+            for spec in itertools.chain.from_iterable(species_pairs):
+                if isinstance(spec, int) or (
+                        isinstance(spec, (tuple, list))
+                        and any(isinstance(s, int) for s in spec)):
+                    raise ValueError(
+                        'Species given as an atom index ({}) needs every '
+                        'frame to hold the same atoms; this structure '
+                        'list does not. Use chemical symbols '
+                        'instead.'.format(spec))
+
+        labels = [
+            '{}_{}'.format(get_label(spec1, ispec), get_label(spec2, ispec))
+            for ispec, (spec1, spec2) in enumerate(species_pairs)]
         binsize = float(radius)/nbins
         bin_edges = np.histogram([], bins=nbins, range=(0, radius))[1]
 
-        # Everything that does not change from frame to frame, worked
-        # out once per species pair.  n_pairs is counted rather than
-        # enumerated: listing every index pair is what used to make
-        # this function quadratic in memory even before any distance
-        # was computed.
-        plan = []
-        for label, (ind1, ind2) in zip(labels, indices_pairs):
-            same_list = ind1 == ind2
-            if same_list:
-                # Each unordered pair once, then counted from both
-                # ends by the factor of two.
-                n_pairs = len(ind1) * (len(ind1) - 1) // 2
-                pair_factor = 2.0
-            else:
-                n_pairs = (len(ind1) * len(ind2)
-                           - len(set(ind1) & set(ind2)))
-                pair_factor = 1.0
-            if not n_pairs:
-                # e.g. a species that is absent from the trajectory.
-                # Skipping keeps the remaining pairs computable; the
-                # histogram below would be empty and its normalisation
-                # a division by zero.
-                if self._verbosity > 0:
-                    print('Warning: no atom pairs for {}, skipping'
-                          ''.format(label))
-                continue
-            # An atom of species 1 that is itself one of the species-2
-            # atoms is not its own neighbour, so the ideal-gas count it
-            # is compared against is len(ind2) minus the chance of that
-            # coincidence.  For a pair of a species with itself this is
-            # the familiar N-1; for disjoint species it is len(ind2).
-            n_neighbours_ideal = (
-                len(ind2)
-                - len(set(ind1) & set(ind2)) / float(len(ind1)))
-            if n_neighbours_ideal <= 0:
-                if self._verbosity > 0:
-                    print('Warning: no ideal-gas reference for {}, '
-                          'skipping'.format(label))
-                continue
-            # normalize the histogram, by the number of steps taken,
-            # and the number of species1
-            prefactor = pair_factor / float(len(frames)) / float(len(ind1))
-            plan.append(dict(
-                label=label, ind1=np.asarray(ind1), ind2=np.asarray(ind2),
-                same_list=same_list, n_pairs=n_pairs, prefactor=prefactor,
-                n_neighbours_ideal=n_neighbours_ideal,
-                hist=np.zeros(nbins, dtype=float),
-                # Second accumulator, weighted by each frame's volume,
-                # so that the g(r) below is the mean of the per-frame
-                # g(r) rather than one histogram divided by a single
-                # volume.  hist itself stays a plain neighbour count,
-                # which is what the running integral reports.
-                hist_by_density=np.zeros(nbins, dtype=float),
-                shortest=np.inf))
+        # One accumulator set per requested pair, allocated once and
+        # summed over frames.  The indices and the normalisation that
+        # used to be worked out here now live in the frame loop, since
+        # both depend on which atoms a frame actually holds.  n_pairs
+        # is counted rather than enumerated: listing every index pair
+        # is what used to make this function quadratic in memory even
+        # before any distance was computed.
+        plan = [dict(label=label, spec1=spec1, spec2=spec2,
+                     n_pairs=0,
+                     hist=np.zeros(nbins, dtype=float),
+                     # Second accumulator, weighted by each frame's
+                     # volume and divided by that frame's ideal-gas
+                     # reference, so the g(r) below is the mean of the
+                     # per-frame g(r).  hist itself stays a plain
+                     # neighbour count, which the running integral
+                     # reports.
+                     hist_by_density=np.zeros(nbins, dtype=float),
+                     shortest=np.inf)
+                for label, (spec1, spec2) in zip(labels, species_pairs)]
 
         # Frames outermost so that the cell work -- the Minkowski
         # reduction above all, which the MinimumImage docstring calls
@@ -535,15 +508,23 @@ class RDF(BaseAnalyzer):
             return mic
 
         if fixed_cell:
-            cell, volume = get_cell(self.trajectory), fixed_volume
+            cell = structures.get_frame_cell(frames[0])
+            volume = abs(np.dot(cell[0], np.cross(cell[1], cell[2])))
             mic = prepare_cell(cell, algorithms[0])
+
+        # Kept inside the per-frame weight rather than applied at the
+        # end, so that a fixed-composition run sums in exactly the
+        # order it always did.
+        frame_factor = 1.0 / float(len(frames))
 
         for iframe, index in enumerate(frames):
             algorithm = algorithms[iframe]
             if not fixed_cell:
-                cell = cells[index]
-                volume = np.dot(cell[0], np.cross(cell[1], cell[2]))
+                cell = structures.get_frame_cell(index)
+                volume = abs(np.dot(cell[0], np.cross(cell[1], cell[2])))
                 mic = prepare_cell(cell, algorithm)
+            types = structures.get_frame_types(index)
+            positions = structures.get_frame_positions(index)
 
             # Every species pair that shares a species would otherwise
             # fold that species' atoms into the box again for each
@@ -552,16 +533,49 @@ class RDF(BaseAnalyzer):
             # frame, however many pairs it takes part in.
             if algorithm == 'ortho':
                 wrapped_positions = _wrap_into_box(
-                    positions[index], np.diag(cell))
+                    positions, np.diag(cell))
 
             for entry in plan:
-                ind1, ind2 = entry['ind1'], entry['ind2']
+                ind1 = np.asarray(get_indices(entry['spec1'], types),
+                                  dtype=int)
+                ind2 = np.asarray(get_indices(entry['spec2'], types),
+                                  dtype=int)
+                if not len(ind1) or not len(ind2):
+                    # A species this frame does not contain.  It
+                    # contributes nothing and still counts in the
+                    # average over frames.
+                    continue
+                same_list = np.array_equal(ind1, ind2)
+                n_shared = len(np.intersect1d(ind1, ind2))
+                if same_list:
+                    # Each unordered pair once, then counted from both
+                    # ends by the factor of two.
+                    n_pairs = len(ind1) * (len(ind1) - 1) // 2
+                    pair_factor = 2.0
+                else:
+                    n_pairs = len(ind1) * len(ind2) - n_shared
+                    pair_factor = 1.0
+                # An atom of species 1 that is itself one of the
+                # species-2 atoms is not its own neighbour, so the
+                # ideal-gas count it is compared against is len(ind2)
+                # minus the chance of that coincidence.  For a pair of
+                # a species with itself this is the familiar N-1; for
+                # disjoint species it is len(ind2).
+                n_neighbours_ideal = (
+                    len(ind2) - n_shared / float(len(ind1)))
+                if not n_pairs or n_neighbours_ideal <= 0:
+                    # e.g. a lone atom of a species paired with itself:
+                    # the histogram would be empty and its
+                    # normalisation a division by zero.
+                    continue
+                entry['n_pairs'] += n_pairs
+
                 if algorithm == 'ortho':
                     pos1 = wrapped_positions[ind1]
                     pos2 = wrapped_positions[ind2]
                 else:
-                    pos1 = positions[index, ind1, :]
-                    pos2 = positions[index, ind2, :]
+                    pos1 = positions[ind1, :]
+                    pos2 = positions[ind2, :]
                 i, j, distances = pairs_within(
                     pos1, pos2, radius, algorithm, cell=cell, mic=mic,
                     wrapped=(algorithm == 'ortho'))
@@ -569,32 +583,51 @@ class RDF(BaseAnalyzer):
                 # against itself, i < j additionally keeps each
                 # unordered pair once, which pair_factor doubles back.
                 global_i, global_j = ind1[i], ind2[j]
-                keep = (global_i < global_j if entry['same_list']
+                keep = (global_i < global_j if same_list
                         else global_i != global_j)
                 distances = distances[keep]
                 if len(distances):
                     entry['shortest'] = min(entry['shortest'],
                                             distances.min())
-                counts = entry['prefactor'] * np.histogram(
-                    distances, bins=nbins, range=(0, radius))[0]
+                counts = (pair_factor * frame_factor / float(len(ind1))
+                          * np.histogram(distances, bins=nbins,
+                                         range=(0, radius))[0])
                 entry['hist'] += counts
-                entry['hist_by_density'] += counts * volume
+                entry['hist_by_density'] += (
+                    counts * volume / n_neighbours_ideal)
 
         radii = 0.5*(bin_edges[:-1]+bin_edges[1:])
         shortest_distance_all = np.inf
+        # A pair no frame could contribute to is dropped rather than
+        # reported as zeros -- a species absent throughout, or a lone
+        # atom paired with itself.
+        plan = [entry for entry in plan if entry['n_pairs']]
+        if self._verbosity > 0:
+            for label in set(labels) - {entry['label'] for entry in plan}:
+                print('Warning: no atom pairs for {}, skipping'
+                      ''.format(label))
+        rdf_res = AttributedArray()
+        rdf_res.set_attr('species_pairs',
+                         [(entry['spec1'], entry['spec2'])
+                          for entry in plan])
         for entry in plan:
             label = entry['label']
             rdf = (entry['hist_by_density']
-                   / (4.0 * np.pi * radii**2 * binsize)
-                   / entry['n_neighbours_ideal'])
+                   / (4.0 * np.pi * radii**2 * binsize))
             integral = np.cumsum(entry['hist'])
 
             rdf_res.set_array('rdf_{}'.format(label), rdf)
             rdf_res.set_array('int_{}'.format(label), integral)
             rdf_res.set_array('radii_{}'.format(label), radii)
-            rdf_res.set_attr('n_pairs_{}'.format(label), entry['n_pairs'])
-            rdf_res.set_attr('n_data_{}'.format(label),
-                             entry['n_pairs'] * ((istop-istart)//stepsize))
+            # n_pairs is now the number in a single frame for a fixed
+            # composition, and the mean over sampled frames otherwise.
+            rdf_res.set_attr('n_pairs_{}'.format(label),
+                             entry['n_pairs'] // len(frames))
+            # Summed over the frames actually sampled.  This used to be
+            # n_pairs * ((istop - istart) // stepsize), which floors
+            # where len(frames) ceils and so undercounted whenever the
+            # stride did not divide the range evenly.
+            rdf_res.set_attr('n_data_{}'.format(label), entry['n_pairs'])
             rdf_res.set_attr('shortest_distance_{}'.format(label),
                              float(entry['shortest']))
             shortest_distance_all = min(shortest_distance_all,
@@ -631,6 +664,28 @@ class BondAnalyzer(BaseAnalyzer):
         super().__init__(**kwargs)
         if bonds is not None:
             self.set_bonds(bonds)
+
+    def set_structures(self, structures):
+        """
+        As :meth:`BaseAnalyzer.set_structures`, but a plain
+        :class:`~samos.structurelist.StructureList` is refused.
+
+        Bond topology here is a list of global atom indices, which only
+        means anything if atom *i* is the same atom in every frame.
+        That is exactly the promise a
+        :class:`~samos.trajectory.Trajectory` makes and a general
+        structure list does not.  Refusing up front beats the
+        AttributeError this would otherwise raise partway through
+        :meth:`run`.
+        """
+        if not isinstance(structures, Trajectory):
+            raise TypeError(
+                '{} needs a {}, not a bare {}: bond topology is a list '
+                'of atom indices, so the atoms have to be the same in '
+                'every frame. Support for varying structures is not '
+                'implemented yet.'.format(
+                    type(self).__name__, Trajectory, StructureList))
+        super().set_structures(structures)
 
     def set_bonds(self, bonds):
         """
@@ -749,12 +804,12 @@ class BondAnalyzer(BaseAnalyzer):
         A set is used internally to deduplicate same-species pairs.
         """
         cutoffs_parsed = self._parse_cutoffs(cutoffs)
-        positions = self.trajectory.get_positions()[frame]
-        mic = MinimumImage(get_cell(self.trajectory, frame))
+        positions = self.structures.get_positions()[frame]
+        mic = MinimumImage(self.structures.get_frame_cell(frame))
         self._check_radius(mic.max_radius,
                            max(r for _, r in cutoffs_parsed.values()),
                            'Bond cutoff')
-        types = self.trajectory.get_types()
+        types = self.structures.get_types()
 
         bond_set = set()
         for (sp1, sp2), (r_min, r_max) in cutoffs_parsed.items():
@@ -831,9 +886,9 @@ class ADF(BondAnalyzer):
                 "Pass species_triplets or centers, not both.")
 
         self._radius_warned = False
-        positions = self.trajectory.get_positions()
-        types = self.trajectory.get_types()
-        cells = self.trajectory.get_cells()
+        positions = self.structures.get_positions()
+        types = self.structures.get_types()
+        cells = self.structures.get_cells()
 
         if istop is None:
             istop = len(positions)
@@ -890,7 +945,7 @@ class ADF(BondAnalyzer):
         # Reduce the cell only once for fixed-cell trajectories.
         if cells is None:
             fixed_cell = True
-            mic = MinimumImage(get_cell(self.trajectory))
+            mic = MinimumImage(self.structures.get_frame_cell(0))
         else:
             fixed_cell = False
 
@@ -974,21 +1029,22 @@ class TorsionAnalyzer(BondAnalyzer):
             "TorsionAnalyzer is not yet implemented.")
 
 
-def pairs_with_other_species(trajectory, species):
+def pairs_with_other_species(structures, species):
     """
     Build the ``(requested, other)`` species pairs for an RDF.
 
     Every entry of *species* is paired with every distinct species
-    present in *trajectory* that was not itself requested.
+    present in *structures* that was not itself requested.
 
     Deduplicating matters: both call sites used to iterate the per-atom
     symbol list rather than the set of species, so a hundred-atom cell
     produced a hundred identical copies of each pair, every one of them
     computed from scratch.
 
-    :param trajectory: :class:`~samos.trajectory.Trajectory` to inspect.
+    :param structures:
+        :class:`~samos.structurelist.StructureList` to inspect.
     :param list species: Chemical symbols of interest.
     :returns: List of ``(spec, other)`` tuples, deterministically ordered.
     """
-    others = sorted(set(trajectory.get_types()) - set(species))
+    others = sorted(set(structures.get_species()) - set(species))
     return [(spec, other) for spec in species for other in others]
