@@ -3,7 +3,7 @@
 #include <omp.h>
 #include <vector>
 
-// NOT BUILT. setup.py no longer compiles this file, and nothing in
+// NOT BUILT. Nothing compiles this file, and nothing in
 // samos imports it -- get_msd lost its backend='cpp' option, which
 // was the only caller. Kept here for reference and in case a future
 // contributor wants the OpenMP version back. See README.md, "The C++

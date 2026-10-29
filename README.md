@@ -20,11 +20,10 @@ below for what replaced each of those and why.
 ## Installation
 
 ```bash
-pip install numpy       # or: conda install numpy
 pip install .
 ```
 
-Other dependencies: `ase`, `scipy`, `matplotlib`.
+That brings in `numpy`, `ase`, `scipy` and `matplotlib`.
 
 No compiler is needed -- there is nothing left to build. (If you're
 on an older checkout that still expects gfortran or a C++ toolchain,
@@ -38,7 +37,7 @@ Working examples are in the `examples/` directory:
 
 | Folder | What it shows |
 |--------|---------------|
-| `ex1-compute-MSD-from-LAMMPS/` | MSD from a LAMMPS dump; Fortran vs C++ benchmark |
+| `ex1-compute-MSD-from-LAMMPS/` | MSD from a LAMMPS dump |
 | `ex2-compute-VAF-from-extxyz/` | VAF and VDOS from an extxyz file |
 | `ex3-compute-RDF/` | Radial distribution function |
 | `ex4-compute-ionic-density/` | Ionic probability densities |
@@ -96,14 +95,16 @@ Time values are plain floats; the unit is set with `--t-unit`
 | `--write FILE` | Write results to a CSV file |
 | `--plot` | Show the plot interactively |
 | `--savefig FILE` | Save the plot to FILE |
+| `-q/--quiet` | Silence the analyzer progress output |
 
 ### Options that need a real trajectory
 
-These three are accepted by `samos-msd`, `samos-vaf`, `samos-vdos` and
-`samos-adf`, but **not** by `samos-rdf`.  A timestep presumes the frames
-are a time series, and recentering and deriving velocities both presume
-that atom *i* is the same atom in every frame.  The RDF works one frame
-at a time and needs none of that, so it does not offer them.
+These three are accepted by `samos-msd`, `samos-vaf` and `samos-vdos`,
+but **not** by `samos-rdf` or `samos-adf`.  A timestep presumes the
+frames are a time series, and recentering and deriving velocities both
+presume that atom *i* is the same atom in every frame.  The RDF and the
+ADF work one frame at a time and need none of that, so they do not
+offer them.
 
 | Flag | Description |
 |------|-------------|
@@ -117,24 +118,35 @@ at a time and needs none of that, so it does not offer them.
 
 ### Files whose frames hold different atoms
 
-`samos-rdf` reads a file whose frames differ in atom count, species and
-cell -- a set of unrelated structures rather than a trajectory.  Every
-frame is analysed and normalised on its own and the results averaged,
-so this needs no correspondence between one frame's atoms and the
-next's.
+`samos-rdf` and `samos-adf` read a file whose frames differ in atom
+count, species and cell -- a set of unrelated structures rather than a
+trajectory.  Every frame is analysed and normalised on its own and the
+results averaged, so this needs no correspondence between one frame's
+atoms and the next's.
 
 ```bash
 # structures.extxyz holds, say, Si8O16, Si12O24 and Al6O9
 samos-rdf structures.extxyz --radius 4
+samos-adf structures.extxyz --radius 2 --species-triplets O-Si-O
 ```
 
 One thing to know about the averaging: a frame holding none of a pair's
 species contributes nothing to that pair and still counts in the
 average, so g(r) tends to the fraction of frames containing both
 species rather than to 1.  That is the composition-averaged correlation
-of the whole set.
+of the whole set.  The ADF is averaged the same way, per frame over
+that frame's own center atoms, so a triplet is scaled by the fraction
+of frames holding its center species.
 
-The other commands refuse such a file, and say why.
+`samos-adf` needs its bonds detected per frame for this, which `-r` and
+`--bonds` do.  `--bonds-file` reads a LAMMPS `Bonds` section, a list of
+global atom indices, and so still needs every frame to hold the same
+atoms; so does `--static-bonds`, which freezes one frame's topology for
+the rest of the run.  Both say so rather than producing nonsense.
+
+`samos-msd`, `samos-vaf` and `samos-vdos` refuse such a file, and say
+why: a correlation function in time has nothing to correlate if the
+atoms change between frames.
 
 ### Reading LAMMPS dump files
 
@@ -346,11 +358,80 @@ Time parameters (`t_start`, `t_end`, `t_start_fit`, `t_end_fit`,
 unit is set once per call via `t_unit` (`'fs'`, `'ps'`, or `'dt'`).
 `stepsize_t` and `stepsize_tau` are always plain integer timestep counts.
 
+### Frames that do not share their atoms
+
+```python
+from ase.io import read
+from samos.structurelist import StructureList
+from samos.analysis.rdf import RDF
+
+structures = StructureList.from_atoms(read('structures.extxyz', index=':'))
+
+rdf = RDF(structures=structures)
+res = rdf.run(radius=4., species_pairs=[('Si', 'O')], nbins=100)
+```
+
+`RDF.run` takes each pair as a two-element tuple, not as the `Si-O`
+string the `--species-pairs` flag accepts; `samos.cli.run_rdf` is what
+splits those strings.
+
+`StructureList` keeps every atom of every frame in one flat array plus
+a table of frame offsets, so its frames may differ in atom count,
+species and cell.  `Trajectory` is the special case where every frame
+holds the same atoms in the same order, which is what lets it keep
+rectangular `(nstep, nat, 3)` storage; it is a subclass, so it is
+accepted anywhere a `StructureList` is.
+
+`RDF` and `ADF` work one frame at a time and take either.
+`DynamicsAnalyzer` needs a `Trajectory`, since it follows atom *i*
+from frame to frame.
+
+`ADF` takes a `StructureList` as long as its bonds are detected per
+frame from `bonds=` cutoffs.  The three ways of giving it explicit
+topology -- `set_bonds`, `load_bonds_lammps` and `static_bonds=True` --
+are lists of global atom indices, so they raise `TypeError` unless
+every frame holds the same atoms in the same order.  That is tested
+with `StructureList.has_uniform_composition` rather than by class: a
+structure list whose frames happen to agree carries the indices as well
+as a `Trajectory` does, and is accepted.
+
 ---
 
 ## Backwards-incompatible changes
 
 The following changes break existing call sites.
+
+### Analyzers take `structures=`, not `trajectory=`
+
+`RDF`, `ADF` and anything else built on `BaseAnalyzer` now name their
+frames `structures`, because a `StructureList` is enough for a
+per-frame analysis and a `Trajectory` is only one kind of one:
+
+```python
+# OLD -- TypeError: RDF got unexpected keyword argument(s): trajectory
+RDF(trajectory=traj)
+# NEW
+RDF(structures=traj)
+```
+
+`set_trajectory` is now `set_structures` and the `.trajectory`
+property is now `.structures`.  `DynamicsAnalyzer` is unaffected: it
+still takes `trajectories=[...]`, since it genuinely needs
+trajectories.
+
+### `Trajectory.from_atoms` no longer reorders atoms
+
+Given frames whose chemical symbol lists disagreed,
+`Trajectory.from_atoms` used to sort each frame by atomic number and
+try again.  That makes the symbol lists agree without making atom *i*
+the same atom: two frames holding one motionless structure, listed as
+`H O H` and `H H O`, came out with a displacement of 1 A invented
+between them, and the guard then passed.
+
+Such frames now raise `ValueError` pointing at
+`StructureList.from_atoms`.  The LAMMPS reader, which the repair was
+written for, never came through here anyway -- it sorts by atom id,
+which carries the identity that atomic number cannot.
 
 ### `shortest_distance` is now measured within the RDF radius
 
@@ -544,6 +625,13 @@ controlled -- see "The C++ backend is disabled" below.
 `-n/--nblocks` is no longer accepted by `samos-rdf` and `samos-adf`,
 which never used it.
 
+`--timestep`, `--recenter` and `--compute-velocities` are no longer
+accepted by `samos-adf` either.  The ADF reads one frame at a time and
+used none of the three: a timestep does not enter a distribution of
+angles, and both of the others presume a correspondence between frames
+that `samos-adf` no longer requires.  Drop them from the command line;
+nothing about the result changes.
+
 The `run_msd`, `run_vaf`, `run_vdos`, `run_rdf` and `run_adf` functions
 that back these commands now live in the importable `samos.cli` module,
 together with `load_trajectory`.
@@ -571,7 +659,7 @@ Previously returned a 14-element positional tuple.  Now returns a
 `get_gaussian_density` now bins the density onto the grid in pure
 numpy and hands the array to `write_xsf` directly, instead of writing
 the header in Python and having Fortran open the same file again in
-append mode to finish it. `setup.py` no longer builds
+append mode to finish it. Nothing builds
 `samos/lib/gaussian_density.f90` -- the file is kept in the repo for
 reference, but it is dead code: nothing imports it any more.
 
@@ -608,7 +696,7 @@ averaging method that, on inspection, the Fortran used too.
 `get_msd`'s `backend` and `num_threads` keywords are gone, along with
 `samos-msd`'s `--backend` and `-j/--num-threads` flags -- the Fortran
 kernel is the only one now, so there is nothing left to pick between.
-`setup.py` no longer builds this file, so `pybind11` is no longer a
+Nothing builds this file, so `pybind11` is no longer a
 build dependency and the `-fopenmp` compiler flag (the one that broke
 the macOS build, see "Removed: unreachable Fortran..." above) is gone
 from the build entirely. The source is kept in the repo for reference
@@ -622,10 +710,11 @@ Fast Correlation Algorithm (an FFT-based identity) in O(N log N).
 `samos/analysis/_fft_dynamics.py` replaces all six Fortran routines
 with that, measured 20-200x faster end to end (the gap grows with
 trajectory length, since one side is quadratic and the other is not).
-`setup.py` no longer builds `mdutils.f90` -- **no compiler is needed
-to install samos any more** -- and it is the last file that needed
-one, so `meson`/`ninja` have also dropped out of the build
-dependencies. The source is kept in the repo for reference.
+Nothing builds `mdutils.f90` -- **no compiler is needed to install
+samos any more** -- and it was the last file that needed one, so
+`meson`/`ninja` have dropped out of the build dependencies and
+`setup.py` itself is gone: `pyproject.toml` is the whole build.
+The source is kept in the repo for reference.
 
 Two behavioural differences, both deliberate fixes rather than
 carried-over bugs:

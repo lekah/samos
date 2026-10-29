@@ -239,7 +239,7 @@ class TestCommands(CLITestCase):
             self.assertEqual(ortho, f.read())
 
     def test_adf(self):
-        cli.main_adf([self.traj_path, '--timestep', '1', '-r', '3',
+        cli.main_adf([self.traj_path, '-r', '3',
                       '-b', '20', '--species-triplets', 'O-Li-O', '-q',
                       '--write', self.out('adf.csv')])
         self.assert_csv(self.out('adf.csv'), 'angle_deg,adf_O_Li_O')
@@ -403,11 +403,34 @@ class TestMixedStructures(CLITestCase):
         message = str(ctx.exception)
         self.assertIn('not all hold the same atoms', message)
         self.assertIn('samos-rdf', message)
+        self.assertIn('samos-adf', message)
 
-    def test_adf_refuses_a_mixed_file(self):
-        with self.assertRaises(ValueError):
-            cli.main_adf([self.mixed_path, '-r', '3', '-q',
+    def test_adf_reads_a_mixed_file(self):
+        cli.main_adf([self.mixed_path, '-r', '3', '-b', '20', '-q',
+                      '--species-triplets', 'O-Si-O',
+                      '--write', self.out('adf.csv')])
+        self.assert_csv(self.out('adf.csv'), 'angle_deg,adf_O_Si_O')
+
+    def test_adf_reads_a_triplet_only_some_frames_hold(self):
+        # Al is in the third frame alone, so a triplet centred on it is
+        # reported only if every sampled frame was consulted for its
+        # centers rather than just the first.
+        cli.main_adf([self.mixed_path, '-r', '3', '-b', '20', '-q',
+                      '--species-triplets', 'O-Al-O',
+                      '--write', self.out('al.csv')])
+        self.assert_csv(self.out('al.csv'), 'angle_deg,adf_O_Al_O')
+
+    def test_adf_refuses_explicit_topology_on_a_mixed_file(self):
+        # Bond topology from a file is a list of global atom indices,
+        # which these frames give no meaning to.
+        bonds_file = os.path.join(self.tmpdir, 'bonds.data')
+        with open(bonds_file, 'w') as handle:
+            handle.write('Bonds\n\n1 1 1 2\n')
+        with self.assertRaises(TypeError) as ctx:
+            cli.main_adf([self.mixed_path, '-q',
+                          '--bonds-file', bonds_file,
                           '--write', self.out('adf.csv')])
+        self.assertIn('same atoms in the same order', str(ctx.exception))
 
     def test_an_ordinary_trajectory_still_loads_for_every_command(self):
         cli.main_msd([self.traj_path, '--timestep', '1', '-q',
@@ -419,30 +442,40 @@ class TestMixedStructures(CLITestCase):
 class TestTrajectoryOnlyOptions(CLITestCase):
     """
     Options that need atom-to-atom correspondence are not offered by
-    samos-rdf at all, rather than offered and rejected at run time.
+    the per-frame commands at all, rather than offered and rejected at
+    run time.
     """
 
     TRAJECTORY_ONLY = ('--timestep', '--recenter', '--compute-velocities')
+    PER_FRAME = ('rdf', 'adf')
 
-    def test_rdf_does_not_offer_them(self):
+    def test_the_per_frame_commands_do_not_offer_them(self):
+        for command in self.PER_FRAME:
+            help_text = _parser_help(getattr(cli, '_parser_' + command))
+            for option in self.TRAJECTORY_ONLY:
+                self.assertNotIn(option, help_text)
+
+    def test_passing_one_anyway_is_an_argparse_error(self):
         for option in self.TRAJECTORY_ONLY:
             argv = [self.traj_path, '-r', '4', '-q', option]
             if option == '--timestep':
                 argv.append('1')
-            with _silence_argparse(), self.assertRaises(
-                    SystemExit, msg=option):
-                cli.main_rdf(argv)
+            for main in (cli.main_rdf, cli.main_adf):
+                with _silence_argparse(), self.assertRaises(
+                        SystemExit, msg=option):
+                    main(list(argv))
 
-    def test_the_other_commands_still_offer_them(self):
+    def test_the_correlation_commands_still_offer_them(self):
         help_text = _parser_help(cli._parser_msd)
         for option in self.TRAJECTORY_ONLY:
             self.assertIn(option, help_text)
 
-    def test_rdf_keeps_the_options_that_do_work(self):
-        help_text = _parser_help(cli._parser_rdf)
-        for option in ('--index', '--transform-species', '--units',
-                       '--species'):
-            self.assertIn(option, help_text)
+    def test_the_per_frame_commands_keep_what_does_work(self):
+        for command in self.PER_FRAME:
+            help_text = _parser_help(getattr(cli, '_parser_' + command))
+            for option in ('--index', '--transform-species', '--units',
+                           '--species'):
+                self.assertIn(option, help_text)
 
 
 def _parser_help(builder):

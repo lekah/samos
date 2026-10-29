@@ -2,7 +2,7 @@
 
  ! To use it with python, compile with f2py
 
- ! NOT BUILT. setup.py no longer compiles this file, and nothing in
+ ! NOT BUILT. Nothing compiles this file, and nothing in
  ! samos imports it -- samos/analysis/_fft_dynamics.py replaced every
  ! routine here with a pure numpy/scipy implementation using an FFT
  ! identity instead of the O(N^2) loop below, 10-200x faster measured

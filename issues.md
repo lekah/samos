@@ -22,9 +22,8 @@ numbers are labels, not an ordering contract.
 
 ## Inventory
 
-| file | lines | what it does | reached from |
-|---|---|---|---|
-| `setup.py` | 56 | build entry point, nothing to build | every install |
+Nothing. `setup.py`, the last entry here, built nothing and has been
+deleted; `pyproject.toml` is the whole build.
 
 Zero lines of compiled code in active use, down from 737 at the start
 of this review. Everything -- RDF, ADF, LAMMPS reading, CLI, dynamics,

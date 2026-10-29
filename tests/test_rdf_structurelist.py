@@ -19,7 +19,7 @@ import unittest
 import numpy as np
 from ase import Atoms
 
-from samos.analysis.rdf import ADF, RDF
+from samos.analysis.rdf import RDF
 from samos.structurelist import StructureList
 from samos.trajectory import Trajectory
 
@@ -366,27 +366,6 @@ class TestIndexSpeciesNeedFixedAtoms(unittest.TestCase):
         res = RDF(structures=traj, verbosity=0).run(
             radius=4.0, nbins=10, species_pairs=[(0, 'O')])
         self.assertNotIn('rdf_None_O', res.get_arraynames())
-
-
-class TestADFStillNeedsATrajectory(unittest.TestCase):
-    """
-    ADF is deferred.  Its bond topology is a list of global atom
-    indices, which only means anything if the atoms are the same in
-    every frame, so it has to refuse a bare StructureList rather than
-    failing somewhere inside run().
-    """
-
-    def test_structure_list_is_refused_with_a_reason(self):
-        frames = _gas_frames(3, 'H8', 10.0, seed=67)
-        with self.assertRaises(TypeError) as ctx:
-            ADF(structures=StructureList.from_atoms(frames), verbosity=0)
-        message = str(ctx.exception)
-        self.assertIn('atom indices', message)
-        self.assertIn('not implemented yet', message)
-
-    def test_a_trajectory_is_still_accepted(self):
-        traj = _traj('H8', 4, np.diag([10.0, 10.0, 10.0]), 71)
-        self.assertIsNotNone(ADF(structures=traj, verbosity=0).structures)
 
 
 if __name__ == '__main__':

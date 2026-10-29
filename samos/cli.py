@@ -210,8 +210,9 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
                     "The frames in '{}' do not all hold the same atoms, "
                     'so they are not a trajectory and this analysis '
                     'cannot follow an atom from one frame to the next. '
-                    'samos-rdf reads such a file, since it treats every '
-                    'frame on its own.'.format(trajectory_path))
+                    'samos-rdf and samos-adf read such a file, since '
+                    'they treat every frame on its own.'.format(
+                        trajectory_path))
             structures = StructureList.from_atoms(aselist)
             if units is not None:
                 # Only the length factor: a structure list stores no
@@ -448,8 +449,11 @@ def run_rdf(traj, stepsize=1, species=None, species_pairs=None,
     Compute the radial distribution function for *traj* and optionally
     display, save, or write a plot.
 
-    :param traj: Pre-loaded trajectory.
-    :type traj: :class:`~samos.trajectory.Trajectory`
+    :param traj:
+        Pre-loaded frames.  Every frame is treated on its own,
+        so a :class:`~samos.structurelist.StructureList` whose
+        frames hold different atoms works as well as a
+        :class:`~samos.trajectory.Trajectory`.
     :param int stepsize:
         Step size over trajectory frames (default 1).
     :param list species:
@@ -529,8 +533,11 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
     Compute the angular distribution function for *traj* and optionally
     display, save, or write results.
 
-    :param traj: Pre-loaded trajectory.
-    :type traj: :class:`~samos.trajectory.Trajectory`
+    :param traj:
+        Pre-loaded frames.  Every frame is treated on its own,
+        so a :class:`~samos.structurelist.StructureList` whose
+        frames hold different atoms works as well as a
+        :class:`~samos.trajectory.Trajectory`.
     :param int stepsize:
         Step size over trajectory frames (default 1).
     :param list centers:
@@ -585,7 +592,7 @@ def run_adf(traj, stepsize=1, centers=None, species_triplets=None,
             bonds_dict[parts[0]] = (float(parts[1]), float(parts[2]))
     elif radius is not None:
         # Expand to all species pairs present in the trajectory.
-        all_species = sorted(set(traj.get_types()))
+        all_species = sorted(traj.get_species())
         bonds_dict = {}
         for i, s1 in enumerate(all_species):
             for s2 in all_species[i:]:
@@ -916,7 +923,7 @@ def _parser_adf():
     p = _make_parser(
         'adf',
         'Calculate the ADF for bond triplets A-B-C (B is the center atom).',
-        blocks=False)
+        blocks=False, trajectory=False)
     _add_stepsize(p)
     p.add_argument(
         '-b', '--bins', type=int, default=180, metavar='N',
@@ -1071,7 +1078,8 @@ def main_rdf(argv=None):
 def main_adf(argv=None):
     """Entry point of the ``samos-adf`` command."""
     args = _parser_adf().parse_args(argv)
-    run_adf(_prepare(args), stepsize=args.stepsize, centers=args.centers,
+    run_adf(_prepare_frames(args), stepsize=args.stepsize,
+            centers=args.centers,
             species_triplets=args.species_triplets, bonds=args.bonds,
             bonds_file=args.bonds_file, radius=args.radius,
             static_bonds=args.static_bonds, bins=args.bins,

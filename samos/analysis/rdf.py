@@ -6,7 +6,6 @@ from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
 
 from samos.structurelist import StructureList
-from samos.trajectory import Trajectory
 from samos.utils.attributed_array import AttributedArray
 
 import itertools
@@ -665,26 +664,59 @@ class BondAnalyzer(BaseAnalyzer):
         if bonds is not None:
             self.set_bonds(bonds)
 
+    def _require_stable_indices(self, what, structures=None):
+        """
+        Raise unless atom *i* is the same atom in every frame.
+
+        Explicit bond topology is a list of global atom indices, so it
+        only means anything when the frames agree on their atoms.  That
+        is a property of the frames rather than of their class: a
+        :class:`~samos.structurelist.StructureList` whose frames happen
+        to hold the same atoms in the same order carries those indices
+        just as well as a :class:`~samos.trajectory.Trajectory` does,
+        which is why this tests
+        :attr:`~samos.structurelist.StructureList.has_uniform_composition`
+        and not the type.
+
+        Cutoff detection has no such requirement -- it rebuilds the
+        neighbour list from each frame's own atoms -- so the check sits
+        on the three sources of explicit topology instead of on
+        :meth:`set_structures`, which would refuse frames that
+        :class:`~samos.analysis.rdf.ADF` can perfectly well handle.
+
+        :param str what: The source being refused, for the message.
+        :param structures:
+            The frames to test, when they are not yet the ones stored.
+        :raises TypeError: If the frames do not agree on their atoms.
+        """
+        if structures is None:
+            structures = self._structures
+        # Nothing to contradict yet: whichever of the two is set second
+        # runs this check with the other already in place.
+        if structures is None or structures.has_uniform_composition:
+            return
+        raise TypeError(
+            '{} needs every frame to hold the same atoms in the same '
+            'order, and these frames do not: it identifies atoms by a '
+            'global index, so atom i has to be the same atom '
+            'throughout. Detect the bonds per frame instead, by '
+            'passing bonds= cutoffs to run() (--radius or --bonds on '
+            'the command line).'.format(what))
+
     def set_structures(self, structures):
         """
-        As :meth:`BaseAnalyzer.set_structures`, but a plain
-        :class:`~samos.structurelist.StructureList` is refused.
-
-        Bond topology here is a list of global atom indices, which only
-        means anything if atom *i* is the same atom in every frame.
-        That is exactly the promise a
-        :class:`~samos.trajectory.Trajectory` makes and a general
-        structure list does not.  Refusing up front beats the
-        AttributeError this would otherwise raise partway through
-        :meth:`run`.
+        As :meth:`BaseAnalyzer.set_structures`, except that frames
+        which do not agree on their atoms are refused once explicit
+        bond topology has been set; see
+        :meth:`_require_stable_indices`.
         """
-        if not isinstance(structures, Trajectory):
-            raise TypeError(
-                '{} needs a {}, not a bare {}: bond topology is a list '
-                'of atom indices, so the atoms have to be the same in '
-                'every frame. Support for varying structures is not '
-                'implemented yet.'.format(
-                    type(self).__name__, Trajectory, StructureList))
+        if self._bonds is not None and isinstance(
+                structures, StructureList):
+            # Guarded by the isinstance check so that something which
+            # is not a set of frames at all still gets the type error
+            # from the parent rather than an AttributeError from here.
+            self._require_stable_indices('Explicit bond topology',
+                                         structures)
         super().set_structures(structures)
 
     def set_bonds(self, bonds):
@@ -694,7 +726,11 @@ class BondAnalyzer(BaseAnalyzer):
         :param array-like bonds:
             Shape (N_bonds, 2), 0-based atom indices.  Canonical ordering
             (i < j) is enforced and duplicate entries are removed.
+        :raises TypeError:
+            If the frames do not agree on their atoms; see
+            :meth:`_require_stable_indices`.
         """
+        self._require_stable_indices('Explicit bond topology')
         arr = np.asarray(bonds, dtype=int)
         arr = np.sort(arr, axis=1)
         self._bonds = np.unique(arr, axis=0)
@@ -707,7 +743,12 @@ class BondAnalyzer(BaseAnalyzer):
         Bond type (column 2 of the Bonds section) is ignored.
 
         :param str path: path to the LAMMPS data file.
+        :raises TypeError:
+            If the frames do not agree on their atoms; see
+            :meth:`_require_stable_indices`.
         """
+        self._require_stable_indices(
+            'Bond topology read from a LAMMPS data file')
         bonds = []
         in_bonds = False
         with open(path) as fh:
@@ -804,12 +845,18 @@ class BondAnalyzer(BaseAnalyzer):
         A set is used internally to deduplicate same-species pairs.
         """
         cutoffs_parsed = self._parse_cutoffs(cutoffs)
-        positions = self.structures.get_positions()[frame]
+        # Read the frame's own atoms rather than slicing a rectangular
+        # (nstep, nat, 3) array, so that frames of differing atom count
+        # work.  The indices returned are therefore frame-local, which
+        # is what ADF.run and _build_adjacency consume; they coincide
+        # with the global ones exactly when the composition is uniform,
+        # which is the only case where explicit topology is allowed.
+        positions = self.structures.get_frame_positions(frame)
         mic = MinimumImage(self.structures.get_frame_cell(frame))
         self._check_radius(mic.max_radius,
                            max(r for _, r in cutoffs_parsed.values()),
                            'Bond cutoff')
-        types = self.structures.get_types()
+        types = self.structures.get_frame_types(frame)
 
         bond_set = set()
         for (sp1, sp2), (r_min, r_max) in cutoffs_parsed.items():
@@ -855,6 +902,32 @@ class ADF(BondAnalyzer):
         """
         Compute the angular distribution function.
 
+        Each sampled frame is normalised by its own number of center
+        atoms and the results are averaged, so the ADF is the mean of
+        the per-frame ADFs.  For a fixed composition that is the same
+        quantity the summed histogram divided by one center count used
+        to give; for frames holding different atoms it is not, and the
+        per-frame version is the one that still means something.
+
+        Frames need not hold the same atoms, as long as the topology is
+        detected per frame from *bonds* cutoffs: the species indices
+        and the normalisation are worked out per frame, so a plain
+        :class:`~samos.structurelist.StructureList` of unrelated
+        structures works as well as a
+        :class:`~samos.trajectory.Trajectory`.  Explicit topology --
+        :meth:`~BondAnalyzer.set_bonds`,
+        :meth:`~BondAnalyzer.load_bonds_lammps`, or *static_bonds*,
+        which freezes one -- is a list of global atom indices and so
+        still needs every frame to hold the same atoms; see
+        :meth:`~BondAnalyzer._require_stable_indices`.
+
+        A frame holding no center atom of a triplet contributes nothing
+        to it and still counts in the average over frames, so for a set
+        of mixed composition a triplet's ADF is scaled by the fraction
+        of frames that contain its center species.  Average only over
+        the frames containing it if you want the conditional
+        distribution instead.
+
         :param list species_triplets:
             List of (spec_left, spec_center, spec_right) tuples.
             Mutually exclusive with centers.
@@ -885,22 +958,27 @@ class ADF(BondAnalyzer):
             raise ValueError(
                 "Pass species_triplets or centers, not both.")
 
+        structures = self.structures
         self._radius_warned = False
-        positions = self.structures.get_positions()
-        types = self.structures.get_types()
-        cells = self.structures.get_cells()
+        fixed_cell = structures.has_fixed_cell
+        uniform = structures.has_uniform_composition
 
         if istop is None:
-            istop = len(positions)
+            istop = structures.nstep
         frames = np.arange(istart, istop, stepsize)
         if not len(frames):
             raise ValueError(
                 'No frames selected: istart={}, istop={}, stepsize={} '
                 'over a trajectory of {} step(s).'.format(
-                    istart, istop, stepsize, len(positions)))
+                    istart, istop, stepsize, structures.nstep))
 
         # One-time detection: freeze topology from the first sampled frame.
         if static_bonds and bonds is not None and self._bonds is None:
+            # Checked before detecting rather than after: freezing one
+            # frame's bonds is meaningless when the next frame holds
+            # different atoms, and set_bonds below would refuse it
+            # anyway, but only after the detection work was done.
+            self._require_stable_indices('static_bonds=True')
             self.set_bonds(self._detect_bonds(bonds, int(frames[0])))
 
         use_static = self._bonds is not None
@@ -912,7 +990,7 @@ class ADF(BondAnalyzer):
                 "or call set_bonds() / load_bonds_lammps() first.")
 
         # Build species triplet list.
-        all_species = sorted(set(types))
+        all_species = sorted(structures.get_species())
         if centers is not None:
             species_triplets = [
                 (s1, c, s2)
@@ -928,31 +1006,48 @@ class ADF(BondAnalyzer):
                     all_species, 2)
             ]
 
-        # Precompute per-species index arrays (same for every frame).
-        triplet_idx = {
-            (sl, sc, sr): (
-                np.where(types == sl)[0],
-                np.where(types == sc)[0],
-                np.where(types == sr)[0],
-            )
-            for sl, sc, sr in species_triplets
-        }
+        def triplet_indices(types):
+            """Per-species atom indices of one frame, per triplet."""
+            return {
+                (sl, sc, sr): (
+                    np.where(types == sl)[0],
+                    np.where(types == sc)[0],
+                    np.where(types == sr)[0],
+                )
+                for sl, sc, sr in species_triplets
+            }
+
+        # Hoisted out of the frame loop when every frame holds the same
+        # atoms in the same order, which is what that flag is for: the
+        # lookup gives the same answer for every frame then, and
+        # repeating it per frame is pure overhead on a long trajectory.
+        if uniform:
+            fixed_triplet_idx = triplet_indices(
+                structures.get_frame_types(frames[0]))
 
         binsize = 180.0 / nbins
         bin_centers = (np.arange(nbins) + 0.5) * binsize
         hists = {t: np.zeros(nbins, dtype=float) for t in species_triplets}
+        # Counted over every sampled frame, not read off the first one:
+        # a triplet whose center species appears only later would
+        # otherwise be dropped from the output.
+        n_centers = {t: 0 for t in species_triplets}
+        frame_factor = 1.0 / float(len(frames))
 
-        # Reduce the cell only once for fixed-cell trajectories.
-        if cells is None:
-            fixed_cell = True
-            mic = MinimumImage(self.structures.get_frame_cell(0))
-        else:
-            fixed_cell = False
+        # Reduce the cell only once when it does not change.  This used
+        # to key off there being no stored cells at all, so a
+        # fixed-cell trajectory still paid for a Minkowski reduction
+        # per frame -- the expensive part, see MinimumImage.
+        if fixed_cell:
+            mic = MinimumImage(structures.get_frame_cell(frames[0]))
 
         for frame in frames:
             if not fixed_cell:
-                mic = MinimumImage(cells[frame])
-            pos = positions[frame]
+                mic = MinimumImage(structures.get_frame_cell(frame))
+            pos = structures.get_frame_positions(frame)
+            triplet_idx = (
+                fixed_triplet_idx if uniform
+                else triplet_indices(structures.get_frame_types(frame)))
 
             # Bond detection is per-frame for dynamic mode; static mode
             # reuses the frozen adjacency built before the loop.
@@ -962,11 +1057,17 @@ class ADF(BondAnalyzer):
                 adjacency = self._build_adjacency(
                     self._detect_bonds(bonds, int(frame)))
 
-            for sl, sc, sr in species_triplets:
-                idx_l, idx_c, idx_r = triplet_idx[(sl, sc, sr)]
+            for triplet in species_triplets:
+                sl, sc, sr = triplet
+                idx_l, idx_c, idx_r = triplet_idx[triplet]
                 if not len(idx_c):
                     continue
+                n_centers[triplet] += len(idx_c)
                 same = (sl == sr)
+                # Accumulated per frame so that the division by this
+                # frame's center count happens once, on the finished
+                # frame histogram, rather than once per center atom.
+                hist_frame = np.zeros(nbins, dtype=float)
 
                 for j in idx_c:
                     bonded = adjacency[j]
@@ -1000,22 +1101,21 @@ class ADF(BondAnalyzer):
                             np.ones((n, n), dtype=bool), k=1)
                         theta = theta[mask]
 
-                    hists[(sl, sc, sr)] += np.histogram(
+                    hist_frame += np.histogram(
                         theta.ravel(), bins=nbins,
                         range=(0.0, 180.0))[0]
 
+                hists[triplet] += hist_frame * (
+                    frame_factor / (len(idx_c) * binsize))
+
         res = AttributedArray()
         res.set_attr('species_triplets', species_triplets)
-        n_frames = len(frames)
 
-        for sl, sc, sr in species_triplets:
-            _, idx_c, _ = triplet_idx[(sl, sc, sr)]
-            if not len(idx_c):
+        for triplet in species_triplets:
+            if not n_centers[triplet]:
                 continue
-            norm = float(len(idx_c)) * float(n_frames) * binsize
-            label = '{}_{}_{}'.format(sl, sc, sr)
-            res.set_array('adf_{}'.format(label),
-                          hists[(sl, sc, sr)] / norm)
+            label = '{}_{}_{}'.format(*triplet)
+            res.set_array('adf_{}'.format(label), hists[triplet])
             res.set_array('angles_{}'.format(label), bin_centers)
 
         return res

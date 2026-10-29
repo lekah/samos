@@ -1,6 +1,6 @@
 ! f2py -c -m gaussian_density gaussian_density.f90
 !
-! NOT BUILT. setup.py no longer compiles this file, and nothing in
+! NOT BUILT. Nothing compiles this file, and nothing in
 ! samos imports it -- samos/analysis/get_gaussian_density.py replaced
 ! it with a pure-numpy implementation (_compute_density_grid). Kept
 ! here for reference and in case a future contributor wants the

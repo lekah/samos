@@ -35,7 +35,6 @@ classifiers = [
 [project.optional-dependencies]
 pre-commit = ["pre-commit", "flake8"]
 tests = ["pytest"]
-docs = ["Sphinx", "docutils", "sphinx_rtd_theme"]
 
 [project.scripts]
 # The dispatcher plus one executable per analysis.  Both spellings run
