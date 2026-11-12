@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 
+import io
+import re
 import unittest
+from contextlib import redirect_stdout
 import numpy as np
 from ase import Atoms
 from samos.trajectory import Trajectory
@@ -839,6 +842,99 @@ class TestMsdVafUseNumpyEngine(unittest.TestCase):
         d = self._analyzer()
         with self.assertWarns(UserWarning):
             d.get_msd(stepsize_tau=5, **self._common())
+
+
+class TestDiffusionIsPrinted(unittest.TestCase):
+    """The analyzers used to announce at length what they were about to
+    fit and then never say what came out of it, so the command-line
+    tools printed nothing a user would call a result unless a figure or
+    a CSV file was asked for as well."""
+
+    def _make_trajectory(self, seed=11, nstep=300, nat=4):
+        rng = np.random.default_rng(seed)
+        atoms = Atoms('H2O2')
+        steps = rng.normal(0., 0.1, (nstep, nat, 3))
+        # The velocities are the steps themselves, so that the VAF sees
+        # the same random walk the MSD does and both have something to
+        # report; their agreement is not what is under test here.
+        return Trajectory(atoms=atoms, positions=np.cumsum(steps, axis=0),
+                          velocities=steps, timestep=1.)
+
+    def _run(self, what, verbosity, **kwargs):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        d = DynamicsAnalyzer(trajectories=[self._make_trajectory()],
+                             verbosity=verbosity)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            res = getattr(d, what)(t_end_fit=100, t_unit='dt', **kwargs)
+        return res, out.getvalue()
+
+    def _printed_values(self, text, moment='mean'):
+        return [float(m) for m in re.findall(
+            r'{}:\s+([0-9.e+-]+)'.format(moment), text)]
+
+    def test_msd_prints_the_diffusion_coefficient(self):
+        msd, text = self._run('get_msd', 1, nr_of_blocks=3)
+        self.assertEqual(text.count('Diffusion coefficient (cm^2/s):'), 2)
+        for moment in ('mean', 'st. dev', 'st. error'):
+            self.assertEqual(len(self._printed_values(text, moment)), 2)
+        for species, value in zip(('H', 'O'),
+                                  self._printed_values(text)):
+            self.assertAlmostEqual(
+                value, msd.get_attr(species)['diffusion_mean_cm2_s'],
+                delta=1e-4 * value)
+
+    def test_vaf_prints_the_diffusion_coefficient(self):
+        vaf, text = self._run('get_vaf', 1, nr_of_blocks=3)
+        printed = self._printed_values(text)
+        self.assertEqual(len(printed), 2)
+        for species, value in zip(('H', 'O'), printed):
+            self.assertAlmostEqual(
+                value, vaf.get_attr(species)['diffusion_mean_cm2_s'],
+                delta=1e-4 * abs(value))
+
+    def test_a_single_block_is_printed_without_an_error_bar(self):
+        _, text = self._run('get_msd', 1, nr_of_blocks=1)
+        self.assertEqual(len(self._printed_values(text)), 2)
+        # NaN is what a lone block has for a spread, and printing it
+        # would read as a failure rather than as nothing to report.
+        self.assertNotIn('st. dev', text)
+        self.assertNotIn('st. error', text)
+        self.assertNotIn('nan', text.lower())
+
+    def test_a_decomposed_msd_prints_the_diagonal(self):
+        msd, text = self._run('get_msd', 1, nr_of_blocks=3,
+                              decomposed=True)
+        printed = self._printed_values(text)
+        self.assertEqual(len(printed), 6)
+        for pol in ('xx', 'yy', 'zz'):
+            self.assertEqual(
+                text.count('D_{} (cm^2/s):'.format(pol)), 2)
+        for species, offset in (('H', 0), ('O', 3)):
+            tensor = msd.get_attr(species)['diffusion_mean_cm2_s']
+            for ipol in range(3):
+                self.assertAlmostEqual(
+                    printed[offset + ipol], tensor[ipol][ipol],
+                    delta=1e-4 * tensor[ipol][ipol])
+
+    def test_every_fit_window_is_printed_above_its_own_result(self):
+        from samos.analysis.dynamics import DynamicsAnalyzer
+        d = DynamicsAnalyzer(trajectories=[self._make_trajectory()],
+                             verbosity=1)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            d.get_msd(t_start_fit=[10, 50], t_end_fit=[50, 100],
+                      t_unit='dt', nr_of_blocks=3)
+        text = out.getvalue()
+        self.assertIn('I will fit from 10 (0.01 ps) to 50 (0.05 ps)',
+                      text)
+        self.assertIn('I will fit from 50 (0.05 ps) to 100 (0.1 ps)',
+                      text)
+        self.assertEqual(len(self._printed_values(text)), 4)
+
+    def test_quiet_prints_nothing(self):
+        _, text = self._run('get_msd', 0, nr_of_blocks=3)
+        self.assertEqual(text, '')
 
 
 if __name__ == '__main__':

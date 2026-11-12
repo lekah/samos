@@ -222,6 +222,77 @@ def _fit_block(block, fit, t_list_fit_fs, decomposed):
     return out
 
 
+def _format_time_window(start_dt, end_dt, timestep_fs, verb):
+    """
+    One line naming the lag-time window a result was taken over.
+
+    Rounding before formatting keeps a window given in steps from
+    printing as 0.30000000000000004 ps, and %g-free formatting keeps
+    the familiar trailing .0 on a round number.
+
+    :param verb: What is done over the window, e.g. ``'fit'``.
+    """
+    return 'I will {} from {} ({} ps) to {} ({} ps)'.format(
+        verb,
+        start_dt, round(start_dt * timestep_fs / 1e3, 6),
+        end_dt, round(end_dt * timestep_fs / 1e3, 6))
+
+
+def _print_moments(mean, std, sem, indent):
+    """
+    The three numbers of one diffusion coefficient, one per line.
+
+    *std* is how much the blocks disagree among themselves and *sem*
+    the uncertainty left on their mean.  A single block has no spread,
+    and both arrive as NaN: the two lines are left out rather than
+    printed as NaN, which reads as a failure instead of as nothing to
+    report.
+    """
+    print('{}{:<10} {:.4e}'.format(indent, 'mean:', mean))
+    if np.isfinite(sem):
+        print('{}{:<10} {:.1e}'.format(indent, 'st. dev:', std))
+        print('{}{:<10} {:.1e}'.format(indent, 'st. error:', sem))
+
+
+def _print_diffusion(mean, std, sem, window_lines, decomposed=False,
+                     indent='      '):
+    """
+    Print the diffusion coefficient(s) found for one species.
+
+    The result is a plain number in the common case, but grows an axis
+    per fit window when several were asked for and a (3, 3) tensor when
+    the MSD was decomposed, so the three inputs are reshaped to the
+    full (window, 3, 3) form and both special cases disappear.
+
+    Only the diagonal of the tensor is printed.  The off-diagonal terms
+    are in the returned results for whoever wants them; nine numbers
+    with error bars on them read as noise in a progress log.
+
+    :param window_lines: One line per window, from
+        :func:`_format_time_window`, printed above its own result so
+        that several windows stay apart.
+    :param bool decomposed: Whether the values are (3, 3) tensors.
+    """
+    shape = ((len(window_lines), 3, 3) if decomposed
+             else (len(window_lines),))
+    mean, std, sem = (np.asarray(x, dtype=float).reshape(shape)
+                      for x in (mean, std, sem))
+
+    for iwindow, line in enumerate(window_lines):
+        print('{}{}'.format(indent, line))
+        if decomposed:
+            for ipol, pol in enumerate('xyz'):
+                print('{}Fitted diffusion coefficient D_{}{} (cm^2/s):'.format(
+                    indent, pol, pol))
+                _print_moments(mean[iwindow, ipol, ipol],
+                               std[iwindow, ipol, ipol],
+                               sem[iwindow, ipol, ipol], indent + '   ')
+        else:
+            print('{}Fitted diffusion coefficient (cm^2/s):'.format(indent))
+            _print_moments(mean[iwindow], std[iwindow], sem[iwindow],
+                           indent + '   ')
+
+
 class DynamicsAnalyzer:
     """
     This class serves as the main analyzer
@@ -652,17 +723,12 @@ class DynamicsAnalyzer:
                         '      Structure contains {} atoms of type {}\n'
                         '      I will calculate {} block(s) of size {} '
                         '({} ps)\n'
-                        '      I will fit from {} ({} ps) to {} ({} ps)\n'
-                        '      Outer stepsize is {}, inner is {}\n'
+                        '      Outer stepsize is {}, inner is {}'
                         ''.format(
                             atomic_species, itraj, nat_of_interest,
                             atomic_species, nr_of_blocks_this_traj,
                             block_length_dt_this_traj,
                             block_length_dt_this_traj * timestep_fs / 1e3,
-                            p.t_start_fit_dt,
-                            p.t_start_fit_dt * timestep_fs / 1e3,
-                            p.t_end_fit_dt,
-                            p.t_end_fit_dt * timestep_fs / 1e3,
                             p.stepsize_t, p.stepsize_tau)
                     ))
                 if decomposed:
@@ -681,9 +747,6 @@ class DynamicsAnalyzer:
                             nr_of_blocks_this_traj, p.nr_of_t, nstep,
                             nat, nat_of_interest)
                     )
-                if self._verbosity > 0:
-                    print('      Done\n')
-
                 for iblock, block in enumerate(msd_this_species_this_traj):
                     msd_this_species.append(block)
                 msd.set_array('msd_{}_{}_{}'.format(
@@ -820,6 +883,15 @@ class DynamicsAnalyzer:
                     results_dict[atomic_species]['diffusion_mean_cm2_s'].shape,
                     np.nan)
 
+            if self._verbosity > 0:
+                _print_diffusion(
+                    results_dict[atomic_species]['diffusion_mean_cm2_s'],
+                    results_dict[atomic_species]['diffusion_std_cm2_s'],
+                    results_dict[atomic_species]['diffusion_sem_cm2_s'],
+                    [_format_time_window(start, end, timestep_fs, 'fit')
+                     for start, end in zip(fit_starts, fit_ends)],
+                    decomposed=decomposed)
+
             # I need to transform to lists, numpy are not json serializable:
             for k in ('slope_msd_mean', 'slope_msd_std', 'slope_msd_sem',
                       'diffusion_mean_cm2_s', 'diffusion_std_cm2_s',
@@ -836,6 +908,9 @@ class DynamicsAnalyzer:
                         print('          {:<20} {}'.format(key,  val))
         # end of species_of_interest loop
         #
+
+        if self._verbosity > 0:
+            print('\n   Done\n')
 
         results_dict.update({
             't_start_fit_dt': (p.t_start_fit_dt.tolist()
@@ -999,6 +1074,15 @@ class DynamicsAnalyzer:
                 results_dict[atomic_species]['diffusion_std_cm2_s'] = np.nan
                 results_dict[atomic_species]['diffusion_sem_cm2_s'] = np.nan
 
+            if self._verbosity > 0:
+                _print_diffusion(
+                    results_dict[atomic_species]['diffusion_mean_cm2_s'],
+                    results_dict[atomic_species]['diffusion_std_cm2_s'],
+                    results_dict[atomic_species]['diffusion_sem_cm2_s'],
+                    [_format_time_window(
+                        p.t_start_fit_dt, p.t_end_fit_dt, timestep_fs,
+                        'average the integral')])
+
             if self._verbosity > 1:
                 print(
                     ('      Done, these are the results for {}:'.format(
@@ -1006,6 +1090,9 @@ class DynamicsAnalyzer:
                 for key, val in results_dict[atomic_species].items():
                     if not isinstance(val, (tuple, list, dict)):
                         print(('          {:<20} {}'.format(key,  val)))
+
+        if self._verbosity > 0:
+            print('\n   Done\n')
 
         results_dict.update({
             't_start_fit_dt':     p.t_start_fit_dt,
