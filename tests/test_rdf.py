@@ -469,7 +469,181 @@ class TestAlgorithmSelection(unittest.TestCase):
         traj = _gas_in_cell(5, 'H10He10', [12.0] * 3)
         with self.assertRaises(ValueError) as ctx:
             RDF(structures=traj, verbosity=0).run(radius=4.0, method='fast')
-        self.assertIn("'auto', 'ortho' or 'skew'", str(ctx.exception))
+        self.assertIn("'auto', 'ortho', 'skew' or 'images'",
+                      str(ctx.exception))
+
+
+class TestPeriodicImages(unittest.TestCase):
+    """
+    ``method='images'`` tiles the cell instead of folding to the
+    nearest image, so it is the one algorithm that stays unbiased past
+    half the shortest lattice vector.  Inside that radius it has to
+    agree with the other two, bar the one normalisation it defines
+    differently; outside it, it is the only one that is right.
+    """
+
+    TRICLINIC = np.array([[10., 0., 0.], [3., 10., 0.], [2., 4., 10.]])
+
+    def test_unlike_pair_matches_ortho_inside_the_cell(self):
+        """Below half the cell an atom has exactly one image in range,
+        so tiling can only find what folding already found."""
+        traj = _gas_in_cell(8, 'H30He30', [12.0] * 3)
+        kwargs = dict(radius=5.0, nbins=50)
+        images = RDF(structures=traj, verbosity=0).run(
+            method='images', **kwargs)
+        ortho = RDF(structures=traj, verbosity=0).run(
+            method='ortho', **kwargs)
+        for name in ('rdf_H_He', 'int_H_He'):
+            np.testing.assert_allclose(
+                images.get_array(name), ortho.get_array(name),
+                rtol=1e-12, atol=0.0, err_msg=name)
+
+    def test_like_pair_differs_only_by_the_ideal_gas_reference(self):
+        """The pairs found are the same; what they are divided by is
+        not.  Tiling compares against all N atoms of the species and
+        folding against N-1, so the two differ by exactly that ratio
+        and by nothing else."""
+        n_atoms = 30
+        traj = _gas_in_cell(8, 'H{}He{}'.format(n_atoms, n_atoms),
+                            [12.0] * 3)
+        kwargs = dict(radius=5.0, nbins=50)
+        images = RDF(structures=traj, verbosity=0).run(
+            method='images', **kwargs)
+        ortho = RDF(structures=traj, verbosity=0).run(
+            method='ortho', **kwargs)
+        np.testing.assert_allclose(
+            images.get_array('rdf_H_H'),
+            ortho.get_array('rdf_H_H') * (n_atoms - 1) / n_atoms,
+            rtol=1e-12, atol=0.0)
+
+    def test_skewed_cell_matches_skew_inside_the_cell(self):
+        """Tiling counts perpendicular widths where folding reduces
+        the basis, so the two agree on a triclinic cell only if the
+        image count is worked out from the right lengths."""
+        traj = _gas_in_cell(8, 'H30He30', self.TRICLINIC)
+        kwargs = dict(radius=3.0, nbins=30)
+        images = RDF(structures=traj, verbosity=0).run(
+            method='images', **kwargs)
+        skew = RDF(structures=traj, verbosity=0).run(
+            method='skew', **kwargs)
+        np.testing.assert_allclose(
+            images.get_array('rdf_H_He'), skew.get_array('rdf_H_He'),
+            rtol=1e-12, atol=0.0)
+
+    def test_variable_cell_retiles_per_frame(self):
+        """The number of images a radius needs depends on the cell, so
+        an NPT trajectory has to be re-tiled frame by frame.  Holding
+        the first frame's tiling would misplace every later frame."""
+        cells = _breathing_cells(6, 12.0, 18.0)
+        traj = _gas(6, 'H30He30', 12.0, cells=cells)
+        kwargs = dict(radius=5.0, nbins=50)
+        images = RDF(structures=traj, verbosity=0).run(
+            method='images', **kwargs)
+        ortho = RDF(structures=traj, verbosity=0).run(
+            method='ortho', **kwargs)
+        np.testing.assert_allclose(
+            images.get_array('rdf_H_He'), ortho.get_array('rdf_H_He'),
+            rtol=1e-12, atol=0.0)
+
+    def test_ideal_gas_stays_flat_beyond_half_the_cell(self):
+        """The point of the whole thing.  A gas has g(r) = 1 at every
+        r; folding to the nearest image loses the pairs that sit in
+        the corners of the box and so falls away past half the cell,
+        and tiling does not.
+
+        An unlike pair, because the atoms of the other species are
+        randomly placed in every image.  A like pair would carry the
+        peaks of the atom's own lattice of images on top of the
+        plateau."""
+        traj = _gas_in_cell(10, 'H200He200', [12.0] * 3)
+        kwargs = dict(radius=10.0, nbins=100)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            images = RDF(structures=traj, verbosity=0).run(
+                method='images', **kwargs)
+            ortho = RDF(structures=traj, verbosity=0).run(
+                method='ortho', **kwargs)
+        # A band and not a tail, because the tail of the folded run
+        # runs over the very region the two disagree in.
+        def band(res, low, high):
+            radii = res.get_array('radii_H_He')
+            inside = (radii > low) & (radii < high)
+            return res.get_array('rdf_H_He')[inside].mean()
+
+        # Inside the cell both are flat, so what follows is about the
+        # radius and not about the normalisation.
+        self.assertAlmostEqual(band(images, 2.0, 5.5), 1.0, places=2)
+        self.assertAlmostEqual(band(ortho, 2.0, 5.5), 1.0, places=2)
+        # Past half the cell they part company: folding keeps only the
+        # nearest image and so finds a fifth of the neighbours.
+        self.assertAlmostEqual(band(images, 7.0, 10.0), 1.0, places=2)
+        self.assertLess(band(ortho, 7.0, 10.0), 0.3)
+
+    def test_a_lone_atom_sees_its_own_lattice(self):
+        """One atom in a cubic cell is a simple cubic lattice, and the
+        running integral has to count its shells: 6 face neighbours at
+        a, 12 edge ones at a*sqrt(2), 8 corner ones at a*sqrt(3).
+
+        Nothing else in the suite covers an atom's own images, and
+        they are what carries the long-range order of a crystal."""
+        edge = 6.0
+        atoms = Atoms('H', cell=np.eye(3) * edge, pbc=True)
+        traj = Trajectory(atoms=atoms)
+        traj.set_positions(np.zeros((1, 1, 3)))
+        res = RDF(structures=traj, verbosity=0).run(
+            radius=11.0, nbins=1100, method='images')
+
+        radii = res.get_array('radii_H_H')
+        integral = res.get_array('int_H_H')
+        outer_edge = radii + 0.5 * (radii[1] - radii[0])
+
+        def within(radius):
+            return integral[outer_edge <= radius][-1]
+
+        # Each radius sits in the gap between two shells, so the count
+        # there is exact and does not depend on the binning.
+        self.assertAlmostEqual(within(5.5), 0.0, places=9)
+        self.assertAlmostEqual(within(7.0), 6.0, places=9)
+        self.assertAlmostEqual(within(9.0), 18.0, places=9)
+        self.assertAlmostEqual(within(10.9), 26.0, places=9)
+
+    def test_a_lone_atom_has_no_pairs_without_tiling(self):
+        """The contrast to the test above: folding to the nearest
+        image leaves a single atom with nobody to pair with, and the
+        pair is dropped rather than reported as zeros."""
+        atoms = Atoms('H', cell=np.eye(3) * 6.0, pbc=True)
+        traj = Trajectory(atoms=atoms)
+        traj.set_positions(np.zeros((1, 1, 3)))
+        res = RDF(structures=traj, verbosity=0).run(radius=2.9, nbins=29)
+        self.assertNotIn('rdf_H_H', res.get_arraynames())
+
+    def test_radius_beyond_the_cell_does_not_warn(self):
+        """The guard warns that only the nearest image is counted.
+        Tiling counts all of them, so there is nothing to warn about
+        and the warning would be wrong."""
+        traj = _gas(5, 'H8He8', 10.0)
+        with warnings.catch_warnings(record=True) as caught:
+            _only_user_warnings()
+            RDF(structures=traj, verbosity=0).run(
+                radius=9.0, nbins=45, method='images')
+        self.assertEqual([str(w.message) for w in caught], [])
+
+    def test_images_says_it_was_requested(self):
+        traj = _gas_in_cell(5, 'H10He10', [12.0] * 3)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            RDF(structures=traj).run(radius=4.0, method='images')
+        self.assertIn('every periodic image', buffer.getvalue())
+
+    def test_auto_never_picks_images(self):
+        """It changes what is counted and not only how, so it is only
+        ever used when asked for by name."""
+        for cell in ([12.0] * 3, self.TRICLINIC):
+            traj = _gas_in_cell(5, 'H10He10', cell)
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                RDF(structures=traj).run(radius=4.0, method='auto')
+            self.assertNotIn('every periodic image', buffer.getvalue())
 
 
 if __name__ == '__main__':

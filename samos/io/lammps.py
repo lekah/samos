@@ -2,8 +2,10 @@
 import numpy as np
 
 import re
+from warnings import warn
 from ase import Atoms
 from ase.data import atomic_masses, chemical_symbols
+from samos.structurelist import StructureList
 from samos.trajectory import Trajectory
 from samos.utils.units import UNIT_SYSTEMS as _LAMMPS_UNITS
 
@@ -13,6 +15,23 @@ integer_regex = re.compile(r'(?P<int>\d+)')  # noqa: W605
 # bounds in several of these forms depending on how it was built.
 float_regex = re.compile(
     r'(?P<float>[+-]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][+-]?\d+)?)')
+
+# What to do with a dump whose frames do not all hold the same atoms.
+# 'error' is the default because the alternative this reader shipped
+# with was to stop at the first such frame and return the frames before
+# it, which loses data without saying so.
+CHANGING_ATOMS_POLICIES = ('error', 'truncate', 'structures')
+
+
+class ChangingAtomsInDump(ValueError):
+    """
+    A dump file's frames do not all hold the same atoms.
+
+    A :class:`ValueError`, so that a caller who only needs to know the
+    file is not a trajectory needs no import of its own, while
+    :mod:`samos.cli` can catch this one case to say what reads such a
+    file instead.
+    """
 
 
 def get_indices(header_list, prefix='', postfix=''):
@@ -222,6 +241,223 @@ def get_thermo_props(fname):
     return header, arr, ts_index
 
 
+def _symbols_from_type_column(type_idx, type_map, quiet, also_print=None):
+    """
+    Name the atoms of a frame by its integer type column.
+
+    :param int type_idx: Column holding the LAMMPS type.
+    :param type_map: Chemical symbol per type, in type order.
+    :param str also_print: A further line to show with the type report.
+    :returns: ``symbols_for(body, sorting_key)``.
+    """
+    announced = []
+
+    def symbols_for(body, sorting_key):
+        types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
+        if not quiet and not announced:
+            # Said once, not once per frame: the dump command fixes the
+            # columns for the whole file, so every frame would repeat it.
+            print('types in body: {}'.format(', '.join(
+                sorted(map(str, set(types_in_body))))))
+            if also_print is not None:
+                print(also_print)
+            announced.append(True)
+        if types_in_body.min() < 1 or types_in_body.max() > len(type_map):
+            raise ValueError(
+                'The dump holds types {} to {}, but {} symbol(s) were '
+                'given to map them to'.format(
+                    types_in_body.min(), types_in_body.max(),
+                    len(type_map)))
+        return type_map[types_in_body - 1]  # 1-based to 0-based indexing
+
+    return symbols_for
+
+
+def _symbols_fixed(symbols, nat, what):
+    """
+    Name the atoms of a frame from a list the caller supplied.
+
+    The list is positional, one entry per slot in atom-id order, so it
+    only means anything while the atom count stays put.  A frame of a
+    different size has no slot for each entry, which is raised rather
+    than guessed at.
+
+    :param symbols: One chemical symbol per atom.
+    :param int nat: The atom count the list was checked against.
+    :param str what: What the list came from, for the error messages.
+    :returns: ``symbols_for(body, sorting_key)``.
+    """
+    if len(symbols) != nat:
+        raise ValueError(
+            'length of {} ({}) is not equal number of atoms '
+            '({})'.format(what, len(symbols), nat))
+
+    def symbols_for(body, sorting_key):
+        if len(body) != nat:
+            raise ChangingAtomsInDump(
+                'A frame holds {} atoms, but {} names {} of them. An '
+                'explicit list of elements is positional, so it can '
+                'only be used on a dump whose atom count does not '
+                'change.'.format(len(body), what, nat))
+        return symbols
+
+    return symbols_for
+
+
+def _symbols_from_masses(mass_types, quiet):
+    """
+    The chemical symbol of every LAMMPS type, by closest atomic mass.
+
+    :param str mass_types: A LAMMPS input file holding a Masses block.
+    :returns: One chemical symbol per type, in type order.
+    :raises ValueError: If the types in the block are not consecutive.
+    """
+    with open(mass_types) as fmass:
+        masses = []
+        reading_masses = False
+        for line in fmass:
+            line = line.strip()
+            if not line:
+                continue
+            if reading_masses:
+                try:
+                    typ, mass = line.split()[:2]
+                    masses.append((int(typ), float(mass)))
+                except ValueError:
+                    break
+            elif line.startswith('Masses'):
+                reading_masses = True
+            else:
+                pass
+    type_indices, masses = zip(*masses)
+    masses = np.array(masses, dtype=float)
+    type_indices = np.array(type_indices, dtype=int)
+    # small check whether all types are present
+    if not np.all(np.arange(1, type_indices.max()+1) == type_indices):
+        raise ValueError('Types are not consecutive')
+    symbols = []
+    for mass in masses:
+        # finding the closest element based on its mass
+        idx = np.argmin(np.abs(atomic_masses - mass))
+        symbols.append(chemical_symbols[idx])
+    return symbols
+
+
+def _make_symbol_source(nat, types=None, element_idx=None, type_idx=None,
+                        elements=None, elements_file=None, mass_types=None,
+                        quiet=False):
+    """
+    Build the function that names the atoms of one frame.
+
+    Called once, from the header pass; the function it returns is
+    called per frame.  That split is what lets a dump whose species or
+    atom count change be read at all: the symbols of a frame come from
+    that frame's own body, not from the first frame's.
+
+    The branches are tried in the order the keywords are documented in
+    :func:`read_lammps_dump`, the first one given winning.
+
+    :param int nat: The atom count of the first frame, which the
+        positional branches are checked against.
+    :returns: ``symbols_for(body, sorting_key)``, giving one chemical
+        symbol per atom of that frame, in atom-id order.
+    :raises ValueError: If a branch needs a column the dump lacks.
+    """
+    if types is not None:
+        if type_idx is None:
+            raise ValueError('types specified but not found in file')
+        return _symbols_from_type_column(
+            type_idx, np.array(types, dtype=str), quiet)
+    if element_idx is not None:
+        def symbols_for(body, sorting_key):
+            return np.array(body[:, element_idx])[sorting_key]
+        return symbols_for
+    if elements is not None:
+        return _symbols_fixed(np.array(elements, dtype=str), nat,
+                              'list of elements')
+    if elements_file is not None:
+        with open(elements_file) as f:
+            from_file = f.readline().strip().split()
+        return _symbols_fixed(np.array(from_file, dtype=str), nat,
+                              'list of elements')
+    if mass_types is not None:
+        if type_idx is None:
+            raise ValueError('types specified but not found in file')
+        symbols = _symbols_from_masses(mass_types, quiet)
+        return _symbols_from_type_column(
+            type_idx, np.array(symbols, dtype=str), quiet,
+            also_print='symbols: {}'.format(', '.join(symbols)))
+
+    # last resort, setting everything to Hydrogen
+    def symbols_for(body, sorting_key):
+        return np.full(len(body), 'H', dtype=str)
+    return symbols_for
+
+
+def _describe_count_change(nat, nat_first):
+    """A clause naming a frame's atom count against the first frame's."""
+    return 'it holds {} atoms, the first frame held {}'.format(
+        nat, nat_first)
+
+
+def _describe_species_change(symbols, symbols_first):
+    """
+    Why a frame's atoms are not the species the first frame's were.
+
+    :param symbols: Chemical symbols of this frame, in atom-id order.
+    :param symbols_first: The same for the first frame.
+    :returns: A clause naming the difference, or None if there is none.
+    """
+    changed = np.flatnonzero(np.asarray(symbols) !=
+                             np.asarray(symbols_first))
+    if len(changed):
+        return ('the species of {} atom(s) changed, the first at '
+                'position {} in atom-id order ({} -> {})'.format(
+                    len(changed), changed[0] + 1,
+                    symbols_first[changed[0]], symbols[changed[0]]))
+    return None
+
+
+def _build_structure_list(filename, positions, types, cells, dropped,
+                          l_conv=1.0, thermo_file=None, outfile=None,
+                          save_extxyz=False, quiet=False):
+    """
+    Assemble the frames of a dump that is not a trajectory.
+
+    :param str filename: The dump that was read, used to name the
+        output file when one is written and *outfile* is not given.
+    :param dropped: Names of the arrays read from the dump that a
+        structure list has nowhere to put, warned about so that they
+        are not silently missing from the result.
+    :returns: A :class:`~samos.structurelist.StructureList`.
+    :raises ValueError: If *thermo_file* was given, whose per-frame
+        columns a structure list does not store.
+    """
+    if thermo_file is not None:
+        raise ValueError(
+            'A thermo file cannot be read for a dump whose frames hold '
+            'different atoms: the frames are returned as a '
+            'StructureList, which stores no energies or stress.')
+    if dropped:
+        warn('The frames of this dump do not all hold the same atoms, '
+             'so they are returned as a StructureList, which stores '
+             'positions and species only. Dropped: {}.'.format(
+                 ', '.join(dropped)))
+    structures = StructureList.from_frames(positions, types, cells,
+                                           pbc=True)
+    structures.apply_unit_conversion(l_conv=l_conv)
+    if not quiet:
+        print('Creating StructureList of length {}'.format(
+            structures.nstep))
+    if save_extxyz or (outfile is not None and outfile.endswith('extxyz')):
+        from ase.io import write
+        write(outfile or filename + '.extxyz', list(structures),
+              format='extxyz')
+    elif outfile:
+        structures.save(outfile)
+    return structures
+
+
 def read_lammps_dump(filename, elements=None,
                      elements_file=None, types=None, timestep=None,
                      mass_types=None,
@@ -231,7 +467,8 @@ def read_lammps_dump(filename, elements=None,
                      skip=0, l_conv=1.0, f_conv=1.0, e_conv=1.0,
                      s_conv=1.0, v_conv=1.0,
                      additional_keywords_dump=[], quiet=False,
-                     istep=1, nsteps=None, units=None):
+                     istep=1, nsteps=None, units=None,
+                     on_changing_atoms='error'):
     """
     Read a filedump from lammps.
     It expects atomid to be printed, and positions
@@ -280,7 +517,30 @@ def read_lammps_dump(filename, elements=None,
     :param nsteps:
         Stop after this many frames have been stored (i.e. after
         applying *skip* and *istep*).  If None, read until end of file.
+    :param on_changing_atoms:
+        What to do with a frame that does not hold the atoms the first
+        frame held, either because the atom count changed or because an
+        atom changed species.
+
+        *   ``'error'`` (the default) raises
+            :class:`ChangingAtomsInDump`.
+        *   ``'truncate'`` returns the frames before that one as a
+            :class:`~samos.trajectory.Trajectory`, warning that it did.
+        *   ``'structures'`` returns every frame as a
+            :class:`~samos.structurelist.StructureList`, which holds
+            positions, species and cells but no velocities, forces or
+            further columns.
+
+        A dump whose frames do all hold the same atoms is read as a
+        trajectory whichever of the three is given.
+    :raises ChangingAtomsInDump:
+        If the frames differ and *on_changing_atoms* is ``'error'``.
     """
+    if on_changing_atoms not in CHANGING_ATOMS_POLICIES:
+        raise ValueError(
+            "Unknown policy '{}' for on_changing_atoms. Supported: "
+            '{}.'.format(on_changing_atoms,
+                         ', '.join(CHANGING_ATOMS_POLICIES)))
     if units is not None:
         if units not in _LAMMPS_UNITS:
             raise ValueError(
@@ -312,84 +572,14 @@ def read_lammps_dump(filename, elements=None,
             has_frc = False
         if ignore_velocities:
             has_vel = False
-        # these are read as strings
-        body = read_body(f, nat_must, lidx=9)
-        atomids = np.array(body[:, atomid_idx], dtype=int)
-        sorting_key = atomids.argsort()
-        # figuring out elements of structure
-        if types is not None:
-            if type_idx is None:
-                raise ValueError('types specified but not found in file')
-            types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
-            if not quiet:
-                print('types in body: {}'.format(', '.join(
-                    sorted(map(str, set(types_in_body))))))
-            types_in_body -= 1  # 1-based to 0-based indexing
-            symbols = np.array(types, dtype=str)[types_in_body]
-        elif element_idx is not None:
-            # reading in elements from body
-            symbols = np.array(body[:, element_idx])[sorting_key]
-            # print(elements)
-            # print(len(elements))
-        elif elements is not None:
-            assert len(elements) == nat_must
-            symbols = elements[:]
-        elif elements_file is not None:
-            with open(elements_file) as f:
-                for line in f:
-                    if line:
-                        break
-                elements = line.strip().split()
-                if len(elements) != nat_must:
-                    raise ValueError(
-                        f'length of list of elements ({len(elements)}) '
-                        f'is not equal number of atoms ({nat_must})')
-                symbols = elements[:]
-        elif mass_types is not None:
-            # reading in masses from lammps input file stored in mass_types
-            # and using these to infer elements
-            with open(mass_types) as fmass:
-                masses = []
-                reading_masses = False
-                for line in fmass:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if reading_masses:
-                        try:
-                            typ, mass = line.split()[:2]
-                            masses.append((int(typ), float(mass)))
-                        except ValueError:
-                            break
-                    elif line.startswith('Masses'):
-                        reading_masses = True
-                    else:
-                        pass
-            type_indices, masses = zip(*masses)
-            masses = np.array(masses, dtype=float)
-            type_indices = np.array(type_indices, dtype=int)
-            # small check whether all types are present
-            if not np.all(np.arange(1, type_indices.max()+1) == type_indices):
-                raise ValueError('Types are not consecutive')
-            # trying to figure out elements
-            if type_idx is None:
-                raise ValueError('types specified but not found in file')
-            types = []
-            for mass in masses:
-                # finding the closest element based on its mass
-                idx = np.argmin(np.abs(atomic_masses - mass))
-                types.append(chemical_symbols[idx])
-            types_in_body = np.array(body[:, type_idx][sorting_key], dtype=int)
-            if not quiet:
-                print('types in body: {}'.format(', '.join(
-                    sorted(map(str, set(types_in_body))))))
-                print('symbols: {}'.format(', '.join(types)))
-            types_in_body -= 1  # 1-based to 0-based indexing
-            symbols = np.array(types, dtype=str)[types_in_body]
-
-        else:
-            # last resort, setting everything to Hydrogen
-            symbols = ['H']*nat_must
+        # The body of the first frame is not read here any more: it
+        # served only to name the atoms, and that now happens frame by
+        # frame in the loop below, from each frame's own body.
+        symbols_for = _make_symbol_source(
+            nat_must, types=types, element_idx=element_idx,
+            type_idx=type_idx, elements=elements,
+            elements_file=elements_file, mass_types=mass_types,
+            quiet=quiet)
 
     positions = []
     timesteps = []
@@ -401,6 +591,13 @@ def read_lammps_dump(filename, elements=None,
 
     lidx = 0
     iframe = 0
+    symbols_first = None
+    ragged = False
+    # Filled from the first frame that differs onwards.  Every frame
+    # kept before it held the atoms of the first frame, and that gap is
+    # filled in below, so a dump that never changes pays nothing for
+    # the possibility that it might.
+    symbols_kept = []
     # dealing with additional keywords
     additional_arrays = {kw: [] for kw in additional_keywords_dump}
 
@@ -414,22 +611,58 @@ def read_lammps_dump(filename, elements=None,
             nat, timestep_, cell = read_step_info(
                 step_info, lidx=lidx, start=False, quiet=quiet)
             lidx += 9
-            if nat != nat_must:
-                if not quiet:
-                    print('Changing number of atoms is not supported, '
-                          'breaking')
-                break
 
             # these are read as strings
-            body = read_body(f, nat_must, lidx=lidx)
-            lidx += nat_must
+            body = read_body(f, nat, lidx=lidx)
+            lidx += nat
             atomids = np.array(body[:, atomid_idx], dtype=int)
             sorting_key = atomids.argsort()
+            symbols = None
+            if symbols_first is None:
+                symbols = symbols_for(body, sorting_key)
+                symbols_first = symbols
+                mismatch = None
+            elif nat != len(symbols_first):
+                mismatch = _describe_count_change(nat, len(symbols_first))
+                # The atoms of this frame are left unnamed until the
+                # policy has had its say: a positional list of elements
+                # cannot describe a frame of another size, and under
+                # 'error' and 'truncate' this frame is not kept, so it
+                # is never asked to.
+            else:
+                symbols = symbols_for(body, sorting_key)
+                mismatch = _describe_species_change(symbols, symbols_first)
+            if mismatch is not None:
+                if on_changing_atoms == 'error':
+                    raise ChangingAtomsInDump(
+                        'Frame {} of {} does not hold the atoms the '
+                        'first frame held: {}. Pass '
+                        "on_changing_atoms='structures' to read the "
+                        'frames as a StructureList, or '
+                        "'truncate' to stop at this frame.".format(
+                            iframe, filename, mismatch))
+                elif on_changing_atoms == 'truncate':
+                    # Warned rather than printed: dropping the rest of
+                    # the file is worth saying even when the caller
+                    # asked for a quiet read.
+                    warn('Frame {} of {} does not hold the atoms the '
+                         'first frame held: {}. Stopping there, so the '
+                         'rest of the file is not read and the '
+                         'trajectory returned holds {} frame(s).'.format(
+                             iframe, filename, mismatch, len(positions)))
+                    break
+                else:
+                    ragged = True
+                    if symbols is None:
+                        symbols = symbols_for(body, sorting_key)
+
             pos = np.array(body[:, posids], dtype=float)[sorting_key]
             if iframe >= skip and iframe % istep == 0:
                 positions.append(pos_2_absolute(cell, pos, postype))
                 timesteps.append(timestep_)
                 cells.append(cell)
+                if ragged:
+                    symbols_kept.append(symbols)
                 if has_vel:
                     velocities.append(
                         np.array(body[:, velids],
@@ -449,8 +682,23 @@ def read_lammps_dump(filename, elements=None,
                     break
             iframe += 1
     if not quiet:
-        print(f'Read trajectory of length {iframe}\n'
-              f'Creating Trajectory of length {len(timesteps)}')
+        print(f'Read trajectory of length {iframe}')
+    if ragged:
+        dropped = []
+        if has_vel:
+            dropped.append('velocities')
+        if has_frc:
+            dropped.append('forces')
+        dropped.extend(additional_keywords_dump)
+        return _build_structure_list(
+            filename, positions,
+            [symbols_first] * (len(positions) - len(symbols_kept))
+            + symbols_kept,
+            cells, dropped, l_conv=l_conv, thermo_file=thermo_file,
+            outfile=outfile, save_extxyz=save_extxyz, quiet=quiet)
+    if not quiet:
+        print(f'Creating Trajectory of length {len(timesteps)}')
+    symbols = symbols_first
     try:
         atoms = Atoms(symbols, positions[0], cell=cells[0], pbc=True)
         traj = Trajectory(atoms=atoms,

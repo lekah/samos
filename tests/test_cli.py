@@ -438,6 +438,98 @@ class TestMixedStructures(CLITestCase):
                       '--t-unit', 'dt', '--write', self.out('msd.csv')])
         self.assertTrue(os.path.exists(self.out('msd.csv')))
 
+    def test_truncate_analyses_the_frames_before_the_change(self):
+        # The first frame of the fixture is Si8O16 and the second is
+        # not, so one frame is left -- enough for an RDF.
+        with self.assertWarns(UserWarning) as ctx:
+            cli.main_rdf([self.mixed_path, '-r', '4', '-b', '20', '-q',
+                          '--changing-atoms', 'truncate',
+                          '--species-pairs', 'O-Si',
+                          '--write', self.out('part.csv')])
+        self.assertIn('frame 1', str(ctx.warning))
+        self.assert_csv(self.out('part.csv'), 'radius_A,rdf_O_Si,int_O_Si')
+
+    def test_msd_refuses_to_read_a_mixed_file_as_structures(self):
+        with self.assertRaises(ValueError) as ctx:
+            cli.main_msd([self.mixed_path, '-q',
+                          '--changing-atoms', 'structures'])
+        self.assertIn('samos-rdf', str(ctx.exception))
+
+    def test_rdf_can_be_told_to_refuse_a_mixed_file(self):
+        with self.assertRaises(ValueError) as ctx:
+            cli.main_rdf([self.mixed_path, '-r', '4', '-q',
+                          '--changing-atoms', 'error'])
+        self.assertIn('not all hold the same atoms', str(ctx.exception))
+
+
+def _write_mixed_dump(path, nuniform=10, seed=7):
+    """
+    Write a LAMMPS dump whose last frame holds one atom more.
+
+    The frames before it are a short random walk of three atoms, so
+    that truncating at the change still leaves something an MSD can be
+    fitted to, and the pairs the RDF test asks for are not all at
+    distance zero.
+    """
+    rng = np.random.default_rng(seed)
+    box = ('ITEM: BOX BOUNDS pp pp pp\n'
+           '0.0 10.0\n0.0 10.0\n0.0 10.0\n')
+    start = np.array([[0.5, 0.5, 0.5], [2.5, 0.5, 0.5], [0.5, 2.5, 0.5]])
+    walk = start + np.cumsum(
+        rng.normal(scale=0.05, size=(nuniform, 3, 3)), axis=0)
+    frames = []
+    for positions in walk:
+        frames.append(['{} {} {} {} {}'.format(
+            iat + 1, 1 if iat == 0 else 2, *position)
+            for iat, position in enumerate(positions)])
+    frames.append(frames[-1] + ['4 1 5.0 5.0 5.0'])
+    with open(path, 'w') as handle:
+        for istep, body in enumerate(frames):
+            handle.write('ITEM: TIMESTEP\n{}\n'
+                         'ITEM: NUMBER OF ATOMS\n{}\n'.format(
+                             istep, len(body))
+                         + box + 'ITEM: ATOMS id type xu yu zu\n'
+                         + ''.join(line + '\n' for line in body))
+
+
+class TestMixedLammpsDump(CLITestCase):
+    """
+    The same for a LAMMPS dump, which took a path of its own: it used
+    to stop at the first frame that differed and return the frames
+    before it as a trajectory, saying so only when not reading quietly.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.dump_path = os.path.join(self.tmpdir, 'mixed.lammpstrj')
+        _write_mixed_dump(self.dump_path)
+
+    def test_rdf_reads_a_mixed_dump(self):
+        cli.main_rdf([self.dump_path, '-r', '4', '-b', '20', '-q',
+                      '--lammps-types', 'Li', 'O',
+                      '--species-pairs', 'O-Li',
+                      '--write', self.out('rdf.csv')])
+        self.assert_csv(self.out('rdf.csv'), 'radius_A,rdf_O_Li,int_O_Li')
+
+    def test_msd_refuses_a_mixed_dump_with_a_reason(self):
+        with self.assertRaises(ValueError) as ctx:
+            cli.main_msd([self.dump_path, '-q', '--timestep', '1',
+                          '--lammps-types', 'Li', 'O'])
+        message = str(ctx.exception)
+        self.assertIn('not all hold the same atoms', message)
+        self.assertIn('samos-rdf', message)
+        self.assertIn('Frame 10', message)
+
+    def test_msd_runs_on_the_frames_before_the_change(self):
+        with self.assertWarns(UserWarning):
+            cli.main_msd([self.dump_path, '-q', '--timestep', '1',
+                          '--lammps-types', 'Li', 'O',
+                          '--changing-atoms', 'truncate',
+                          '--t-start-fit', '1', '--t-end-fit', '4',
+                          '--t-unit', 'dt',
+                          '--write', self.out('msd.csv')])
+        self.assertTrue(os.path.exists(self.out('msd.csv')))
+
 
 class TestTrajectoryOnlyOptions(CLITestCase):
     """

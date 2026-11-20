@@ -19,6 +19,7 @@ Commands: msd, vaf, vdos, rdf, adf.
 
 import sys
 from argparse import ArgumentParser, ArgumentTypeError
+from warnings import warn
 
 import numpy as np
 from ase.io import read
@@ -26,6 +27,11 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 from samos.structurelist import StructureList
 from samos.trajectory import Trajectory
+from samos.io.lammps import (
+    CHANGING_ATOMS_POLICIES,
+    ChangingAtomsInDump,
+    read_lammps_dump,
+)
 from samos.analysis.dynamics import DynamicsAnalyzer
 from samos.analysis.rdf import RDF, ADF, pairs_with_other_species
 from samos.utils.units import UNIT_SYSTEMS
@@ -141,9 +147,54 @@ def _finish_plot(savefig):
         plt.show()
 
 
+def _ragged_frames_message(path, detail=None):
+    """
+    The one explanation of why an analysis will not take a file whose
+    frames hold different atoms.
+
+    Shared by the LAMMPS and the extxyz path so that the two cannot
+    drift apart; the reader's own message, which names the frame, comes
+    through as *detail*.
+
+    :param str path: The file that was read.
+    :param str detail: What differs, if known.
+    """
+    message = (
+        "The frames in '{}' do not all hold the same atoms, so they "
+        'are not a trajectory and this analysis cannot follow an atom '
+        'from one frame to the next. samos-rdf and samos-adf read such '
+        'a file, since they treat every frame on its own.'.format(path))
+    if detail:
+        message += ' ({})'.format(detail)
+    return message
+
+
+def _changing_atoms_policy(changing_atoms, allow_structures):
+    """
+    What to do with a file whose frames hold different atoms.
+
+    :param str changing_atoms: What the caller asked for, or None to
+        let the analysis decide: the per-frame analyses take such a
+        file, the time-correlated ones cannot.
+    :param bool allow_structures: Whether the analysis takes a
+        :class:`~samos.structurelist.StructureList`.
+    :raises ValueError: If a structure list was asked for by an
+        analysis that cannot use one.
+    """
+    if changing_atoms is None:
+        return 'structures' if allow_structures else 'error'
+    if changing_atoms == 'structures' and not allow_structures:
+        raise ValueError(
+            'This analysis follows an atom from one frame to the next, '
+            'so it cannot run on frames that hold different atoms. Use '
+            'samos-rdf or samos-adf for that, or --changing-atoms '
+            'truncate to analyse the frames before the atoms change.')
+    return changing_atoms
+
+
 def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
                     lammps_elements=None, lammps=False, units=None,
-                    allow_structures=False):
+                    allow_structures=False, changing_atoms=None):
     """
     Load a trajectory from *trajectory_path* and return a
     :class:`~samos.trajectory.Trajectory` instance.
@@ -180,6 +231,13 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         returned as a :class:`~samos.structurelist.StructureList`
         instead.  When False such a file raises, since the analysis
         asking for it follows atoms from frame to frame.
+    :param str changing_atoms:
+        What to do with a file whose frames do not all hold the same
+        atoms: ``'error'``, ``'truncate'`` to keep the frames before
+        the first that differs, or ``'structures'`` to read them all as
+        a :class:`~samos.structurelist.StructureList`.  None, the
+        default, means ``'structures'`` where *allow_structures* and
+        ``'error'`` otherwise.
     :returns:
         :class:`~samos.trajectory.Trajectory`, or a
         :class:`~samos.structurelist.StructureList` when the frames
@@ -187,14 +245,25 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
     :raises ValueError:
         If the frames differ and *allow_structures* is False.
     """
+    policy = _changing_atoms_policy(changing_atoms, allow_structures)
     if lammps_types is not None or lammps_elements is not None or lammps:
-        from samos.io.lammps import read_lammps_dump
-        traj = read_lammps_dump(trajectory_path,
-                                types=lammps_types,
-                                elements=lammps_elements,
-                                timestep=timestep,
-                                units=units)
-        return traj
+        try:
+            return read_lammps_dump(trajectory_path,
+                                    types=lammps_types,
+                                    elements=lammps_elements,
+                                    timestep=timestep,
+                                    units=units,
+                                    on_changing_atoms=policy)
+        except ChangingAtomsInDump as exc:
+            if policy != 'error':
+                # The frames differ and the analysis was willing to
+                # take them, so the reader stopped for its own reason
+                # -- an explicit list of elements it cannot apply to a
+                # frame of another size, say.  Pointing at samos-rdf
+                # here would be no help, least of all to samos-rdf.
+                raise
+            raise ValueError(_ragged_frames_message(
+                trajectory_path, str(exc))) from exc
     try:
         traj = Trajectory.load_file(trajectory_path)
     except Exception:
@@ -203,24 +272,30 @@ def load_trajectory(trajectory_path, timestep=None, lammps_types=None,
         # from_atoms, so that the two cases are told apart by the one
         # property that distinguishes them rather than by which
         # exception happened to come out.
-        if len({tuple(atoms.get_chemical_symbols())
-                for atoms in aselist}) > 1:
-            if not allow_structures:
-                raise ValueError(
-                    "The frames in '{}' do not all hold the same atoms, "
-                    'so they are not a trajectory and this analysis '
-                    'cannot follow an atom from one frame to the next. '
-                    'samos-rdf and samos-adf read such a file, since '
-                    'they treat every frame on its own.'.format(
-                        trajectory_path))
-            structures = StructureList.from_atoms(aselist)
-            if units is not None:
-                # Only the length factor: a structure list stores no
-                # velocities, forces, energies or stress for the rest
-                # of the system's factors to apply to.
-                structures.apply_unit_conversion(
-                    l_conv=UNIT_SYSTEMS[units]['l_conv'])
-            return structures
+        first = tuple(aselist[0].get_chemical_symbols())
+        differs = [index for index, atoms in enumerate(aselist)
+                   if tuple(atoms.get_chemical_symbols()) != first]
+        if differs:
+            if policy == 'error':
+                raise ValueError(_ragged_frames_message(
+                    trajectory_path,
+                    'frame {} is the first that differs'.format(
+                        differs[0])))
+            if policy == 'truncate':
+                warn('The frames in {} do not all hold the same atoms. '
+                     'Stopping at frame {}, the first that differs, so '
+                     'the trajectory holds {} frame(s).'.format(
+                         trajectory_path, differs[0], differs[0]))
+                aselist = aselist[:differs[0]]
+            else:
+                structures = StructureList.from_atoms(aselist)
+                if units is not None:
+                    # Only the length factor: a structure list stores no
+                    # velocities, forces, energies or stress for the rest
+                    # of the system's factors to apply to.
+                    structures.apply_unit_conversion(
+                        l_conv=UNIT_SYSTEMS[units]['l_conv'])
+                return structures
         traj = Trajectory.from_atoms(aselist)
     if timestep is not None:
         traj.set_timestep(timestep)
@@ -702,12 +777,24 @@ def _frames_parser():
              'Accepts either a formula string (e.g. Al31 or Li10GeP2S12) '
              'or a space-separated list (e.g. Al Al Al). Use when '
              'neither a "type" column with a type map nor an "element" '
-             'column is available.')
+             'column is available. The list is positional, so it needs '
+             'a dump whose atom count does not change.')
     p.add_argument(
         '--lammps', action='store_true', default=False,
         help='Read the trajectory as a LAMMPS dump file. Use this when '
              'the dump already contains an "element" column so no element '
              'list needs to be supplied.')
+    p.add_argument(
+        '--changing-atoms', dest='changing_atoms', default=None,
+        choices=CHANGING_ATOMS_POLICIES,
+        help='What to do with a file whose frames do not all hold the '
+             'same atoms, either because the atom count changes or '
+             'because an atom changes species. "error" refuses the '
+             'file, "truncate" analyses the frames before the first '
+             'that differs, and "structures" reads every frame '
+             '(samos-rdf and samos-adf only, which treat every frame '
+             'on its own). The default is "structures" where the '
+             'analysis allows it and "error" otherwise.')
     p.add_argument(
         '--species', nargs='+', metavar='SYMBOL',
         help='Chemical symbols to analyse (default: all species).')
@@ -992,7 +1079,8 @@ def _prepare_frames(args, allow_structures=True):
                              lammps_elements=lammps_elements,
                              lammps=args.lammps,
                              units=args.units,
-                             allow_structures=allow_structures)
+                             allow_structures=allow_structures,
+                             changing_atoms=args.changing_atoms)
 
     if args.index is not None:
         frames = frames.slice_steps(args.index)

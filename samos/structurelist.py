@@ -61,6 +61,88 @@ class StructureList(AttributedArray):
         new.set_structures(atoms_list)
         return new
 
+    @classmethod
+    def from_frames(cls, positions, types, cells, pbc=True):
+        """
+        Build a structure list from per-atom and per-frame arrays.
+
+        The route for a reader, which holds the arrays already and may
+        carry a label that is not a chemical element at all: nothing
+        here goes through :class:`ase.Atoms`, so no label is checked
+        against the periodic table and no per-frame object is built for
+        a file of many frames.
+
+        :param positions: One ``(nat, 3)`` array per frame, in Angstrom.
+        :param types: One sequence of per-atom labels per frame.
+        :param cells: One ``(3, 3)`` cell per frame, in Angstrom.
+        :param pbc: The boundary conditions, as one flag, one ``(3,)``
+            set of flags shared by every frame, or one entry per frame.
+        :returns: A new :class:`StructureList`.
+        """
+        new = cls()
+        new.set_frames(positions, types, cells, pbc=pbc)
+        return new
+
+    def set_frames(self, positions, types, cells, pbc=True):
+        """
+        Replace the stored frames with the arrays given.
+
+        The one place the flat layout is written; both
+        :meth:`from_frames` and :meth:`set_structures` end up here.
+
+        :param positions: One ``(nat, 3)`` array per frame, in Angstrom.
+        :param types: One sequence of per-atom labels per frame.
+        :param cells: One ``(3, 3)`` cell per frame, in Angstrom.
+        :param pbc: The boundary conditions, as one flag, one ``(3,)``
+            set of flags shared by every frame, or one entry per frame.
+        :raises ValueError: If no frames are given, if the three
+            sequences differ in length, or if a frame's positions and
+            labels do not agree in number.
+        """
+        positions = [np.asarray(p, dtype=float) for p in positions]
+        types = [list(t) for t in types]
+        if not positions:
+            raise ValueError('No frames given, nothing to store')
+        if not len(positions) == len(types) == len(cells):
+            raise ValueError(
+                'Got {} frames of positions, {} of types and {} '
+                'cells'.format(len(positions), len(types), len(cells)))
+        for index, (pos, labels) in enumerate(zip(positions, types)):
+            if len(pos) != len(labels):
+                raise ValueError(
+                    'Frame {} holds {} positions but {} type '
+                    'labels'.format(index, len(pos), len(labels)))
+
+        counts = [len(pos) for pos in positions]
+        offsets = np.concatenate(([0], np.cumsum(counts))).astype(int)
+        flat_positions = np.concatenate(
+            [pos.reshape(len(pos), 3) for pos in positions])
+        # Built from one flat list of Python strings rather than by
+        # concatenating per-frame arrays: an empty frame would
+        # contribute a float64 array of size zero and poison the dtype
+        # of the concatenation.
+        flat_types = []
+        for labels in types:
+            flat_types.extend(labels)
+        pbc = np.asarray(pbc, dtype=bool)
+        if pbc.ndim == 0:
+            pbc = np.full((len(positions), 3), bool(pbc))
+        elif pbc.ndim == 1:
+            pbc = np.tile(pbc, (len(positions), 1))
+
+        self.set_array(self._OFFSETS_KEY, offsets, wanted_shape_len=1)
+        self.set_array(self._POSITIONS_KEY, flat_positions,
+                       wanted_shape_len=2, wanted_shape_1=3)
+        self.set_array(self._TYPES_KEY, np.array(flat_types, dtype=str),
+                       wanted_shape_len=1)
+        self.set_array(self._CELL_KEY,
+                       np.array([np.asarray(cell, dtype=float)
+                                 for cell in cells]),
+                       wanted_shape_len=3,
+                       wanted_shape_1=3, wanted_shape_2=3)
+        self.set_array(self._PBC_KEY, pbc, wanted_shape_len=2,
+                       wanted_shape_1=3)
+
     def set_structures(self, atoms_list):
         """
         Replace the stored frames with *atoms_list*.
@@ -79,31 +161,12 @@ class StructureList(AttributedArray):
                     'Entry {} is a {}, not an {}'.format(
                         index, type(atoms).__name__, Atoms))
 
-        counts = [len(atoms) for atoms in atoms_list]
-        offsets = np.concatenate(([0], np.cumsum(counts))).astype(int)
-        positions = np.concatenate(
-            [atoms.get_positions() for atoms in atoms_list])
-        # Built from one flat list of Python strings rather than by
-        # concatenating per-frame arrays: an empty frame would
-        # contribute a float64 array of size zero and poison the dtype
-        # of the concatenation.
-        symbols = []
-        for atoms in atoms_list:
-            symbols.extend(atoms.get_chemical_symbols())
-        types = np.array(symbols, dtype=str)
-        cells = np.array([np.asarray(atoms.cell, dtype=float)
-                          for atoms in atoms_list])
-        pbc = np.array([np.asarray(atoms.pbc, dtype=bool)
-                        for atoms in atoms_list])
-
-        self.set_array(self._OFFSETS_KEY, offsets, wanted_shape_len=1)
-        self.set_array(self._POSITIONS_KEY, positions,
-                       wanted_shape_len=2, wanted_shape_1=3)
-        self.set_array(self._TYPES_KEY, types, wanted_shape_len=1)
-        self.set_array(self._CELL_KEY, cells, wanted_shape_len=3,
-                       wanted_shape_1=3, wanted_shape_2=3)
-        self.set_array(self._PBC_KEY, pbc, wanted_shape_len=2,
-                       wanted_shape_1=3)
+        self.set_frames(
+            [atoms.get_positions() for atoms in atoms_list],
+            [atoms.get_chemical_symbols() for atoms in atoms_list],
+            [np.asarray(atoms.cell, dtype=float) for atoms in atoms_list],
+            pbc=np.array([np.asarray(atoms.pbc, dtype=bool)
+                          for atoms in atoms_list]))
 
     @property
     def nstep(self):

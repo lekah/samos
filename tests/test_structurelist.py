@@ -91,6 +91,61 @@ class TestStructureListFromAtoms(unittest.TestCase):
         self.assertIn('Entry 1', str(ctx.exception))
 
 
+class TestStructureListFromFrames(unittest.TestCase):
+    """
+    The route a reader takes: it holds the arrays already, and the
+    labels it read may not be chemical elements at all, which
+    :class:`ase.Atoms` would refuse.
+    """
+
+    def _frames(self):
+        return (
+            [np.zeros((2, 3)), np.ones((3, 3))],
+            [['Li', 'Li'], ['Li', 'Li', 'O']],
+            [np.eye(3) * 4.0, np.eye(3) * 5.0],
+        )
+
+    def test_frames_are_stored_per_frame(self):
+        structures = StructureList.from_frames(*self._frames())
+        self.assertEqual(structures.nstep, 2)
+        self.assertEqual(structures.get_frame_natoms(0), 2)
+        self.assertEqual(structures.get_frame_natoms(1), 3)
+        self.assertEqual(list(structures.get_frame_types(1)),
+                         ['Li', 'Li', 'O'])
+        np.testing.assert_allclose(structures.get_frame_cell(1),
+                                   np.eye(3) * 5.0)
+
+    def test_a_label_that_is_no_element_is_accepted(self):
+        structures = StructureList.from_frames(
+            [np.zeros((2, 3))], [['A', 'B']], [np.eye(3)])
+        self.assertEqual(list(structures.get_frame_types(0)), ['A', 'B'])
+
+    def test_pbc_is_broadcast_over_the_frames(self):
+        positions, types, cells = self._frames()
+        for pbc, expected in ((True, [True] * 3),
+                              ([True, False, True], [True, False, True])):
+            with self.subTest(pbc=pbc):
+                structures = StructureList.from_frames(
+                    positions, types, cells, pbc=pbc)
+                self.assertEqual(list(structures.get_frame_pbc(1)),
+                                 expected)
+
+    def test_no_frames_raises(self):
+        with self.assertRaises(ValueError):
+            StructureList.from_frames([], [], [])
+
+    def test_a_frame_whose_labels_do_not_match_its_positions_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            StructureList.from_frames(
+                [np.zeros((2, 3))], [['Li']], [np.eye(3)])
+        self.assertIn('Frame 0', str(ctx.exception))
+
+    def test_sequences_of_different_length_raise(self):
+        positions, types, cells = self._frames()
+        with self.assertRaises(ValueError):
+            StructureList.from_frames(positions, types, cells[:1])
+
+
 class TestStructureListFrameIndexing(unittest.TestCase):
 
     def setUp(self):

@@ -875,7 +875,8 @@ class TestDiffusionIsPrinted(unittest.TestCase):
 
     def test_msd_prints_the_diffusion_coefficient(self):
         msd, text = self._run('get_msd', 1, nr_of_blocks=3)
-        self.assertEqual(text.count('Diffusion coefficient (cm^2/s):'), 2)
+        self.assertEqual(
+            text.count('Fitted diffusion coefficient (cm^2/s):'), 2)
         for moment in ('mean', 'st. dev', 'st. error'):
             self.assertEqual(len(self._printed_values(text, moment)), 2)
         for species, value in zip(('H', 'O'),

@@ -125,12 +125,53 @@ def _wrap_into_box(positions, edges):
     return wrapped
 
 
+def _wrap_into_cell(positions, cell):
+    """
+    Fold *positions* into the cell, whatever its shape.
+
+    :func:`_wrap_into_box` is the orthorhombic special case and is
+    kept because it is the cheaper of the two: no inverse and no two
+    matrix products per call.  The guard against a coordinate landing
+    exactly on the far edge is there for the same reason as in that
+    function.
+    """
+    cell = np.asarray(cell, dtype=float)
+    frac = np.asarray(positions, dtype=float) @ np.linalg.inv(cell)
+    frac -= np.floor(frac)
+    frac[frac >= 1.0] = 0.0
+    return frac @ cell
+
+
+def _image_offsets(cell, radius):
+    """
+    Lattice translations of every cell that can hold a neighbour
+    within *radius* of the home cell, the home cell included.
+
+    How many repeats a direction needs is set by the cell's
+    perpendicular width there -- the volume over the area of the
+    opposite face -- which is the spacing of the lattice planes that
+    direction stacks, and not by the length of the lattice vector.
+    The two agree only for an orthorhombic cell; a skewed one is
+    narrower than its vectors are long, and using the lengths would
+    leave images in range untiled.
+    """
+    cell = np.asarray(cell, dtype=float)
+    volume = abs(np.linalg.det(cell))
+    widths = np.array([
+        volume / np.linalg.norm(np.cross(cell[(axis + 1) % 3],
+                                         cell[(axis + 2) % 3]))
+        for axis in range(3)])
+    repeats = np.ceil(radius / widths).astype(int)
+    grid = itertools.product(*[range(-n, n + 1) for n in repeats])
+    return np.array(list(grid), dtype=float) @ cell
+
+
 def pairs_within(positions_1, positions_2, radius, algorithm,
                  cell=None, mic=None, wrapped=False):
     """
     Every periodic pair closer than *radius*, and how far apart it is.
 
-    Two algorithms, giving the same answer:
+    Three algorithms:
 
     ``'ortho'``
         A pair of k-d trees over the periodic box.  Only builds the
@@ -139,27 +180,61 @@ def pairs_within(positions_1, positions_2, radius, algorithm,
     ``'skew'``
         Every pair against all 27 neighbour images via *mic*.  Exact
         for any cell shape, and O(N^2) in both time and memory.
+    ``'images'``
+        Species 2 tiled over every periodic image that reaches within
+        *radius*, then one k-d tree query against the untiled species
+        1.  Exact for any cell shape and at any radius.
 
-    Both report the distance to the *nearest* periodic image only, so
-    both are biased low beyond ``MinimumImage.max_radius`` and in the
-    same way -- see :meth:`BaseAnalyzer._check_radius`.
+    The first two give the same answer as each other: both report the
+    distance to the *nearest* periodic image only, so both are biased
+    low beyond ``MinimumImage.max_radius`` and in the same way -- see
+    :meth:`BaseAnalyzer._check_radius`.  ``'images'`` is the one that
+    is not, because it counts every image in range rather than the
+    closest.  Inside that limit it agrees with the other two; past it
+    they lose pairs and it does not.
+
+    What that costs: tiling to *radius* copies species 2 once per
+    image, and the number of images grows as the cube of the radius
+    over the cell width.  A radius of twice the width is 125 copies.
 
     :param bool wrapped:
-        For ``'ortho'`` only: skip folding *positions_1* and
-        *positions_2* into the box, because the caller already did so.
-        A caller that queries the same frame for several species pairs
-        can fold every atom once and pass the same wrapped array in
-        for each pair, rather than this function folding the same
-        atoms again for every pair that touches them.  Ignored for
-        ``'skew'``, which never wraps -- :class:`MinimumImage` finds
-        the nearest periodic image directly from unwrapped positions.
+        For ``'ortho'`` and ``'images'``: skip folding *positions_1*
+        and *positions_2* into the cell, because the caller already
+        did so.  A caller that queries the same frame for several
+        species pairs can fold every atom once and pass the same
+        wrapped array in for each pair, rather than this function
+        folding the same atoms again for every pair that touches them.
+        Ignored for ``'skew'``, which never wraps --
+        :class:`MinimumImage` finds the nearest periodic image
+        directly from unwrapped positions.
 
     :returns:
         ``(i, j, d)``.  *i* indexes *positions_1* and *j* indexes
-        *positions_2*, both locally; *d* holds the distances.  Pairs of
-        an atom with itself are not filtered out here, because whether
-        two rows are the same atom is the caller's bookkeeping.
+        *positions_2*, both locally; *d* holds the distances.  Under
+        ``'images'`` a row of *positions_2* appears once per image of
+        it that is in range, so a *j* can repeat with several
+        different *d*.  Pairs of an atom with itself are not filtered
+        out here, because whether two rows are the same atom is the
+        caller's bookkeeping; under ``'images'`` that includes the
+        atom's own images, which sit at a real distance and are real
+        neighbours, unlike the copy of it in the home cell.
     """
+    if algorithm == 'images':
+        cell = np.asarray(cell, dtype=float)
+        p1 = positions_1 if wrapped else _wrap_into_cell(positions_1, cell)
+        p2 = positions_2 if wrapped else _wrap_into_cell(positions_2, cell)
+        p2 = np.asarray(p2, dtype=float)
+        tiled = (p2[None, :, :]
+                 + _image_offsets(cell, radius)[:, None, :]).reshape(-1, 3)
+        found = cKDTree(np.asarray(p1, dtype=float)).sparse_distance_matrix(
+            cKDTree(tiled), radius, output_type='ndarray')
+        # j runs over the tiled copies.  Taking it back to the row of
+        # positions_2 that the copy is an image of lets the caller
+        # index its own arrays with it exactly as for the other two
+        # algorithms, at the price of no longer being able to tell
+        # which image a pair came from -- which no caller asks.
+        return found['i'], found['j'] % len(p2), found['v']
+
     if algorithm == 'ortho':
         edges = np.diag(np.asarray(cell, dtype=float))
         p1 = positions_1 if wrapped else _wrap_into_box(positions_1, edges)
@@ -172,7 +247,8 @@ def pairs_within(positions_1, positions_2, radius, algorithm,
 
     if algorithm != 'skew':
         raise ValueError(
-            "algorithm must be 'ortho' or 'skew', got {!r}".format(algorithm))
+            "algorithm must be 'ortho', 'skew' or 'images', got "
+            '{!r}'.format(algorithm))
 
     n_1, n_2 = len(positions_1), len(positions_2)
     i, j = np.divmod(np.arange(n_1 * n_2), n_2)
@@ -267,21 +343,32 @@ class BaseAnalyzer(metaclass=ABCMeta):
             The :class:`~samos.structurelist.StructureList` to read the
             per-frame cells from.
         :param frames: Indices of the frames that will be sampled.
-        :param str method: ``'auto'``, ``'ortho'`` or ``'skew'``.
+        :param str method:
+            ``'auto'``, ``'ortho'``, ``'skew'`` or ``'images'``.
+            ``'auto'`` never picks ``'images'``: it changes what is
+            counted, not just how, so it is only ever used when asked
+            for by name.
         :returns:
             ``(algorithms, message)`` -- one algorithm name per entry of
             *frames*, and the line to print saying what was chosen.
         """
-        if method not in ('auto', 'ortho', 'skew'):
+        if method not in ('auto', 'ortho', 'skew', 'images'):
             raise ValueError(
-                "method must be 'auto', 'ortho' or 'skew', got "
-                "{!r}".format(method))
+                "method must be 'auto', 'ortho', 'skew' or 'images', "
+                'got {!r}'.format(method))
 
         if method == 'skew':
             # No need to look at the cells at all.
             return (np.full(len(frames), 'skew'),
                     'using the slower skew algorithm, because it was '
                     'requested.')
+
+        if method == 'images':
+            # Tiling works for any cell shape, so the cells say
+            # nothing about this choice either.
+            return (np.full(len(frames), 'images'),
+                    'counting every periodic image within the radius, '
+                    'because it was requested.')
 
         if structures.has_fixed_cell:
             # One cell for every frame, so one test for it.
@@ -358,10 +445,32 @@ class RDF(BaseAnalyzer):
         edge of that bin, half a binsize beyond the matching entry of
         ``radii_*``, which holds bin centres.
 
-        Distances come from :func:`pairs_within`, which reports the
-        distance to the nearest periodic image whichever algorithm it
-        uses.  A *radius* beyond ``MinimumImage.max_radius`` biases
-        g(r) low -- see there -- and warns.
+        Distances come from :func:`pairs_within`, which under the
+        default methods reports the distance to the nearest periodic
+        image.  A *radius* beyond ``MinimumImage.max_radius`` then
+        biases g(r) low -- see there -- and warns.
+
+        ``method='images'`` lifts that limit by tiling the cell out to
+        *radius* and counting every image, so g(r) is unbiased however
+        far out it is asked for.  Three things change with it, all of
+        them because the tiled system is infinite rather than N atoms
+        in one box:
+
+        * An atom's own periodic images are neighbours.  In a crystal
+          they are the whole of the long-range order, so leaving them
+          out would flatten g(r) past the first cell.  Only the copy
+          in the home cell, at zero separation, is excluded.
+        * The ideal-gas reference is the full count of species 2, not
+          N-1, so a like pair's g(r) comes out lower by N/(N-1) than
+          the same run under ``'ortho'``.  For a few hundred atoms
+          that is a fraction of a percent; for ten it is ten percent.
+        * A single atom of a species now has a g(r) with itself --
+          the lattice it generates -- where the other methods have
+          nothing to report and skip the pair.
+
+        The cost is the tiling: the number of copies grows as the cube
+        of the radius over the cell width, so asking for twice the
+        width makes 125 of them.
 
         :param float radius:
             The radius for the calculation of the RDF
@@ -379,7 +488,10 @@ class RDF(BaseAnalyzer):
             demands it and raises if the cell is skewed, and ``'skew'``
             forces the exact-for-any-cell path even when the cell is
             orthorhombic.  The two agree to rounding, so ``'skew'`` is
-            useful as a check on ``'ortho'``.  See :func:`pairs_within`.
+            useful as a check on ``'ortho'``.  ``'images'`` counts
+            every periodic image within *radius* instead of the
+            nearest one; see below.  ``'auto'`` never selects it.  See
+            :func:`pairs_within`.
         :raises ValueError:
             On an unknown *method*, or ``method='ortho'`` with a cell
             that is not diagonal with positive edges.
@@ -500,6 +612,10 @@ class RDF(BaseAnalyzer):
             shortest edge, so the ortho path gets its radius limit
             without reducing anything.
             """
+            if algorithm == 'images':
+                # Tiling reaches every image in range, so the limit
+                # the guard warns about is not one this path has.
+                return None
             mic = None if algorithm == 'ortho' else MinimumImage(cell)
             max_radius = (0.5 * np.diag(cell).min() if algorithm == 'ortho'
                           else mic.max_radius)
@@ -533,6 +649,8 @@ class RDF(BaseAnalyzer):
             if algorithm == 'ortho':
                 wrapped_positions = _wrap_into_box(
                     positions, np.diag(cell))
+            elif algorithm == 'images':
+                wrapped_positions = _wrap_into_cell(positions, cell)
 
             for entry in plan:
                 ind1 = np.asarray(get_indices(entry['spec1'], types),
@@ -546,22 +664,41 @@ class RDF(BaseAnalyzer):
                     continue
                 same_list = np.array_equal(ind1, ind2)
                 n_shared = len(np.intersect1d(ind1, ind2))
-                if same_list:
-                    # Each unordered pair once, then counted from both
-                    # ends by the factor of two.
-                    n_pairs = len(ind1) * (len(ind1) - 1) // 2
-                    pair_factor = 2.0
-                else:
-                    n_pairs = len(ind1) * len(ind2) - n_shared
+                if algorithm == 'images':
+                    # Every image of species 2 is counted outwards
+                    # from each home atom of species 1, so the sum
+                    # already runs over both ends of every pair and
+                    # there is no factor of two to put back.
+                    #
+                    # The ideal-gas reference is the whole of species
+                    # 2, with no N-1.  Tiling makes the system
+                    # infinite, and leaving one atom out of an
+                    # infinite system changes nothing; an atom's own
+                    # images are part of the density it sits in, and
+                    # in a crystal they are what the Bragg peaks are
+                    # made of.  Against 'ortho' and 'skew' this makes
+                    # a like pair's g(r) lower by N/(N-1).
+                    n_pairs = len(ind1) * len(ind2)
                     pair_factor = 1.0
-                # An atom of species 1 that is itself one of the
-                # species-2 atoms is not its own neighbour, so the
-                # ideal-gas count it is compared against is len(ind2)
-                # minus the chance of that coincidence.  For a pair of
-                # a species with itself this is the familiar N-1; for
-                # disjoint species it is len(ind2).
-                n_neighbours_ideal = (
-                    len(ind2) - n_shared / float(len(ind1)))
+                    n_neighbours_ideal = float(len(ind2))
+                else:
+                    if same_list:
+                        # Each unordered pair once, then counted from
+                        # both ends by the factor of two.
+                        n_pairs = len(ind1) * (len(ind1) - 1) // 2
+                        pair_factor = 2.0
+                    else:
+                        n_pairs = len(ind1) * len(ind2) - n_shared
+                        pair_factor = 1.0
+                    # An atom of species 1 that is itself one of the
+                    # species-2 atoms is not its own neighbour, so the
+                    # ideal-gas count it is compared against is
+                    # len(ind2) minus the chance of that coincidence.
+                    # For a pair of a species with itself this is the
+                    # familiar N-1; for disjoint species it is
+                    # len(ind2).
+                    n_neighbours_ideal = (
+                        len(ind2) - n_shared / float(len(ind1)))
                 if not n_pairs or n_neighbours_ideal <= 0:
                     # e.g. a lone atom of a species paired with itself:
                     # the histogram would be empty and its
@@ -569,7 +706,7 @@ class RDF(BaseAnalyzer):
                     continue
                 entry['n_pairs'] += n_pairs
 
-                if algorithm == 'ortho':
+                if algorithm in ('ortho', 'images'):
                     pos1 = wrapped_positions[ind1]
                     pos2 = wrapped_positions[ind2]
                 else:
@@ -577,13 +714,20 @@ class RDF(BaseAnalyzer):
                     pos2 = positions[ind2, :]
                 i, j, distances = pairs_within(
                     pos1, pos2, radius, algorithm, cell=cell, mic=mic,
-                    wrapped=(algorithm == 'ortho'))
+                    wrapped=(algorithm in ('ortho', 'images')))
                 # An atom is not its own neighbour.  For a species
                 # against itself, i < j additionally keeps each
                 # unordered pair once, which pair_factor doubles back.
                 global_i, global_j = ind1[i], ind2[j]
-                keep = (global_i < global_j if same_list
-                        else global_i != global_j)
+                if algorithm == 'images':
+                    # Here an atom meets itself once per image, and
+                    # all but one of those are neighbours at a real
+                    # distance.  The exception is the copy in the home
+                    # cell, which is the atom, at zero separation.
+                    keep = ~((global_i == global_j) & (distances == 0.0))
+                else:
+                    keep = (global_i < global_j if same_list
+                            else global_i != global_j)
                 distances = distances[keep]
                 if len(distances):
                     entry['shortest'] = min(entry['shortest'],
