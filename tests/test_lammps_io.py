@@ -17,10 +17,16 @@ Two trajectory files from examples/data/ are used:
 """
 
 import os
+import tempfile
 import unittest
 
 import numpy as np
-from samos.io.lammps import ChangingAtomsInDump, read_lammps_dump
+from samos.io.lammps import (
+    ChangingAtomsInDump,
+    _build_parser as lammps_parser,
+    main as lammps_main,
+    read_lammps_dump,
+)
 from samos.structurelist import StructureList
 from samos.trajectory import Trajectory
 
@@ -396,7 +402,7 @@ class TestChangingAtoms(unittest.TestCase):
         self.assertEqual(traj.nstep, 1)
         self.assertEqual(list(traj.types), ['H', 'H'])
 
-    def test_velocities_are_dropped_with_a_warning(self):
+    def test_velocities_are_kept_frame_by_frame(self):
         path = self._dump(
             [['1 1 0.0 0.0 0.0 0.1 0.0 0.0',
               '2 1 1.0 1.0 1.0 0.0 0.1 0.0'],
@@ -404,19 +410,15 @@ class TestChangingAtoms(unittest.TestCase):
               '2 1 1.1 1.0 1.0 0.0 0.1 0.0',
               '3 1 2.0 2.0 2.0 0.0 0.0 0.1']],
             header='ITEM: ATOMS id type xu yu zu vx vy vz\n')
-        with self.assertWarns(UserWarning) as cm:
-            structures = read_lammps_dump(
-                path, types=['H'], quiet=True,
-                on_changing_atoms='structures')
-        self.assertIn('velocities', str(cm.warning))
-        self.assertNotIn('velocities', structures.get_arraynames())
-
-    def test_a_thermo_file_is_refused_for_a_structure_list(self):
-        with self.assertRaises(ValueError) as cm:
-            read_lammps_dump(self._growing(), types=['H', 'He'],
-                             quiet=True, on_changing_atoms='structures',
-                             thermo_file='thermo-that-is-never-opened')
-        self.assertIn('StructureList', str(cm.exception))
+        structures = read_lammps_dump(
+            path, types=['H'], quiet=True,
+            on_changing_atoms='structures')
+        np.testing.assert_allclose(
+            structures.get_frame_array('velocities', 1),
+            [[0.1, 0., 0.], [0., 0.1, 0.], [0., 0., 0.1]])
+        np.testing.assert_allclose(
+            structures.get_frame_atoms(1).get_velocities(),
+            [[0.1, 0., 0.], [0., 0.1, 0.], [0., 0., 0.1]])
 
     def test_the_type_map_must_cover_the_types_in_the_dump(self):
         """A type the map does not reach used to index past its end, or
@@ -425,6 +427,161 @@ class TestChangingAtoms(unittest.TestCase):
             read_lammps_dump(self._reacting(), types=['H'], quiet=True,
                              on_changing_atoms='structures')
         self.assertIn('symbol', str(cm.exception))
+
+
+class TestRaggedExport(unittest.TestCase):
+    """
+    The export a vented run needs: a dump that loses atoms has to
+    reach extxyz carrying everything a dump of constant size carries,
+    ids above all, since once atoms leave the box an index says
+    nothing about which atom it is.
+    """
+
+    _BOX = ('ITEM: BOX BOUNDS pp pp pp\n'
+            '0.0 10.0\n0.0 10.0\n0.0 10.0\n')
+    _HEADER = 'ITEM: ATOMS id type xu yu zu vx vy vz v_gam\n'
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def _atom(self, iat, itype, step, gamma):
+        """One atom line, its position walking with the step."""
+        return '{} {} {} {} {} 0.1 0.2 0.3 {}'.format(
+            iat, itype, 0.5 * iat + 0.01 * step, 0.5 * iat, 0.5, gamma)
+
+    def _dump(self, name='verlet.trj', nframe=4, nat=5, lost_after=2):
+        """
+        A dump of *nat* atoms, the last of which leaves after frame
+        *lost_after*, as fix evaporate would take it out.
+        """
+        path = os.path.join(self.tmpdir, name)
+        with open(path, 'w') as handle:
+            for step in range(nframe):
+                here = nat if step <= lost_after else nat - 1
+                body = [self._atom(iat + 1, 1 if iat else 2, step,
+                                   0.01 * (iat + step))
+                        for iat in range(here)]
+                handle.write(
+                    'ITEM: TIMESTEP\n{}\n'
+                    'ITEM: NUMBER OF ATOMS\n{}\n'.format(
+                        100 * step, len(body))
+                    + self._BOX + self._HEADER
+                    + ''.join(line + '\n' for line in body))
+        return path
+
+    def _thermo(self, name='verlet-1.evp', nframe=4):
+        """A thermo file with one row per frame of the dump."""
+        path = os.path.join(self.tmpdir, name)
+        with open(path, 'w') as handle:
+            handle.write('# a comment line\n')
+            handle.write('# TimeStep v_maxgam\n')
+            for step in range(nframe):
+                handle.write('{} {}\n'.format(100 * step,
+                                              1.1 + 0.01 * step))
+        return path
+
+    def _export(self, extra=(), **kwargs):
+        """Run the module's own command line and read the result back."""
+        from ase.io import read as ase_read
+        out = os.path.join(self.tmpdir, 'out.extxyz')
+        argv = [kwargs.pop('dump', None) or self._dump(),
+                '--thermo-file', self._thermo(),
+                '-t', 'He', 'B', '-o', out,
+                '--changing-atoms', 'structures',
+                '--ignore-forces', '-a', 'id', 'v_gam',
+                '-tk', 'v_maxgam', '-q']
+        argv.extend(extra)
+        lammps_main(argv)
+        return ase_read(out, index=':'), out
+
+    def test_every_frame_is_written(self):
+        frames, _ = self._export()
+        self.assertEqual(len(frames), 4)
+        self.assertEqual([len(atoms) for atoms in frames], [5, 5, 5, 4])
+
+    def test_ids_say_which_atom_left(self):
+        frames, _ = self._export()
+        self.assertEqual(list(frames[0].arrays['id']), [1, 2, 3, 4, 5])
+        self.assertEqual(list(frames[3].arrays['id']), [1, 2, 3, 4])
+        # An id is a label, so it has to survive as one: written as a
+        # float it comes back as 1.0 and no longer indexes anything.
+        self.assertTrue(
+            np.issubdtype(frames[0].arrays['id'].dtype, np.integer))
+
+    def test_velocities_and_columns_reach_the_file(self):
+        frames, path = self._export()
+        np.testing.assert_allclose(frames[3].get_velocities(),
+                                   [[0.1, 0.2, 0.3]] * 4)
+        np.testing.assert_allclose(frames[3].arrays['v_gam'],
+                                   [0.03, 0.04, 0.05, 0.06])
+        with open(path) as handle:
+            handle.readline()
+            comment = handle.readline()
+        for column in ('species:S:1', 'pos:R:3', 'momenta:R:3',
+                       'v_gam:R:1', 'id:I:1'):
+            self.assertIn(column, comment)
+
+    def test_thermo_keywords_reach_each_frames_info(self):
+        frames, _ = self._export()
+        for step, atoms in enumerate(frames):
+            self.assertAlmostEqual(atoms.info['v_maxgam'],
+                                   1.1 + 0.01 * step)
+
+    @staticmethod
+    def _frames_text(path):
+        """An extxyz file split into one block of text per frame."""
+        blocks = []
+        with open(path) as handle:
+            while True:
+                count = handle.readline()
+                if not count.strip():
+                    return blocks
+                lines = [count, handle.readline()]
+                lines += [handle.readline()
+                          for _ in range(int(count))]
+                blocks.append(''.join(lines))
+
+    def test_a_frame_of_a_vented_run_looks_like_any_other(self):
+        """
+        The contract itself: the frames a vented run shares with a
+        constant one have to come out byte for byte the same, whether
+        they were written as a trajectory or as a structure list, or
+        everything downstream needs two code paths.
+        """
+        dump = self._dump()
+        common = [dump, '--thermo-file', self._thermo(),
+                  '-t', 'He', 'B', '--ignore-forces',
+                  '-a', 'id', 'v_gam', '-tk', 'v_maxgam', '-q']
+        paths = {}
+        for policy in ('truncate', 'structures'):
+            paths[policy] = os.path.join(
+                self.tmpdir, '{}.extxyz'.format(policy))
+            argv = common + ['-o', paths[policy],
+                             '--changing-atoms', policy]
+            if policy == 'truncate':
+                with self.assertWarns(UserWarning):
+                    result = lammps_main(argv)
+                self.assertIsInstance(result, Trajectory)
+            else:
+                result = lammps_main(argv)
+                self.assertIsInstance(result, StructureList)
+
+        as_trajectory = self._frames_text(paths['truncate'])
+        as_structures = self._frames_text(paths['structures'])
+        self.assertEqual(len(as_trajectory), 3)
+        self.assertEqual(len(as_structures), 4)
+        self.assertEqual(as_trajectory, as_structures[:3])
+
+    def test_the_policy_reaches_the_reader_from_the_command_line(self):
+        args = lammps_parser().parse_args(
+            ['dump.trj', '--changing-atoms', 'truncate'])
+        self.assertEqual(args.on_changing_atoms, 'truncate')
+
+    def test_the_default_policy_is_to_refuse(self):
+        args = lammps_parser().parse_args(['dump.trj'])
+        self.assertEqual(args.on_changing_atoms, 'error')
 
 
 if __name__ == '__main__':

@@ -4,6 +4,71 @@ from ase import Atoms
 import numpy as np
 from samos.utils.attributed_array import AttributedArray
 
+# The stored array names that do not become a column of their own.
+# Both containers use these same names, which is what lets one
+# function below serve a frame of either.
+_CELLS = 'cells'
+_CALCULATOR_KEYS = {'forces': 'forces',
+                    'potential_energy': 'energy',
+                    'stress': 'stress'}
+# Only these two make a frame worth a calculator.  Stress on its own
+# never did, and reading it back out of an extxyz file written without
+# the other two has not been asked for.
+_NEED_CALCULATOR_KEYS = ('forces', 'potential_energy')
+
+
+def attach_arrays(atoms, arrays, ignore_calculated=False):
+    """
+    Put one frame's arrays onto *atoms*.
+
+    The single rule both containers follow, so that a frame of a
+    trajectory and a frame of a structure list reach a writer in the
+    same shape: an array with one row per atom becomes a column of its
+    own, a single number becomes an info entry, and forces, energy and
+    stress become a calculator.  What an extxyz file's ``Properties``
+    line says is decided here and nowhere else.
+
+    :param atoms: The frame as an :class:`ase.Atoms`, already holding
+        its symbols, positions, cell and boundary conditions.
+    :param dict arrays: The stored arrays, each already cut down to
+        this one frame.
+    :param bool ignore_calculated: Leave forces, energy and stress off.
+    :returns: *atoms*, which is modified in place.
+    """
+    need_calculator = (not ignore_calculated
+                       and any(key in arrays
+                               for key in _NEED_CALCULATOR_KEYS))
+    calc_kwargs = {}
+
+    for name, value in arrays.items():
+        if name == _CELLS:
+            atoms.set_cell(value)
+        elif name in _CALCULATOR_KEYS:
+            if need_calculator:
+                calc_kwargs[_CALCULATOR_KEYS[name]] = value
+        else:
+            shape = np.shape(value)
+            if len(shape) > 0:
+                if shape[0] == len(atoms):
+                    try:
+                        if hasattr(atoms, 'set_{}'.format(name)):
+                            getattr(atoms, 'set_{}'.format(name))(value)
+                        else:
+                            atoms.set_array(name, value)
+                    except Exception:
+                        pass
+                else:
+                    print("Warning. Can't pass array {} to atoms".format(
+                        name))
+            else:
+                # this must be a single number
+                atoms.info[name] = value
+
+    if need_calculator:
+        from ase.calculators.singlepoint import SinglePointCalculator
+        atoms.calc = SinglePointCalculator(atoms, **calc_kwargs)
+    return atoms
+
 
 class StructureList(AttributedArray):
     """
@@ -33,12 +98,22 @@ class StructureList(AttributedArray):
     _CELL_KEY = 'cells'
     _PBC_KEY = 'pbc'
     _OFFSETS_KEY = 'offsets'
+    _VELOCITIES_KEY = 'velocities'
+    _FORCES_KEY = 'forces'
+    _POT_ENER_KEY = 'potential_energy'
+    _STRESS_KEY = 'stress'
+    _ARRAY_KINDS_KEY = 'array_kinds'
 
     # Which stored arrays are indexed by atom and which by frame.
     # Slicing has to know: a per-atom array is cut with the offsets, a
     # per-frame array with the frame numbers, and getting it the wrong
     # way round produces a plausible-looking but corrupt result rather
     # than an error.
+    #
+    # These four are the layout itself and are always known.  Anything
+    # else -- velocities, forces, a column read from a dump, a number
+    # per frame read from a thermo file -- is declared by the setter
+    # that stores it, see :meth:`set_per_atom_array`.
     _PER_ATOM_KEYS = (_POSITIONS_KEY, _TYPES_KEY)
     _PER_FRAME_KEYS = (_CELL_KEY, _PBC_KEY)
 
@@ -142,6 +217,99 @@ class StructureList(AttributedArray):
                        wanted_shape_1=3, wanted_shape_2=3)
         self.set_array(self._PBC_KEY, pbc, wanted_shape_len=2,
                        wanted_shape_1=3)
+
+    def _array_kinds(self):
+        """
+        Every stored array that is known to be per-atom or per-frame.
+
+        The layout's own arrays, plus whatever the setters below have
+        declared.  Kept in the attributes rather than on the instance
+        so that it is written out and read back with the arrays it
+        describes; a file whose extra arrays came back undeclared
+        could not be sliced.
+
+        :returns: A dict of array name to ``'atom'`` or ``'frame'``.
+        """
+        kinds = {name: 'atom' for name in self._PER_ATOM_KEYS}
+        kinds.update({name: 'frame' for name in self._PER_FRAME_KEYS})
+        kinds.update(self._attrs.get(self._ARRAY_KINDS_KEY, {}))
+        return kinds
+
+    def _declare_array(self, name, kind):
+        """Record that *name* is indexed by atom or by frame."""
+        kinds = dict(self._attrs.get(self._ARRAY_KINDS_KEY, {}))
+        kinds[name] = kind
+        self.set_attr(self._ARRAY_KINDS_KEY, kinds)
+
+    def set_per_atom_array(self, name, values):
+        """
+        Store an array that has one row per atom, frame by frame.
+
+        Velocities, forces and any column read alongside the positions
+        go in this way.  The frames have to be in place already, since
+        it is their atom counts the entries are checked against.
+
+        :param str name: The array name, also the name it is written
+            under when a frame becomes an :class:`ase.Atoms`.
+        :param values: One ``(nat, ...)`` array per frame.
+        :raises ValueError: If the number of entries or the length of
+            one of them does not match the frames stored.
+        """
+        counts = np.diff(self._arrays[self._OFFSETS_KEY])
+        values = [np.asarray(value) for value in values]
+        if len(values) != len(counts):
+            raise ValueError(
+                'Got {} entries for {} frame(s)'.format(
+                    len(values), len(counts)))
+        for index, (value, count) in enumerate(zip(values, counts)):
+            if len(value) != count:
+                raise ValueError(
+                    'Entry {} of {} holds {} row(s), frame {} holds {} '
+                    'atom(s)'.format(index, name, len(value), index,
+                                     count))
+        self.set_array(name, np.concatenate(values))
+        self._declare_array(name, 'atom')
+
+    def set_per_frame_array(self, name, values):
+        """
+        Store an array that has one entry per frame.
+
+        A cell, a potential energy, a number read from a thermo file.
+
+        :param str name: The array name, also the key it is written
+            under in a frame's ``info`` when it is a single number.
+        :param values: One entry per frame.
+        :raises ValueError: If the number of entries does not match the
+            frames stored.
+        """
+        values = np.asarray(values)
+        if len(values) != self.nstep:
+            raise ValueError(
+                'Got {} entries for {} frame(s)'.format(
+                    len(values), self.nstep))
+        self.set_array(name, values)
+        self._declare_array(name, 'frame')
+
+    def get_frame_arrays(self, frame):
+        """
+        Every declared array of *frame*, beyond positions and species.
+
+        The cells and the boundary flags are left out as well: a frame
+        carries those itself, and they are not columns.
+
+        :returns: A dict of array name to this frame's values.
+        """
+        skip = (self._POSITIONS_KEY, self._TYPES_KEY, self._CELL_KEY,
+                self._PBC_KEY, self._OFFSETS_KEY)
+        arrays = {}
+        for name, kind in self._array_kinds().items():
+            if name in skip or name not in self._arrays:
+                continue
+            if kind == 'atom':
+                arrays[name] = self.get_frame_array(name, frame)
+            else:
+                arrays[name] = self._arrays[name][self._frame_index(frame)]
+        return arrays
 
     def set_structures(self, atoms_list):
         """
@@ -260,19 +428,31 @@ class StructureList(AttributedArray):
         """The periodic boundary flags of *frame*, shape ``(3,)``."""
         return self._arrays[self._PBC_KEY][self._frame_index(frame)]
 
-    def get_frame_atoms(self, frame):
+    def get_frame_atoms(self, frame, ignore_calculated=False):
         """
         *frame* as a fresh :class:`ase.Atoms`.
 
-        Positions, symbols, cell and boundary conditions only.  On
-        :class:`~samos.trajectory.Trajectory`,
-        :meth:`~samos.trajectory.Trajectory.get_step_atoms` is the
-        richer version that also attaches masses and a calculator.
+        Symbols, positions, cell and boundary conditions, and then
+        every declared array through :func:`attach_arrays`, the same
+        function :meth:`~samos.trajectory.Trajectory.get_step_atoms`
+        ends in -- so a frame of either container reaches a writer in
+        the same shape.
+
+        The masses are the standard ones for the symbols, there being
+        no reference structure here to take them from.  Velocities
+        pass through them on their way to momenta, so a frame whose
+        masses were set by hand is the one case where the two
+        containers part ways.
+
+        :param bool ignore_calculated: Leave forces, energy and stress
+            off the frame.
         """
-        return Atoms(symbols=list(self.get_frame_types(frame)),
-                     positions=self.get_frame_positions(frame),
-                     cell=self.get_frame_cell(frame),
-                     pbc=self.get_frame_pbc(frame))
+        atoms = Atoms(symbols=list(self.get_frame_types(frame)),
+                      positions=self.get_frame_positions(frame),
+                      cell=self.get_frame_cell(frame),
+                      pbc=self.get_frame_pbc(frame))
+        return attach_arrays(atoms, self.get_frame_arrays(frame),
+                             ignore_calculated=ignore_calculated)
 
     def get_species(self):
         """Sorted unique chemical symbols over every frame."""
@@ -329,28 +509,27 @@ class StructureList(AttributedArray):
                 'Slicing {} frames with {} leaves nothing to '
                 'analyse'.format(self.nstep, index))
 
-        unknown = (set(self._arrays)
-                   - set(self._PER_ATOM_KEYS)
-                   - set(self._PER_FRAME_KEYS)
-                   - {self._OFFSETS_KEY})
+        kinds = self._array_kinds()
+        unknown = set(self._arrays) - set(kinds) - {self._OFFSETS_KEY}
         if unknown:
             raise TypeError(
                 'Cannot slice {}: not known to be per-atom or '
-                'per-frame. Add it to _PER_ATOM_KEYS or '
-                '_PER_FRAME_KEYS.'.format(', '.join(sorted(unknown))))
+                'per-frame. Store it with set_per_atom_array or '
+                'set_per_frame_array.'.format(', '.join(sorted(unknown))))
 
         new = self.__class__()
         slices = [self._frame_slice(frame) for frame in frames]
         counts = [self.get_frame_natoms(frame) for frame in frames]
         new.set_array(self._OFFSETS_KEY,
                       np.concatenate(([0], np.cumsum(counts))).astype(int))
-        for name in self._PER_ATOM_KEYS:
-            if name in self._arrays:
+        for name, kind in kinds.items():
+            if name not in self._arrays:
+                continue
+            if kind == 'atom':
                 flat = self._flat(name)
                 new.set_array(name, np.concatenate(
                     [flat[where] for where in slices]))
-        for name in self._PER_FRAME_KEYS:
-            if name in self._arrays:
+            else:
                 new.set_array(name, self._arrays[name][list(frames)])
         for key, value in self._attrs.items():
             new.set_attr(key, value)
@@ -370,24 +549,37 @@ class StructureList(AttributedArray):
         self.set_array(self._TYPES_KEY,
                        np.full(len(types), target, dtype=str))
 
-    def apply_unit_conversion(self, l_conv=1.0):
+    def apply_unit_conversion(self, l_conv=1.0, v_conv=1.0, f_conv=1.0,
+                              e_conv=1.0, s_conv=1.0):
         """
-        Scale the stored lengths to samos internal units in-place.
+        Scale the stored arrays to samos internal units in-place.
 
-        Only the arrays present are touched.  The flat layout makes no
-        difference here: the factor multiplies every element either
-        way, which is why
-        :class:`~samos.trajectory.Trajectory` can extend this rather
-        than reimplement it.
+        Only the arrays present are touched, and only those whose
+        meaning is known: a column read from a dump under its own name
+        is left alone, since nothing here can say what it measures.
+        The flat layout makes no difference, the factor multiplying
+        every element either way, which is why
+        :class:`~samos.trajectory.Trajectory` inherits this rather
+        than reimplementing it.
 
         :param float l_conv: length factor (multiply to get Angstrom);
             applied to both positions and cell vectors
+        :param float v_conv: velocity factor (multiply to get A/fs)
+        :param float f_conv: force factor (multiply to get eV/A)
+        :param float e_conv: energy factor (multiply to get eV)
+        :param float s_conv: stress factor to eV/Angstrom^3
         """
-        if l_conv == 1.0:
-            return
-        for name in (self._POSITIONS_KEY, self._CELL_KEY):
-            if name in self._arrays:
-                self._arrays[name] = self._arrays[name] * l_conv
+        factors = ((l_conv, (self._POSITIONS_KEY, self._CELL_KEY)),
+                   (v_conv, (self._VELOCITIES_KEY,)),
+                   (f_conv, (self._FORCES_KEY,)),
+                   (e_conv, (self._POT_ENER_KEY,)),
+                   (s_conv, (self._STRESS_KEY,)))
+        for factor, names in factors:
+            if factor == 1.0:
+                continue
+            for name in names:
+                if name in self._arrays:
+                    self._arrays[name] = self._arrays[name] * factor
 
     def __len__(self):
         return self.nstep

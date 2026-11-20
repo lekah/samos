@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from samos.structurelist import StructureList
+from samos.structurelist import StructureList, attach_arrays
 
 
 class IncompatibleTrajectoriesException(Exception):
@@ -605,40 +605,19 @@ class Trajectory(StructureList):
                        check_nat=False, check_nstep=True,
                        wanted_shape_len=1)
 
-    def apply_unit_conversion(self, l_conv=1.0, v_conv=1.0, f_conv=1.0,
-                              e_conv=1.0, s_conv=1.0):
-        """
-        Scale stored arrays to samos internal units in-place.
-
-        Only arrays present in the trajectory are touched; missing arrays
-        are silently skipped.
-
-        :param float l_conv: length factor (multiply to get Angstrom);
-            applied to both positions and cell vectors
-        :param float v_conv: velocity factor (multiply to get A/fs)
-        :param float f_conv: force factor (multiply to get eV/A)
-        :param float e_conv: energy factor (multiply to get eV)
-        :param float s_conv: stress factor to eV/Angstrom^3
-        """
-        names = self.get_arraynames()
-        # Positions and cells are handled by StructureList, which does
-        # the same thing shape-agnostically.  What is left below are
-        # the arrays only a trajectory has.
-        super().apply_unit_conversion(l_conv=l_conv)
-        if v_conv != 1.0 and self._VELOCITIES_KEY in names:
-            self._arrays[self._VELOCITIES_KEY] *= v_conv
-        if f_conv != 1.0 and self._FORCES_KEY in names:
-            self._arrays[self._FORCES_KEY] *= f_conv
-        if e_conv != 1.0 and self._POT_ENER_KEY in names:
-            self._arrays[self._POT_ENER_KEY] *= e_conv
-        if s_conv != 1.0 and self._STRESS_KEY in names:
-            self._arrays[self._STRESS_KEY] *= s_conv
-
     def get_step_atoms(self, index, ignore_calculated=False,
                        warnings=True):
         """
         For a set stepindex, returns an atoms instance with all
         the settings from that step.
+
+        The reference structure supplies the masses, the cell it was
+        given and anything else set on it; the stored arrays are then
+        put on top by
+        :func:`~samos.structurelist.attach_arrays`, which a frame of a
+        :class:`~samos.structurelist.StructureList` goes through as
+        well so that the two reach a writer in the same shape.
+
         :param int index: The index of the step
         :param bool ignore_calculated:
             ignore the calculated values (forces, energies, stress)
@@ -646,52 +625,10 @@ class Trajectory(StructureList):
         """
         assert isinstance(index, (int, np.int64)
                           ), 'step index has to be an integer'
-
-        need_calculator = False
-        if not ignore_calculated:
-            for key in (self._FORCES_KEY, self._POT_ENER_KEY):
-                if key in self.get_arraynames():
-                    need_calculator = True
-                    break
-        atoms = self.atoms.copy()
-
-        if need_calculator:
-            from ase.calculators.singlepoint import SinglePointCalculator
-            calc_kwargs = {}
-
-        for k, v in list(self._arrays.items()):
-            if k == self._CELL_KEY:
-                atoms.set_cell(v[index])
-            elif k == self._FORCES_KEY:
-                if need_calculator:
-                    calc_kwargs['forces'] = v[index]
-            elif k == self._POT_ENER_KEY:
-                if need_calculator:
-                    calc_kwargs['energy'] = v[index]
-            elif k == self._STRESS_KEY:
-                if need_calculator:
-                    calc_kwargs['stress'] = v[index]
-            else:
-                shape = v[index].shape
-                if len(shape) > 0:
-                    if shape[0] == len(atoms):
-                        try:
-                            if hasattr(atoms, 'set_{}'.format(k)):
-                                getattr(atoms, 'set_{}'.format(k))(v[index])
-                            else:
-                                atoms.set_array(k, v[index])
-                        except Exception:
-                            pass
-                    else:
-                        print(f"Warning. Can't pass array {k} to atoms")
-                else:
-                    # this must be a single number
-                    atoms.info[k] = v[index]
-
-        if need_calculator:
-            calc = SinglePointCalculator(atoms, **calc_kwargs)
-            atoms.calc = calc
-        return atoms
+        return attach_arrays(
+            self.atoms.copy(),
+            {name: array[index] for name, array in self._arrays.items()},
+            ignore_calculated=ignore_calculated)
 
     def slice_steps(self, index):
         """

@@ -228,6 +228,73 @@ class TestStructureListSaveAndLoad(unittest.TestCase):
                                        np.asarray(atoms.cell))
 
 
+class TestStructureListExtraArrays(unittest.TestCase):
+    """
+    A frame carries more than positions and species: velocities, the
+    columns a dump was asked for, a number per frame out of a thermo
+    file.  The container has to know which of the two each is, or it
+    cannot slice them, and it has to say so in the file it writes.
+    """
+
+    def setUp(self):
+        self.frames = _mixed_frames()           # 6, 9 and 5 atoms
+        self.sl = StructureList.from_atoms(self.frames)
+        self.velocities = [np.full((len(atoms), 3), 0.1 * index)
+                           for index, atoms in enumerate(self.frames)]
+        self.sl.set_per_atom_array('velocities', self.velocities)
+        self.sl.set_per_atom_array(
+            'id', [np.arange(len(atoms)) + 1 for atoms in self.frames])
+        self.sl.set_per_frame_array('v_maxgam', [1.0, 1.1, 1.2])
+
+    def test_a_per_atom_array_is_read_back_per_frame(self):
+        for index in range(3):
+            np.testing.assert_allclose(
+                self.sl.get_frame_array('velocities', index),
+                self.velocities[index])
+
+    def test_a_frame_carries_its_arrays_onto_the_atoms(self):
+        atoms = self.sl.get_frame_atoms(1)
+        np.testing.assert_allclose(atoms.get_velocities(),
+                                   self.velocities[1])
+        self.assertEqual(list(atoms.arrays['id']), list(range(1, 10)))
+        self.assertAlmostEqual(atoms.info['v_maxgam'], 1.1)
+
+    def test_an_entry_of_the_wrong_length_names_the_frame(self):
+        with self.assertRaises(ValueError) as ctx:
+            self.sl.set_per_atom_array(
+                'charges', [np.zeros(len(atoms) + 1)
+                            for atoms in self.frames])
+        self.assertIn('Entry 0', str(ctx.exception))
+
+    def test_too_few_entries_raise(self):
+        with self.assertRaises(ValueError):
+            self.sl.set_per_frame_array('energy', [1.0, 2.0])
+
+    def test_slicing_cuts_each_array_the_right_way(self):
+        sliced = self.sl.slice_steps(slice(1, 3))
+        self.assertEqual(sliced.nstep, 2)
+        np.testing.assert_allclose(
+            sliced.get_frame_array('velocities', 0), self.velocities[1])
+        self.assertEqual(list(sliced.get_array('v_maxgam')), [1.1, 1.2])
+
+    def test_the_kinds_survive_a_round_trip_through_a_file(self):
+        """Loaded back undeclared, the extra arrays could not be
+        sliced, which is why the registry lives in the attributes."""
+        with tempfile.NamedTemporaryFile() as handle:
+            self.sl.save(handle.name)
+            loaded = StructureList.load_file(handle.name)
+        sliced = loaded.slice_steps(slice(0, 2))
+        np.testing.assert_allclose(
+            sliced.get_frame_array('velocities', 1), self.velocities[1])
+        self.assertEqual(list(sliced.get_array('v_maxgam')), [1.0, 1.1])
+
+    def test_an_undeclared_array_still_refuses_to_be_sliced(self):
+        self.sl.set_array('mystery', np.zeros(self.sl.nstep))
+        with self.assertRaises(TypeError) as ctx:
+            self.sl.slice_steps(slice(0, 2))
+        self.assertIn('mystery', str(ctx.exception))
+
+
 class TestStructureListUniformityFlags(unittest.TestCase):
     """
     has_fixed_cell and has_uniform_composition are what an analyzer

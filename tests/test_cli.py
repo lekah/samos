@@ -462,7 +462,7 @@ class TestMixedStructures(CLITestCase):
         self.assertIn('not all hold the same atoms', str(ctx.exception))
 
 
-def _write_mixed_dump(path, nuniform=10, seed=7):
+def _write_mixed_dump(path, nuniform=10, seed=7, with_velocities=False):
     """
     Write a LAMMPS dump whose last frame holds one atom more.
 
@@ -477,18 +477,21 @@ def _write_mixed_dump(path, nuniform=10, seed=7):
     start = np.array([[0.5, 0.5, 0.5], [2.5, 0.5, 0.5], [0.5, 2.5, 0.5]])
     walk = start + np.cumsum(
         rng.normal(scale=0.05, size=(nuniform, 3, 3)), axis=0)
+    tail = ' 0.1 0.2 0.3' if with_velocities else ''
+    header = ('ITEM: ATOMS id type xu yu zu vx vy vz\n' if with_velocities
+              else 'ITEM: ATOMS id type xu yu zu\n')
     frames = []
     for positions in walk:
         frames.append(['{} {} {} {} {}'.format(
-            iat + 1, 1 if iat == 0 else 2, *position)
+            iat + 1, 1 if iat == 0 else 2, *position) + tail
             for iat, position in enumerate(positions)])
-    frames.append(frames[-1] + ['4 1 5.0 5.0 5.0'])
+    frames.append(frames[-1] + ['4 1 5.0 5.0 5.0' + tail])
     with open(path, 'w') as handle:
         for istep, body in enumerate(frames):
             handle.write('ITEM: TIMESTEP\n{}\n'
                          'ITEM: NUMBER OF ATOMS\n{}\n'.format(
                              istep, len(body))
-                         + box + 'ITEM: ATOMS id type xu yu zu\n'
+                         + box + header
                          + ''.join(line + '\n' for line in body))
 
 
@@ -519,6 +522,26 @@ class TestMixedLammpsDump(CLITestCase):
         self.assertIn('not all hold the same atoms', message)
         self.assertIn('samos-rdf', message)
         self.assertIn('Frame 10', message)
+
+    def test_rdf_reads_a_mixed_dump_that_carries_velocities(self):
+        # The ragged path keeps the velocities now, so the analyzers
+        # see a structure list holding more than positions and species.
+        path = os.path.join(self.tmpdir, 'with-velocities.lammpstrj')
+        _write_mixed_dump(path, with_velocities=True)
+        cli.main_rdf([path, '-r', '4', '-b', '20', '-q',
+                      '--lammps-types', 'Li', 'O',
+                      '--species-pairs', 'O-Li',
+                      '--write', self.out('vel.csv')])
+        self.assert_csv(self.out('vel.csv'), 'radius_A,rdf_O_Li,int_O_Li')
+
+    def test_index_slices_a_mixed_dump_that_carries_velocities(self):
+        path = os.path.join(self.tmpdir, 'with-velocities.lammpstrj')
+        _write_mixed_dump(path, with_velocities=True)
+        cli.main_rdf([path, '-r', '4', '-b', '20', '-q', '-i', '::2',
+                      '--lammps-types', 'Li', 'O',
+                      '--species-pairs', 'O-Li',
+                      '--write', self.out('part.csv')])
+        self.assert_csv(self.out('part.csv'), 'radius_A,rdf_O_Li,int_O_Li')
 
     def test_msd_runs_on_the_frames_before_the_change(self):
         with self.assertWarns(UserWarning):

@@ -241,6 +241,18 @@ def get_thermo_props(fname):
     return header, arr, ts_index
 
 
+def _dump_column_dtype(name):
+    """
+    What a column read from a dump by name holds.
+
+    An atom id is a label, and a reader downstream has to be able to
+    tell which atom left the box between two frames, which it cannot
+    do from a float that prints as 1.7e+04.  The other names here are
+    LAMMPS's own integer per-atom quantities.
+    """
+    return int if name in ('id', 'mol', 'proc', 'procp1', 'type') else float
+
+
 def _symbols_from_type_column(type_idx, type_map, quiet, also_print=None):
     """
     Name the atoms of a frame by its integer type column.
@@ -418,41 +430,86 @@ def _describe_species_change(symbols, symbols_first):
     return None
 
 
-def _build_structure_list(filename, positions, types, cells, dropped,
-                          l_conv=1.0, thermo_file=None, outfile=None,
-                          save_extxyz=False, quiet=False):
+def _thermo_arrays(thermo_file, timesteps, thermo_pe=None,
+                   thermo_stress=None, thermo_keywords=()):
+    """
+    The columns of a thermo file, one value per frame that was read.
+
+    Shared by both branches of the reader, so that a dump whose atom
+    count changes carries the same thermo columns as one whose does
+    not.
+
+    :param timesteps: The LAMMPS timestep of every frame kept, which
+        is what the row belonging to a frame is found by.
+    :returns: A dict of one array per frame-indexed quantity, the
+        energy and the stress under the names a trajectory stores them
+        as and every thermo keyword under its own.
+    :raises ValueError: If a frame's timestep is in no row of the file.
+    """
+    header, arr, ts_index = get_thermo_props(thermo_file)
+    timesteps_thermo = np.array(arr[:, ts_index], dtype=int).tolist()
+    indices = []
+    for ts in timesteps:
+        try:
+            indices.append(timesteps_thermo.index(ts))
+        except ValueError:
+            raise ValueError(f'Index {ts} is not in thermo file')
+    indices = np.array(indices, dtype=int)
+
+    arrays = {}
+    if thermo_pe:
+        arrays['potential_energy'] = arr[indices, header.index(thermo_pe)]
+    if thermo_stress:
+        # voigt notation for stress:
+        keys = ('xx', 'yy', 'zz', 'yz', 'xz', 'xy')
+        arrays['stress'] = np.array(
+            [arr[indices, header.index(thermo_stress + key)]
+             for key in keys]).T
+    for kw in thermo_keywords:
+        try:
+            arrays[kw] = arr[indices, header.index(kw)]
+        except Exception as e:
+            print(e)
+    return arrays
+
+
+def _build_structure_list(filename, positions, types, cells,
+                          per_atom=None, per_frame=None, conversions=None,
+                          outfile=None, save_extxyz=False, quiet=False):
     """
     Assemble the frames of a dump that is not a trajectory.
 
     :param str filename: The dump that was read, used to name the
         output file when one is written and *outfile* is not given.
-    :param dropped: Names of the arrays read from the dump that a
-        structure list has nowhere to put, warned about so that they
-        are not silently missing from the result.
+    :param dict per_atom: Arrays with one row per atom, as one entry
+        per frame: the velocities, the forces, and every column asked
+        for by name.
+    :param dict per_frame: Arrays with one value per frame, from the
+        thermo file.
+    :param dict conversions: Unit factors for
+        :meth:`~samos.structurelist.StructureList.apply_unit_conversion`.
     :returns: A :class:`~samos.structurelist.StructureList`.
-    :raises ValueError: If *thermo_file* was given, whose per-frame
-        columns a structure list does not store.
     """
-    if thermo_file is not None:
-        raise ValueError(
-            'A thermo file cannot be read for a dump whose frames hold '
-            'different atoms: the frames are returned as a '
-            'StructureList, which stores no energies or stress.')
-    if dropped:
-        warn('The frames of this dump do not all hold the same atoms, '
-             'so they are returned as a StructureList, which stores '
-             'positions and species only. Dropped: {}.'.format(
-                 ', '.join(dropped)))
     structures = StructureList.from_frames(positions, types, cells,
                                            pbc=True)
-    structures.apply_unit_conversion(l_conv=l_conv)
+    for name, values in (per_atom or {}).items():
+        structures.set_per_atom_array(name, values)
+    for name, values in (per_frame or {}).items():
+        structures.set_per_frame_array(name, values)
+    structures.apply_unit_conversion(**(conversions or {}))
     if not quiet:
         print('Creating StructureList of length {}'.format(
             structures.nstep))
     if save_extxyz or (outfile is not None and outfile.endswith('extxyz')):
         from ase.io import write
-        write(outfile or filename + '.extxyz', list(structures),
-              format='extxyz')
+        path_to_save = outfile or filename + '.extxyz'
+        # One frame at a time: a vented run of tens of thousands of
+        # atoms would otherwise hold every frame as an ase.Atoms at
+        # once, on top of the arrays each is built from.
+        with open(path_to_save, 'w') as handle:
+            for frame in range(structures.nstep):
+                write(handle, structures.get_frame_atoms(frame),
+                      format='extxyz')
     elif outfile:
         structures.save(outfile)
     return structures
@@ -675,7 +732,8 @@ def read_lammps_dump(filename, elements=None,
                                        additional_ids_dump):
                     additional_arrays[kw].append(
                         np.array(body[:, idx_add],
-                                 dtype=float)[sorting_key])
+                                 dtype=_dump_column_dtype(kw))[
+                                     sorting_key])
                 if nsteps is not None and len(positions) >= nsteps:
                     if not quiet:
                         print(f'Reached nsteps={nsteps}, stopping')
@@ -684,17 +742,22 @@ def read_lammps_dump(filename, elements=None,
     if not quiet:
         print(f'Read trajectory of length {iframe}')
     if ragged:
-        dropped = []
+        per_atom = {}
         if has_vel:
-            dropped.append('velocities')
+            per_atom['velocities'] = velocities
         if has_frc:
-            dropped.append('forces')
-        dropped.extend(additional_keywords_dump)
+            per_atom['forces'] = forces
+        per_atom.update(additional_arrays)
         return _build_structure_list(
             filename, positions,
             [symbols_first] * (len(positions) - len(symbols_kept))
             + symbols_kept,
-            cells, dropped, l_conv=l_conv, thermo_file=thermo_file,
+            cells, per_atom=per_atom,
+            per_frame=(_thermo_arrays(thermo_file, timesteps, thermo_pe,
+                                      thermo_stress, thermo_keywords)
+                       if thermo_file else None),
+            conversions=dict(l_conv=l_conv, v_conv=v_conv, f_conv=f_conv,
+                             e_conv=e_conv, s_conv=s_conv),
             outfile=outfile, save_extxyz=save_extxyz, quiet=quiet)
     if not quiet:
         print(f'Creating Trajectory of length {len(timesteps)}')
@@ -715,42 +778,15 @@ def read_lammps_dump(filename, elements=None,
     for key, arr in additional_arrays.items():
         traj.set_array(key, np.array(arr))
     if thermo_file:
-        header, arr, ts_index = get_thermo_props(thermo_file)
-        timesteps_thermo = np.array(arr[:, ts_index], dtype=int).tolist()
-        indices = []
-        for ts in timesteps:
-            try:
-                indices.append(timesteps_thermo.index(ts))
-            except ValueError:
-                raise ValueError(f'Index {ts} is not in thermo file')
-        indices = np.array(indices, dtype=int)
-        # if thermo_te:
-        #     colidx = header.index(thermo_te)
-        #     traj.set_total_energies(arr[indices, colidx])
-        headers_to_do = set(header)
-        if thermo_pe:
-            colidx = header.index(thermo_pe)
-            traj.set_pot_energies(arr[indices, colidx])
-            headers_to_do.remove(thermo_pe)
-        if thermo_stress:
-            stressall = []
-            # voigt notation for stress:
-            keys = ('xx', 'yy', 'zz', 'yz', 'xz', 'xy')
-            # first diagonal terms:
-            for key in keys:
-                fullkey = thermo_stress + key
-                headers_to_do.remove(fullkey)
-                colidx = header.index(fullkey)
-                stressall.append(arr[indices, colidx])
-            traj.set_stress(np.array(stressall).T)
-        for kw in thermo_keywords:
-            try:
-                traj.set_array(kw, arr[indices, header.index(kw)])
-            except Exception as e:
-                print(e)
-        # if thermo_ke:
-        #     colidx = header.index(thermo_ke)
-        #     traj.set_kinetic_energies(arr[indices, colidx])
+        for name, values in _thermo_arrays(
+                thermo_file, timesteps, thermo_pe, thermo_stress,
+                thermo_keywords).items():
+            if name == 'potential_energy':
+                traj.set_pot_energies(values)
+            elif name == 'stress':
+                traj.set_stress(values)
+            else:
+                traj.set_array(name, values)
     traj.apply_unit_conversion(
         l_conv=l_conv, v_conv=v_conv, f_conv=f_conv,
         e_conv=e_conv, s_conv=s_conv)
@@ -765,7 +801,13 @@ def read_lammps_dump(filename, elements=None,
     return traj
 
 
-if __name__ == '__main__':
+def _build_parser():
+    """
+    The parser of the module's own command line.
+
+    Separate from :func:`main` so that a test can read an argument
+    list without running an export.
+    """
     from argparse import ArgumentParser
     parser = ArgumentParser(
         """Reads lammps input and returns/saves a Trajectory instance""")
@@ -837,7 +879,29 @@ if __name__ == '__main__':
                         default=[])
     parser.add_argument('-q', '--quiet', action='store_true',
                         help='Do not print anything')
-    args = parser.parse_args()
+    parser.add_argument(
+        '--changing-atoms', dest='on_changing_atoms', default='error',
+        choices=CHANGING_ATOMS_POLICIES,
+        help='What to do with a frame that does not hold the atoms the '
+             'first frame held, either because the atom count changed '
+             'or because an atom changed species: refuse the file, '
+             'truncate at that frame, or read every frame as a '
+             'StructureList. The last carries the velocities, forces, '
+             'thermo columns and -a columns of every frame, as a '
+             'trajectory does.')
+    return parser
+
+
+def main(argv=None):
+    """
+    Read a dump as named on the command line and write it out.
+
+    :param argv: The arguments, or None to take them from the command
+        line.
+    :returns: Whatever :func:`read_lammps_dump` built.
+    """
+    parser = _build_parser()
+    args = parser.parse_args(argv)
     if args.units is not None:
         manual = [f'--{k.replace("_", "-")}'
                   for k, default in (('l_conv', 1.0), ('v_conv', 1.0),
@@ -848,4 +912,8 @@ if __name__ == '__main__':
             parser.error(
                 '--units cannot be combined with individual conversion '
                 'flags: ' + ', '.join(manual))
-    read_lammps_dump(**vars(args))
+    return read_lammps_dump(**vars(args))
+
+
+if __name__ == '__main__':
+    main()
